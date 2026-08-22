@@ -14,7 +14,10 @@ elif test "$test_mode" = 0; then
   tls_dir=/etc/ringring/tls
   storage_archive=
   refresh_command=
-  lock_file=/run/ringring-sip-tls-sync.lock
+  lock_directory=/run/ringring-sip-tls-sync
+  test ! -L "$lock_directory" || { echo "The SIP TLS synchronization runtime directory is unsafe." >&2; exit 1; }
+  install -d -m 0700 "$lock_directory"
+  lock_file="$lock_directory/lock"
   if test -n "${RINGRING_TLS_SYNC_TEST_CHECKOUT:-}${RINGRING_TLS_SYNC_TEST_OUTPUT:-}${RINGRING_TLS_SYNC_TEST_ARCHIVE:-}${RINGRING_TLS_SYNC_TEST_REFRESH:-}${RINGRING_TLS_SYNC_TEST_LOCK:-}"; then
     echo "Test overrides require RINGRING_TLS_SYNC_TEST_MODE=1." >&2
     exit 1
