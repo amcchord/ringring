@@ -20,6 +20,12 @@ The hosted reference instance is live at [ringring.live](https://ringring.live).
 
 See [the architecture](docs/ARCHITECTURE.md), [the security model](docs/SECURITY.md), [backup and recovery](docs/RECOVERY.md), and [the roadmap](docs/ROADMAP.md).
 
+## Self-hosting
+
+On a clean Debian or Ubuntu server with Docker Engine and Compose v2, clone the public repository into `/opt/ringring`, copy the root-only [answers template](deploy/install.answers.example) outside the checkout, and run `sudo ./ringringctl install --answers /root/ringring-install.answers`. Secrets are accepted only through that private file or hidden terminal prompts—not command-line flags. The command generates independent deployment keys, configures the SIP firewall before starting public listeners, starts the full stack, and verifies the private and public health checks.
+
+`sudo /opt/ringring/ringringctl upgrade` performs an exact fast-forward upgrade with drilled pre- and post-upgrade backups. `sudo /opt/ringring/ringringctl doctor` provides a read-only deployment check. See the [deployment guide](docs/DEPLOYMENT.md) for prerequisites, dry runs, interrupted-operation recovery, existing manual deployment adoption, and advanced manual steps.
+
 ## Status
 
 The core private-phone flow is live: hosts can create and safely retire parties, issue one-time member invitations, provision or remove members and devices, see whether each phone is registered and reachable, rotate or revoke SIP credentials, replace and revoke a party's OpenAI runtime key, set its bounded hard monthly AI spend limit, delete their host account, scan a one-time Linphone setup QR, or follow manual setup guides for ATAs, VoIP phones, and other softphones. Hosts sign up immediately with a RingRing username, password, shared family access code, and offline recovery codes—Google and email confirmation are not required.
@@ -44,6 +50,7 @@ make setup
 make dev
 make test
 make check
+make admin-test
 make sip-smoke
 make nat-smoke
 make linphone-smoke

@@ -33,6 +33,12 @@ make restore-drill BACKUP=/root/ringring-backups/ringring-<UTC>-<commit>.tar.gz
 
 The drill verifies the sidecar checksum, rejects unsafe archive paths and special files, extracts only into a root-only temporary directory, and reruns the sealed state report. It then starts the restored app with no network, no host ports, no OpenAI admin key, and no AMI secret. Readiness and telephony-config regeneration must pass, the app must stop cleanly, and the state report must remain unchanged. The exact temporary container and extracted copy are removed; the archive and live deployment are not changed.
 
+## Resume an interrupted guided operation
+
+`ringringctl install` keeps `/etc/ringring/install.pending` after configuration has been generated but before every deployment verification passes. Preserve that marker and the environment files, fix the reported host, DNS, build, firewall, or service condition, and run `sudo /opt/ringring/ringringctl install --yes`. Do not supply a new answers file: resume intentionally reuses the previously generated secrets.
+
+`ringringctl upgrade` creates and drills a pre-upgrade backup before it writes `/etc/ringring/upgrade.pending` or moves Git. The marker fixes the old commit, exact target commit, and verified backup path. If the upgrade stops, retain both marker and backup and run `sudo /opt/ringring/ringringctl upgrade --yes` after correcting the failure. The command accepts only the recorded target and adds the post-upgrade backup after full verification; it does not repeat the pre-upgrade snapshot. Do not delete the marker, improvise a different target, or roll the database backward across an unknown forward migration.
+
 ## Recover a failed host
 
 Use a maintenance window and keep every replacement reversible:
@@ -42,8 +48,8 @@ Use a maintenance window and keep every replacement reversible:
 3. Clone the public repository, inspect `ringring-backup/manifest.txt`, and check out the recorded commit or a reviewed forward-compatible commit. Install Docker and the state directories from [the deployment guide](DEPLOYMENT.md).
 4. Build the `ringring-app` image, then run the isolated restore drill. Do not continue if checksum, decryption, integrity, startup, or regenerated telephony configuration fails.
 5. Stop the Compose stack. Move any existing `deploy/state/app` and `/etc/ringring` files into a new root-only rollback directory; do not delete them.
-6. Extract the already-verified archive into a new root-only staging directory. Copy `ringring-backup/app` into `deploy/state/app`, set it recursively to UID/GID `10001:10001`, and install the two archived environment files into `/etc/ringring` as root with mode `0600`.
+6. Extract the already-verified archive into a new root-only staging directory. Copy `ringring-backup/app` into `deploy/state/app`, set it recursively to UID/GID `10001:10001`, and install the two archived environment files into `/etc/ringring` as root with mode `0600`. Recreate `/opt/ringring/.env` as a mode-`0600` file containing only `RINGRING_DOMAIN=<hostname>` derived from the restored `APP_BASE_URL`.
 7. Start the stack and verify app/Asterisk health, public readiness and security headers, Fail2Ban, generated party routes, and the isolated SIP/RTP smoke test before allowing family devices to reconnect.
 8. Keep the pre-restore rollback directory until hosts verify their parties and devices. Securely retire superseded backup material only under the operator's retention policy.
 
-The backup does not include the Git checkout, container images, Caddy certificates, or generated Asterisk state. The repository and images are reproducible from the recorded commit, Caddy can obtain replacement certificates, and RingRing regenerates telephony configuration from restored application state.
+The backup does not include the Git checkout, its non-secret domain-only Compose `.env`, container images, Caddy certificates, or generated Asterisk state. The repository and images are reproducible from the recorded commit, the Compose value is derivable from the restored application origin, Caddy can obtain replacement certificates, and RingRing regenerates telephony configuration from restored application state.

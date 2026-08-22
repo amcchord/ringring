@@ -11,19 +11,48 @@ The reference deployment runs the Go app, Asterisk 22 LTS, and Caddy with Docker
 
 No database, app origin, Docker API, or Asterisk Manager Interface port is published.
 
-## Server prerequisites
+## Guided fresh install
 
-Install Docker Engine, the Compose v2 plugin, Git, and GNU Make, then create state directories:
+The guided command supports a clean Debian or Ubuntu host. Install Docker Engine, the Compose v2 plugin, Git, OpenSSL, cURL, and GNU Make first; point the deployment hostname's DNS records at the server; and confirm ports `80`, `443`, `5060/udp`, and `10000-10199/udp` are allowed by the provider firewall. RingRing configures its checked-in SIP authentication jail, but it does not change SSH policy, cloud firewall rules, DNS, or install Docker for the operator.
+
+Clone a clean published checkout, prepare the root-only answers file, and review a no-mutation plan:
 
 ```sh
-install -d -m 0755 /opt/ringring
+cd /opt
+sudo git clone https://github.com/amcchord/ringring.git
+cd /opt/ringring
+sudo install -m 0600 deploy/install.answers.example /root/ringring-install.answers
+sudoedit /root/ringring-install.answers
+sudo ./ringringctl install --answers /root/ringring-install.answers --dry-run
+sudo ./ringringctl install --answers /root/ringring-install.answers
+```
+
+Fill every required blank before running the command. The domain is a hostname such as `phone.example.com`, not a URL. The family access code must be 8–64 letters, numbers, dots, dashes, or underscores; choose a memorable multi-word value and share it only with trusted hosts. The OpenAI administrator key is optional. Leaving it blank disables automatic party AI provisioning without affecting private calling.
+
+Instead of an answers file, `sudo ./ringringctl install` asks for ordinary settings and reads the access code and optional administrator key with terminal echo disabled. Secrets are deliberately not accepted as command-line flags, where shell history and process listings could retain them. `--yes` approves the displayed non-secret plan for unattended execution. Use `--skip-public-check` only while DNS or certificate issuance is pending, then run `sudo /opt/ringring/ringringctl doctor` without that option as soon as the public name is ready.
+
+The installer refuses a dirty or unpublished source commit, existing configuration, occupied public ports, symlinked managed paths, and unsafe answer-file ownership or permissions. It generates separate 32-byte application and session keys plus the private AMI secret, writes root-only app/Asterisk environments, and puts only `RINGRING_DOMAIN` in the checkout's mode-`0600` Compose `.env`. After building, it creates the Asterisk security log and installs Fail2Ban before starting any public SIP listener. Success requires app and Asterisk health, sealed state verification, private AMI verification, the SIP jail, public readiness unless explicitly deferred, and clean recent app logs.
+
+An interrupted install retains `/etc/ringring/install.pending` and the already-generated secrets. Fix the reported condition and run:
+
+```sh
+sudo /opt/ringring/ringringctl install --yes
+```
+
+Do not supply the answers file again during a resume. After a successful install, move or securely retire that file according to the operator's credential-handling policy.
+
+## Manual deployment prerequisites
+
+Install Docker Engine, the Compose v2 plugin, Git, and GNU Make. Clone the repository into `/opt/ringring`, then create its state and configuration directories:
+
+```sh
+cd /opt
+git clone https://github.com/amcchord/ringring.git
 install -d -o 10001 -g 10001 -m 0770 /opt/ringring/deploy/state/app
 install -d -o 10001 -g 10001 -m 0770 /opt/ringring/deploy/state/asterisk
 install -d -o 10002 -g 10001 -m 0770 /opt/ringring/deploy/state/log/asterisk
 install -d -m 0700 /etc/ringring
 ```
-
-Clone this repository into `/opt/ringring`.
 
 ## Secrets
 
@@ -86,6 +115,8 @@ Asterisk already limits unidentified request tracking and uses globally random S
 ```sh
 /opt/ringring/scripts/install-sip-firewall.sh
 ```
+
+The guided installer runs this after the image build and security-log creation but before `docker compose up`, so the SIP listener is never intentionally published without the jail. Guided upgrades refresh the checked-in jail without repeating package installation.
 
 The jail reads Asterisk's dedicated security log and inserts its jump in Docker's `DOCKER-USER` chain, which Docker processes before its forwarding rules. Ten failures in ten minutes produce a 15-minute ban; repeat bans grow up to 24 hours. Check it with:
 
@@ -173,16 +204,46 @@ make radio-smoke
 
 The application image emits only its fixed station IDs and URLs into a disposable production Asterisk image. The runner rejects anything outside the exact SomaFM MP3 host/path shape and requires every catalog entry to deliver decodable MPEG Layer III audio. It receives no deployment environment, production state, family credential, or published port. This is an intentional outbound availability check and is kept outside the default offline test suite.
 
-## Update
+## Guided upgrade
+
+The installed checkout must be clean and its root-only environment files must still pass validation. Fetch first if the dry run should inspect the newest remote `main`; the dry run itself intentionally performs no fetch, backup, file write, service action, firewall change, or Git move:
 
 ```sh
 cd /opt/ringring
+sudo git fetch --prune origin
+sudo ./ringringctl upgrade --dry-run
+sudo ./ringringctl upgrade
+```
+
+The real upgrade fetches again, resolves one exact target commit, and refuses any non-fast-forward history. Before moving Git it creates and drills a checksummed backup, then records the old commit, target commit, and backup path in root-only `/etc/ringring/upgrade.pending`. It runs from an immutable temporary copy so replacing `ringringctl` in the target commit cannot corrupt the operation in progress. It fast-forwards, builds the complete stack, refreshes the checked-in Fail2Ban policy, reconciles services, verifies private and public health, and creates and drills a post-upgrade backup.
+
+If any post-backup step fails, keep the named backup and marker, fix the reported condition, and run `sudo /opt/ringring/ringringctl upgrade --yes`. Resume uses the exact recorded target and does not repeat the pre-upgrade backup or drill. RingRing never attempts an automatic Git or database rollback across a forward migration; follow the release-specific notes below before considering a manual rollback.
+
+Existing manual deployments must first create `/opt/ringring/.env` with mode `0600` and this single non-secret setting, using the hostname from `APP_BASE_URL` without `https://`:
+
+```dotenv
+RINGRING_DOMAIN=phone.example.com
+```
+
+The value must match both `APP_BASE_URL` and `SIP_PUBLIC_HOST` in `/etc/ringring/app.env`. The guided installer creates this file automatically. Do not copy the application or Asterisk secrets into the Compose `.env`, because Compose passes that file to Caddy's variable substitution path.
+
+At any time with no install or upgrade pending, run the read-only deployment check:
+
+```sh
+sudo /opt/ringring/ringringctl doctor
+```
+
+## Manual update (advanced)
+
+```sh
+cd /opt/ringring
+make backup
 git pull --ff-only
 docker compose build
 docker compose up -d --remove-orphans
 ```
 
-Run `make backup` before schema-changing upgrades. Generated Asterisk files can be regenerated from the database and do not need separate backups.
+Drill the backup and perform every verification from **Deploy and verify** when using the manual path. Generated Asterisk files can be regenerated from the database and do not need separate backups. The guided upgrade is preferred because it binds the verified backup, exact commit, failure marker, service checks, and post-upgrade recovery point into one resumable operation.
 
 ### `*14` upgrade and rollback
 

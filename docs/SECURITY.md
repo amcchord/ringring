@@ -34,6 +34,8 @@ Telephony configuration is derived from SQLite. If an Asterisk regeneration or p
 ## Secrets
 
 - Deployment secrets live outside Git in a root-readable environment file or secret manager.
+- The guided installer accepts deployment secrets only from hidden terminal input or a root-owned mode-`0400`/`0600` regular answers file. It refuses secret command-line flags, symlinked managed paths, and existing configuration rather than guessing whether an overwrite is safe.
+- Caddy receives only the non-secret `RINGRING_DOMAIN` value from the checkout's private Compose `.env`; OpenAI, encryption, session, family-access, and AMI secrets remain confined to the service-specific files under `/etc/ringring`.
 - The application master key encrypts SIP passwords and party-scoped integration keys.
 - Each party's OpenAI key identifier is stored alongside its encrypted value so a host can replace it. During replacement, AI-powered routes pause until RingRing confirms the fresh key exists and every older active key owned by that party's dedicated service account is deleted. Partial failures remain retryable and never reveal a key to the browser.
 - Invitation tokens are random, expire, are single-use, and are stored as hashes.
@@ -68,6 +70,8 @@ The database, AMI, metrics, debug endpoints, and container APIs are never public
 - New parties and host updates accept an OpenAI project limit only after the provider echoes the exact requested USD cents, monthly interval, and active enforcement. An ambiguous update pauses new AI-powered calls until the same pending amount is retried.
 
 The reference deployment writes Asterisk PJSIP security events to a dedicated file. Fail2Ban uses its maintained Asterisk filter and inserts bans into Docker's `DOCKER-USER` chain, before published-port forwarding. A legitimate first SIP challenge is not a failure; repeated bad authentication responses are banned with increasing durations.
+
+On a guided fresh install, the security log and Fail2Ban policy are in place before Compose starts the public SIP listener. Upgrades refresh that source-controlled policy before services are reconciled. Both operations retain root-only pending markers on failure; those markers contain only commits, a domain, or a backup path—not deployment credentials. Upgrade rollback is deliberately not automatic because a target may already have applied a forward-only database migration.
 
 The weather line sends a host-chosen place to Open-Meteo and a short forecast sentence to the party's OpenAI project for speech generation. Its AI-generated voice identifies itself and names Open-Meteo. RingRing does not send caller audio, member names, or SIP credentials to either service for weather playback.
 

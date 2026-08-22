@@ -1,0 +1,771 @@
+#!/bin/sh
+set -eu
+umask 077
+
+program=ringringctl
+test_mode=${RINGRINGCTL_TEST_MODE:-0}
+
+if test "$test_mode" = 1; then
+  checkout=${RINGRINGCTL_TEST_CHECKOUT:?RINGRINGCTL_TEST_CHECKOUT is required in test mode}
+  config_dir=${RINGRINGCTL_TEST_CONFIG_DIR:?RINGRINGCTL_TEST_CONFIG_DIR is required in test mode}
+  backup_root=${RINGRINGCTL_TEST_BACKUP_ROOT:?RINGRINGCTL_TEST_BACKUP_ROOT is required in test mode}
+  for test_path in "$checkout" "$config_dir" "$backup_root"; do
+    case "$test_path" in
+      /*) ;;
+      *) echo "Test paths must be absolute." >&2; exit 1 ;;
+    esac
+  done
+  state_uid=${RINGRINGCTL_TEST_STATE_UID:-$(id -u)}
+  state_gid=${RINGRINGCTL_TEST_STATE_GID:-$(id -g)}
+  log_uid=${RINGRINGCTL_TEST_LOG_UID:-$(id -u)}
+  firewall_installer=${RINGRINGCTL_TEST_FIREWALL_INSTALLER:-}
+  if test -n "$firewall_installer"; then
+    firewall_installer=$(realpath "$firewall_installer")
+  fi
+elif test "$test_mode" = 0; then
+  checkout=/opt/ringring
+  config_dir=/etc/ringring
+  backup_root=/root/ringring-backups
+  state_uid=10001
+  state_gid=10001
+  log_uid=10002
+  firewall_installer=
+  if test -n "${RINGRINGCTL_TEST_CHECKOUT:-}${RINGRINGCTL_TEST_CONFIG_DIR:-}${RINGRINGCTL_TEST_BACKUP_ROOT:-}${RINGRINGCTL_TEST_FIREWALL_INSTALLER:-}"; then
+    echo "Test path overrides require RINGRINGCTL_TEST_MODE=1." >&2
+    exit 1
+  fi
+else
+  echo "RINGRINGCTL_TEST_MODE must be 0 or 1." >&2
+  exit 1
+fi
+
+bootstrap_state=${RINGRINGCTL_BOOTSTRAPPED:-0}
+if test "$bootstrap_state" = 0; then
+  original_script=$(realpath "$0")
+  snapshot=$(mktemp /tmp/ringringctl.XXXXXX)
+  trap 'rm -f -- "$snapshot"' EXIT HUP INT TERM
+  install -m 0700 "$original_script" "$snapshot"
+  RINGRINGCTL_BOOTSTRAPPED=1 \
+    RINGRINGCTL_ORIGINAL_SCRIPT="$original_script" \
+    RINGRINGCTL_SNAPSHOT_PATH="$snapshot" \
+    exec "$snapshot" "$@"
+elif test "$bootstrap_state" != 1; then
+  echo "RINGRINGCTL_BOOTSTRAPPED must be 0 or 1." >&2
+  exit 1
+fi
+
+case "${RINGRINGCTL_SNAPSHOT_PATH:-}" in
+  /tmp/ringringctl.??????) ;;
+  *) echo "The internal command snapshot path is invalid." >&2; exit 1 ;;
+esac
+test ! -L "$RINGRINGCTL_SNAPSHOT_PATH" && \
+  test "$(realpath "$0")" = "$(realpath "$RINGRINGCTL_SNAPSHOT_PATH")" || {
+  echo "The internal command snapshot does not match the running script." >&2
+  exit 1
+}
+script_path=$(realpath "${RINGRINGCTL_ORIGINAL_SCRIPT:?RINGRINGCTL_ORIGINAL_SCRIPT is required}")
+source_checkout=$(CDPATH='' cd -- "$(dirname "$script_path")" && pwd)
+install_marker="$config_dir/install.pending"
+upgrade_marker="$config_dir/upgrade.pending"
+temporary_paths=${RINGRINGCTL_SNAPSHOT_PATH:?RINGRINGCTL_SNAPSHOT_PATH is required}
+failure_note=
+saved_stty=
+
+usage() {
+  cat <<EOF
+Usage:
+  $program install [--answers FILE] [--yes] [--skip-public-check] [--dry-run]
+  $program upgrade [--target GIT_REF] [--yes] [--skip-public-check] [--dry-run]
+  $program doctor [--skip-public-check]
+
+Secrets are read from a root-only answers file or hidden interactive prompts.
+They are never accepted as command-line arguments.
+EOF
+}
+
+die() {
+  echo "$*" >&2
+  exit 1
+}
+
+remember_temporary() {
+  temporary_paths="$temporary_paths $1"
+}
+
+cleanup() {
+  exit_code=$?
+  trap - EXIT HUP INT TERM
+  set +e
+  if test -n "$saved_stty"; then
+    stty "$saved_stty" >/dev/null 2>&1
+  fi
+  for path in $temporary_paths; do
+    if test -f "$path" && test ! -L "$path"; then
+      rm -f -- "$path"
+    elif test -d "$path" && test ! -L "$path"; then
+      find "$path" -depth -delete >/dev/null 2>&1
+    fi
+  done
+  if test "$exit_code" -ne 0 && test -n "$failure_note"; then
+    echo "$failure_note" >&2
+  fi
+  exit "$exit_code"
+}
+trap cleanup EXIT HUP INT TERM
+
+require_root() {
+  if test "$test_mode" != 1 && test "$(id -u)" -ne 0; then
+    die "Run $program as root."
+  fi
+}
+
+validate_managed_paths() {
+  for path in "$checkout" "$config_dir" "$backup_root"; do
+    test ! -L "$path" || die "Managed deployment paths must not be symlinks: $path"
+  done
+}
+
+paths_match() {
+  test "$(realpath "$1")" = "$(realpath "$2")"
+}
+
+require_published_source() {
+  test "$test_mode" = 1 && return
+  repository=$1
+  commit=$2
+  git -C "$repository" remote get-url origin >/dev/null 2>&1 || die "The install source needs an origin remote."
+  remote_refs=$(GIT_TERMINAL_PROMPT=0 git -C "$repository" ls-remote origin 2>/dev/null) ||
+    die "Could not verify the install source against its origin."
+  printf '%s\n' "$remote_refs" | grep -Eq "^${commit}[[:space:]]" ||
+    die "The install source commit is not advertised by its origin. Push it or use a published branch or tag."
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || die "Required command is missing: $1"
+}
+
+file_mode() {
+  if stat -c %a "$1" >/dev/null 2>&1; then
+    stat -c %a "$1"
+  else
+    stat -f %Lp "$1"
+  fi
+}
+
+file_owner() {
+  if stat -c %u "$1" >/dev/null 2>&1; then
+    stat -c %u "$1"
+  else
+    stat -f %u "$1"
+  fi
+}
+
+require_private_file() {
+  path=$1
+  label=$2
+  test -f "$path" && test ! -L "$path" || die "$label must be a regular, non-symlink file: $path"
+  case "$(file_mode "$path")" in
+    400|600) ;;
+    *) die "$label must have mode 0400 or 0600: $path" ;;
+  esac
+  if test "$test_mode" != 1 && test "$(file_owner "$path")" -ne 0; then
+    die "$label must be owned by root: $path"
+  fi
+}
+
+env_value() {
+  file=$1
+  key=$2
+  count=$(awk -F= -v wanted="$key" '$1 == wanted { count++ } END { print count + 0 }' "$file")
+  test "$count" -eq 1 || die "$file must contain exactly one $key entry."
+  awk -F= -v wanted="$key" '$1 == wanted { sub(/^[^=]*=/, ""); print }' "$file"
+}
+
+optional_env_value() {
+  file=$1
+  key=$2
+  count=$(awk -F= -v wanted="$key" '$1 == wanted { count++ } END { print count + 0 }' "$file")
+  test "$count" -le 1 || die "$file contains $key more than once."
+  if test "$count" -eq 1; then
+    awk -F= -v wanted="$key" '$1 == wanted { sub(/^[^=]*=/, ""); print }' "$file"
+  fi
+}
+
+validate_domain() {
+  value=$1
+  test "${#value}" -le 253 || die "The domain is too long."
+  printf '%s\n' "$value" | grep -Eq '^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$' ||
+    die "Use a DNS hostname such as ringring.example.com, without a scheme, port, path, or trailing dot."
+}
+
+validate_timezone() {
+  value=$1
+  case "$value" in
+    UTC) ;;
+    *..*|/*|*//*|*[!A-Za-z0-9_+./-]*) die "Use a timezone such as America/New_York or UTC." ;;
+    */*) ;;
+    *) die "Use a timezone such as America/New_York or UTC." ;;
+  esac
+  if test "$test_mode" != 1 && test ! -f "/usr/share/zoneinfo/$value"; then
+    die "Timezone data was not found for $value."
+  fi
+}
+
+validate_signup_code() {
+  value=$1
+  printf '%s\n' "$value" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{7,63}$' ||
+    die "The family access code must be 8-64 letters, numbers, dots, dashes, or underscores."
+}
+
+validate_openai_key() {
+  value=$1
+  test -z "$value" && return
+  test "${#value}" -ge 16 && test "${#value}" -le 300 || die "The OpenAI administrator key has an unexpected length."
+  printf '%s\n' "$value" | grep -Eq '^[A-Za-z0-9._-]+$' || die "The OpenAI administrator key contains unsupported characters."
+}
+
+validate_spend_limit() {
+  value=$1
+  printf '%s\n' "$value" | grep -Eq '^[0-9]+$' || die "The AI spend ceiling must be whole USD cents."
+  test "$value" -ge 1 && test "$value" -le 100000 || die "Choose an AI spend ceiling from 1 to 100000 cents."
+}
+
+validate_answers_file() {
+  require_private_file "$1" "The answers file"
+  unknown=$(awk -F= '
+    /^[[:space:]]*($|#)/ { next }
+    $1 !~ /^(RINGRING_DOMAIN|TZ|HOST_SIGNUP_CODE|OPENAI_ADMIN_KEY|OPENAI_PARTY_SPEND_LIMIT_CENTS)$/ { print $1; exit }
+  ' "$1")
+  test -z "$unknown" || die "Unknown answers-file key: $unknown"
+}
+
+read_hidden() {
+  prompt=$1
+  if test ! -t 0; then
+    die "Interactive secret input requires a terminal; use --answers with a root-only file."
+  fi
+  printf '%s' "$prompt" >&2
+  saved_stty=$(stty -g)
+  stty -echo
+  IFS= read -r hidden_value || {
+    stty "$saved_stty"
+    saved_stty=
+    echo >&2
+    die "Input ended unexpectedly."
+  }
+  stty "$saved_stty"
+  saved_stty=
+  echo >&2
+}
+
+confirm() {
+  message=$1
+  approved=$2
+  test "$approved" -eq 1 && return
+  test -t 0 || die "$message Re-run with --yes after reviewing the plan."
+  printf '%s [y/N] ' "$message" >&2
+  IFS= read -r answer
+  case "$answer" in
+    y|Y|yes|YES) ;;
+    *) die "No changes were made." ;;
+  esac
+}
+
+require_git_checkout() {
+  repository=$1
+  test -d "$repository/.git" || die "Not a Git checkout: $repository"
+  test -f "$repository/compose.yaml" || die "RingRing compose.yaml is missing from $repository."
+  test -x "$repository/ringringctl" || die "The checkout is missing executable ringringctl."
+  test -z "$(git -C "$repository" status --porcelain)" || die "The RingRing checkout must be clean."
+}
+
+prepare_checkout() {
+  require_git_checkout "$source_checkout"
+  source_commit=$(git -C "$source_checkout" rev-parse HEAD)
+  if paths_match "$source_checkout" "$checkout"; then
+    return
+  fi
+  if test -d "$checkout/.git"; then
+    require_git_checkout "$checkout"
+    test "$(git -C "$checkout" rev-parse HEAD)" = "$source_commit" || die "The partial install checkout does not match the source commit."
+    return
+  fi
+  test ! -e "$checkout" || die "The install target already exists: $checkout"
+  origin=$(git -C "$source_checkout" remote get-url origin)
+  git clone --quiet --no-checkout "$origin" "$checkout"
+  if ! git -C "$checkout" cat-file -e "$source_commit^{commit}" 2>/dev/null; then
+    find "$checkout" -depth -delete >/dev/null 2>&1
+    die "The source commit is not available from its origin. Push or use a published checkout first."
+  fi
+  git -C "$checkout" checkout --quiet -B main "$source_commit"
+  if git -C "$checkout" show-ref --verify --quiet refs/remotes/origin/main; then
+    git -C "$checkout" branch --set-upstream-to=origin/main main >/dev/null
+  fi
+  require_git_checkout "$checkout"
+}
+
+install_owned_directory() {
+  path=$1
+  owner=$2
+  group=$3
+  mode=$4
+  if test "$test_mode" = 1; then
+    install -d -m "$mode" "$path"
+  else
+    install -d -o "$owner" -g "$group" -m "$mode" "$path"
+  fi
+}
+
+ensure_security_log() {
+  security_log="$checkout/deploy/state/log/asterisk/security"
+  test ! -L "$security_log" || die "The Asterisk security log must not be a symlink."
+  if test -e "$security_log"; then
+    test -f "$security_log" || die "The Asterisk security log must be a regular file."
+    chmod 0640 "$security_log"
+    if test "$test_mode" != 1; then
+      chown "$log_uid:$state_gid" "$security_log"
+    fi
+  elif test "$test_mode" = 1; then
+    install -m 0640 /dev/null "$security_log"
+  else
+    install -o "$log_uid" -g "$state_gid" -m 0640 /dev/null "$security_log"
+  fi
+}
+
+write_install_configuration() {
+  domain=$1
+  timezone=$2
+  signup_code=$3
+  openai_key=$4
+  spend_limit=$5
+  commit=$6
+
+  install -d -m 0700 "$config_dir"
+  test ! -e "$config_dir/app.env" || die "The application environment already exists."
+  test ! -e "$config_dir/asterisk.env" || die "The Asterisk environment already exists."
+  test ! -e "$checkout/.env" || die "The checkout Compose environment already exists."
+
+  staging=$(mktemp -d "$config_dir/.ringring-install.XXXXXX")
+  remember_temporary "$staging"
+  master_key=$(openssl rand -base64 32 | tr -d '\n')
+  session_secret=$(openssl rand -base64 32 | tr -d '\n')
+  ami_secret=$(openssl rand -hex 32 | tr -d '\n')
+
+  {
+    printf 'APP_ENV=production\n'
+    printf 'APP_BASE_URL=https://%s\n' "$domain"
+    printf 'HTTP_ADDR=:8080\n'
+    printf 'DATABASE_PATH=/data/ringring.db\n'
+    printf 'RINGRING_MASTER_KEY=%s\n' "$master_key"
+    printf 'SESSION_SECRET=%s\n' "$session_secret"
+    printf 'HOST_SIGNUP_CODE=%s\n' "$signup_code"
+    printf 'GOOGLE_CLIENT_ID=\n'
+    printf 'GOOGLE_CLIENT_SECRET=\n'
+    printf 'OPENAI_ADMIN_KEY=%s\n' "$openai_key"
+    printf 'OPENAI_PARTY_SPEND_LIMIT_CENTS=%s\n' "$spend_limit"
+    printf 'SIP_PUBLIC_HOST=%s\n' "$domain"
+    printf 'ASTERISK_CONFIG_DIR=/asterisk\n'
+    printf 'ASTERISK_AMI_ADDR=asterisk:5038\n'
+    printf 'ASTERISK_AMI_USER=ringring\n'
+    printf 'ASTERISK_AMI_SECRET=%s\n' "$ami_secret"
+    printf 'FASTAGI_ADDR=:4573\n'
+    printf 'AI_AUDIO_ADDR=:4574\n'
+    printf 'AI_REALTIME_MODEL=gpt-realtime-2.1\n'
+    printf 'AI_CALL_MAX_DURATION=3m\n'
+    printf 'AI_MAX_CONCURRENT=2\n'
+    printf 'VOICE_AUDIO_DIR=/asterisk/audio\n'
+    printf 'VOICE_PLAYBACK_DIR=/var/lib/ringring/asterisk/audio\n'
+    printf 'TZ=%s\n' "$timezone"
+  } >"$staging/app.env"
+  {
+    printf 'SIP_PUBLIC_HOST=%s\n' "$domain"
+    printf 'ASTERISK_AMI_SECRET=%s\n' "$ami_secret"
+    printf 'TZ=%s\n' "$timezone"
+  } >"$staging/asterisk.env"
+  printf 'RINGRING_DOMAIN=%s\n' "$domain" >"$staging/compose.env"
+  {
+    printf 'format=1\n'
+    printf 'commit=%s\n' "$commit"
+    printf 'domain=%s\n' "$domain"
+  } >"$staging/install.pending"
+  chmod 0600 "$staging/app.env" "$staging/asterisk.env" "$staging/compose.env" "$staging/install.pending"
+  install -m 0600 "$staging/app.env" "$config_dir/app.env"
+  install -m 0600 "$staging/asterisk.env" "$config_dir/asterisk.env"
+  install -m 0600 "$staging/compose.env" "$checkout/.env"
+  install -m 0600 "$staging/install.pending" "$install_marker"
+}
+
+validate_installed_configuration() {
+  require_private_file "$config_dir/app.env" "The application environment"
+  require_private_file "$config_dir/asterisk.env" "The Asterisk environment"
+  require_private_file "$checkout/.env" "The Compose environment"
+  app_environment=$(env_value "$config_dir/app.env" APP_ENV)
+  test "$app_environment" = production || die "APP_ENV must be production."
+  base_url=$(env_value "$config_dir/app.env" APP_BASE_URL)
+  case "$base_url" in
+    https://*) domain=${base_url#https://} ;;
+    *) die "APP_BASE_URL must be an HTTPS origin." ;;
+  esac
+  validate_domain "$domain"
+  test "$(env_value "$config_dir/app.env" SIP_PUBLIC_HOST)" = "$domain" || die "SIP_PUBLIC_HOST must match APP_BASE_URL."
+  test "$(env_value "$checkout/.env" RINGRING_DOMAIN)" = "$domain" || die "RINGRING_DOMAIN must match APP_BASE_URL."
+  app_ami=$(env_value "$config_dir/app.env" ASTERISK_AMI_SECRET)
+  asterisk_ami=$(env_value "$config_dir/asterisk.env" ASTERISK_AMI_SECRET)
+  test -n "$app_ami" && test "$app_ami" = "$asterisk_ami" || die "The AMI secrets do not match."
+  test -n "$(env_value "$config_dir/app.env" RINGRING_MASTER_KEY)" || die "The application master key is empty."
+  test -n "$(env_value "$config_dir/app.env" SESSION_SECRET)" || die "The session secret is empty."
+}
+
+wait_for_health() {
+  service=$1
+  attempts=${2:-60}
+  healthy=0
+  for _ in $(seq 1 "$attempts"); do
+    if test "$(docker compose ps "$service" --format '{{.Health}}' 2>/dev/null)" = healthy; then
+      healthy=1
+      break
+    fi
+    sleep 1
+  done
+  test "$healthy" -eq 1 || die "$service did not become healthy."
+}
+
+check_public_ready() {
+  domain=$1
+  skip=$2
+  if test "$skip" -eq 1; then
+    echo "Skipped the public HTTPS check by request. Verify https://$domain/readyz after DNS is ready."
+    return
+  fi
+  ready=0
+  for _ in $(seq 1 60); do
+    if curl --fail --silent --show-error --max-time 10 "https://$domain/readyz" 2>/dev/null | grep -q '"status":"ok"'; then
+      ready=1
+      break
+    fi
+    sleep 2
+  done
+  test "$ready" -eq 1 || die "Public HTTPS readiness failed for https://$domain/readyz. The install/upgrade marker was kept for a safe retry."
+}
+
+verify_deployment() {
+  skip_public=$1
+  validate_installed_configuration
+  cd "$checkout"
+  docker compose config --quiet
+  wait_for_health app
+  wait_for_health asterisk
+  docker compose exec -T app ringring verify-state </dev/null
+  docker compose exec -T app ringring verify-ami </dev/null
+  fail2ban-client status ringring-sip >/dev/null
+  check_public_ready "$domain" "$skip_public"
+  if docker compose logs --since 10m app 2>&1 | grep -Eq '"level":"(WARN|ERROR)"'; then
+    die "The RingRing app logged a warning or error. Review docker compose logs before continuing."
+  fi
+}
+
+run_firewall_installer() {
+  mode=$1
+  if test -n "$firewall_installer"; then
+    "$firewall_installer" "$mode" "$checkout"
+  elif test "$mode" = install; then
+    "$checkout/scripts/install-sip-firewall.sh" "$checkout"
+  else
+    "$checkout/scripts/install-sip-firewall.sh" --skip-packages "$checkout"
+  fi
+}
+
+check_fresh_ports() {
+  test "$test_mode" = 1 && return
+  listeners=$(ss -H -lntu)
+  for port in 80 443 5060; do
+    if printf '%s\n' "$listeners" | grep -Eq "[:.]${port}[[:space:]]"; then
+      die "Port $port is already in use. RingRing requires 80/tcp, 443/tcp+udp, and 5060/udp."
+    fi
+  done
+  if printf '%s\n' "$listeners" | grep -Eq '[:.](100[0-9]{2}|101[0-9]{2})[[:space:]]'; then
+    die "A port in RingRing's 10000-10199/udp RTP range is already in use."
+  fi
+}
+
+install_command() {
+  require_root
+  validate_managed_paths
+  answers=
+  yes=0
+  skip_public=0
+  dry_run=0
+  while test "$#" -gt 0; do
+    case "$1" in
+      --answers) test "$#" -ge 2 || die "--answers needs a file."; answers=$2; shift 2 ;;
+      --yes) yes=1; shift ;;
+      --skip-public-check) skip_public=1; shift ;;
+      --dry-run) dry_run=1; shift ;;
+      -h|--help) usage; exit 0 ;;
+      *) die "Unknown install option: $1" ;;
+    esac
+  done
+
+  for command_name in realpath git docker openssl curl awk grep sed stat install sha256sum tar; do
+    require_command "$command_name"
+  done
+  if test "$test_mode" != 1; then
+    test "$(uname -s)" = Linux || die "The guided install currently supports Linux hosts."
+    for command_name in apt-get systemctl iptables ss; do
+      require_command "$command_name"
+    done
+    docker info >/dev/null 2>&1 || die "Docker Engine is not running."
+    docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is required."
+    iptables -n -L DOCKER-USER >/dev/null 2>&1 || die "Docker's DOCKER-USER firewall chain is unavailable."
+  fi
+
+  if test -f "$install_marker"; then
+    test -z "$answers" || die "An interrupted install is pending; do not replace its answers."
+    require_git_checkout "$checkout"
+    require_private_file "$install_marker" "The install marker"
+    marker_commit=$(env_value "$install_marker" commit)
+    test "$(git -C "$checkout" rev-parse HEAD)" = "$marker_commit" || die "The pending install commit does not match the checkout."
+    validate_installed_configuration
+    echo "Resuming the pending RingRing install for $domain."
+  else
+    if test -e "$config_dir/app.env" || test -e "$config_dir/asterisk.env" || test -e "$checkout/.env"; then
+      die "RingRing configuration already exists. Use '$program doctor' or '$program upgrade'."
+    fi
+    if test -n "$answers"; then
+      validate_answers_file "$answers"
+      domain=$(env_value "$answers" RINGRING_DOMAIN)
+      timezone=$(env_value "$answers" TZ)
+      signup_code=$(env_value "$answers" HOST_SIGNUP_CODE)
+      openai_key=$(optional_env_value "$answers" OPENAI_ADMIN_KEY)
+      spend_limit=$(optional_env_value "$answers" OPENAI_PARTY_SPEND_LIMIT_CENTS)
+      test -n "$spend_limit" || spend_limit=1000
+    else
+      test -t 0 || die "Use --answers with a root-only file for non-interactive installation."
+      printf 'Public RingRing domain (for example ringring.example.com): ' >&2
+      IFS= read -r domain
+      printf 'Timezone [UTC]: ' >&2
+      IFS= read -r timezone
+      test -n "$timezone" || timezone=UTC
+      read_hidden "Family access code (8-64 safe characters): "
+      signup_code=$hidden_value
+      read_hidden "OpenAI administrator key (optional; Enter to skip): "
+      openai_key=$hidden_value
+      printf 'Maximum monthly AI spend in cents [1000]: ' >&2
+      IFS= read -r spend_limit
+      test -n "$spend_limit" || spend_limit=1000
+    fi
+    validate_domain "$domain"
+    validate_timezone "$timezone"
+    validate_signup_code "$signup_code"
+    validate_openai_key "$openai_key"
+    validate_spend_limit "$spend_limit"
+
+    require_git_checkout "$source_checkout"
+    source_commit=$(git -C "$source_checkout" rev-parse HEAD)
+    require_published_source "$source_checkout" "$source_commit"
+    echo "Install plan:"
+    echo "  source commit: $source_commit"
+    echo "  checkout: $checkout"
+    echo "  public web and SIP host: $domain"
+    echo "  timezone: $timezone"
+    echo "  AI project provisioning: $(test -n "$openai_key" && echo enabled || echo disabled)"
+    echo "  monthly AI ceiling: $spend_limit cents"
+    echo "  secrets: generated/read privately and never printed"
+    if test "$dry_run" -eq 1; then
+      echo "Dry run passed. No files, services, firewall rules, or Git state were changed."
+      return
+    fi
+    confirm "Create the RingRing deployment and start its public services?" "$yes"
+    check_fresh_ports
+    prepare_checkout
+    install_owned_directory "$checkout/deploy/state/app" "$state_uid" "$state_gid" 0770
+    install_owned_directory "$checkout/deploy/state/asterisk" "$state_uid" "$state_gid" 0770
+    install_owned_directory "$checkout/deploy/state/log/asterisk" "$log_uid" "$state_gid" 0770
+    write_install_configuration "$domain" "$timezone" "$signup_code" "$openai_key" "$spend_limit" "$source_commit"
+  fi
+
+  failure_note="Install did not finish. Its root-only marker was preserved at $install_marker; fix the reported problem and run '$checkout/ringringctl install --yes' to resume without replacing secrets."
+  cd "$checkout"
+  docker compose config --quiet
+  docker compose build
+  ensure_security_log
+  run_firewall_installer install
+  docker compose up -d --remove-orphans
+  wait_for_health app
+  wait_for_health asterisk
+  verify_deployment "$skip_public"
+  rm -f -- "$install_marker"
+  failure_note=
+  echo "RingRing is ready at https://$domain/."
+  echo "Create the first host with the private family access code, then save the one-time recovery codes."
+  echo "Next: make one invitation and configure a phone; RingRing cannot call regular or emergency numbers."
+}
+
+safe_target_ref() {
+  case "$1" in
+    ''|-*|*..*|*[!A-Za-z0-9._/-]*) die "Use a simple branch, tag, remote ref, or commit as the upgrade target." ;;
+  esac
+}
+
+create_backup() {
+  output=$("$checkout/scripts/backup.sh" "$backup_root")
+  printf '%s\n' "$output" >&2
+  archive=$(printf '%s\n' "$output" | sed -n 's/^Backup created: //p')
+  case "$archive" in
+    "$backup_root"/ringring-*.tar.gz) ;;
+    *) die "The backup command returned an unexpected archive path." ;;
+  esac
+  test -f "$archive" && test -f "$archive.sha256" || die "The backup archive or checksum is missing."
+  printf '%s\n' "$archive"
+}
+
+write_upgrade_marker() {
+  from_commit=$1
+  to_commit=$2
+  backup=$3
+  staging=$(mktemp "$config_dir/.upgrade.pending.XXXXXX")
+  remember_temporary "$staging"
+  {
+    printf 'format=1\n'
+    printf 'from_commit=%s\n' "$from_commit"
+    printf 'to_commit=%s\n' "$to_commit"
+    printf 'backup=%s\n' "$backup"
+  } >"$staging"
+  chmod 0600 "$staging"
+  install -m 0600 "$staging" "$upgrade_marker"
+}
+
+upgrade_command() {
+  require_root
+  validate_managed_paths
+  target_ref=origin/main
+  yes=0
+  skip_public=0
+  dry_run=0
+  while test "$#" -gt 0; do
+    case "$1" in
+      --target) test "$#" -ge 2 || die "--target needs a Git ref."; target_ref=$2; shift 2 ;;
+      --yes) yes=1; shift ;;
+      --skip-public-check) skip_public=1; shift ;;
+      --dry-run) dry_run=1; shift ;;
+      -h|--help) usage; exit 0 ;;
+      *) die "Unknown upgrade option: $1" ;;
+    esac
+  done
+  safe_target_ref "$target_ref"
+  paths_match "$source_checkout" "$checkout" || die "Run upgrades with $checkout/ringringctl."
+  require_git_checkout "$checkout"
+  validate_installed_configuration
+  for command_name in git docker curl awk grep sed stat sha256sum tar; do
+    require_command "$command_name"
+  done
+  cd "$checkout"
+  docker compose config --quiet
+  wait_for_health app 10
+  wait_for_health asterisk 10
+
+  current_commit=$(git rev-parse HEAD)
+  if test -f "$upgrade_marker"; then
+    require_private_file "$upgrade_marker" "The upgrade marker"
+    from_commit=$(env_value "$upgrade_marker" from_commit)
+    target_commit=$(env_value "$upgrade_marker" to_commit)
+    pre_backup=$(env_value "$upgrade_marker" backup)
+    printf '%s\n' "$from_commit$target_commit" | grep -Eq '^[0-9a-f]{80}$' || die "The upgrade marker contains invalid commits."
+    case "$pre_backup" in "$backup_root"/ringring-*.tar.gz) ;; *) die "The upgrade marker contains an invalid backup path." ;; esac
+    test -f "$pre_backup" && test -f "$pre_backup.sha256" || die "The pending upgrade backup is missing."
+    if test "$current_commit" != "$from_commit" && test "$current_commit" != "$target_commit"; then
+      die "The checkout no longer matches either commit in the pending upgrade."
+    fi
+    echo "Resuming the exact pending upgrade from $from_commit to $target_commit."
+  else
+    if test "$dry_run" -eq 1; then
+      target_commit=$(git rev-parse --verify "$target_ref^{commit}") || die "The local target ref does not resolve. Dry run does not fetch."
+    else
+      git fetch --prune origin
+      target_commit=$(git rev-parse --verify "$target_ref^{commit}") || die "The upgrade target does not resolve."
+    fi
+    if test "$current_commit" = "$target_commit"; then
+      echo "RingRing is already at $current_commit."
+      verify_deployment "$skip_public"
+      return
+    fi
+    git merge-base --is-ancestor "$current_commit" "$target_commit" || die "The target is not a fast-forward descendant of the installed commit."
+    echo "Upgrade plan:"
+    echo "  current commit: $current_commit"
+    echo "  target commit: $target_commit"
+    echo "  verified pre/post backups: $backup_root"
+    echo "  deployment: rebuild and reconcile the complete Compose stack"
+    echo "  rollback: never automatic across forward database migrations"
+    if test "$dry_run" -eq 1; then
+      echo "Dry run passed using existing local refs. No fetch, backup, file, service, or Git state was changed."
+      return
+    fi
+    confirm "Back up, drill, fast-forward, and deploy this exact target?" "$yes"
+    pre_backup=$(create_backup)
+    "$checkout/scripts/restore-drill.sh" "$pre_backup"
+    write_upgrade_marker "$current_commit" "$target_commit" "$pre_backup"
+    from_commit=$current_commit
+  fi
+
+  failure_note="Upgrade did not finish. Do not delete $pre_backup or roll back across an unknown migration. Fix the reported problem and run '$checkout/ringringctl upgrade --yes' to resume the recorded target."
+  if test "$(git rev-parse HEAD)" = "$from_commit"; then
+    git merge --ff-only "$target_commit"
+  fi
+  test "$(git rev-parse HEAD)" = "$target_commit" || die "The checkout did not reach the recorded upgrade target."
+  test -z "$(git status --porcelain)" || die "The upgraded checkout is dirty."
+  docker compose config --quiet
+  docker compose build
+  ensure_security_log
+  run_firewall_installer refresh
+  docker compose up -d --remove-orphans
+  wait_for_health app
+  wait_for_health asterisk
+  verify_deployment "$skip_public"
+  post_backup=$(create_backup)
+  "$checkout/scripts/restore-drill.sh" "$post_backup"
+  rm -f -- "$upgrade_marker"
+  failure_note=
+  echo "Upgrade complete at $target_commit."
+  echo "Verified pre-upgrade backup: $pre_backup"
+  echo "Verified post-upgrade backup: $post_backup"
+}
+
+doctor_command() {
+  require_root
+  validate_managed_paths
+  skip_public=0
+  while test "$#" -gt 0; do
+    case "$1" in
+      --skip-public-check) skip_public=1; shift ;;
+      -h|--help) usage; exit 0 ;;
+      *) die "Unknown doctor option: $1" ;;
+    esac
+  done
+  paths_match "$source_checkout" "$checkout" || die "Run doctor with $checkout/ringringctl."
+  require_git_checkout "$checkout"
+  if test -f "$install_marker"; then
+    die "An install is pending. Resume it before running doctor."
+  fi
+  if test -f "$upgrade_marker"; then
+    die "An upgrade is pending. Resume it before running doctor."
+  fi
+  for command_name in realpath git docker curl awk grep stat fail2ban-client; do
+    require_command "$command_name"
+  done
+  verify_deployment "$skip_public"
+  echo "RingRing doctor passed at $(git -C "$checkout" rev-parse HEAD)."
+}
+
+test "$#" -ge 1 || {
+  usage
+  exit 2
+}
+command_name=$1
+shift
+case "$command_name" in
+  install) install_command "$@" ;;
+  upgrade) upgrade_command "$@" ;;
+  doctor) doctor_command "$@" ;;
+  -h|--help|help) usage ;;
+  *) usage >&2; die "Unknown command: $command_name" ;;
+esac

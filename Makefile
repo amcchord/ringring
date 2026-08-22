@@ -1,4 +1,4 @@
-.PHONY: setup dev test check backup restore-drill sip-smoke nat-smoke linphone-smoke radio-smoke compose-up compose-down
+.PHONY: setup dev test check admin-test backup restore-drill sip-smoke nat-smoke linphone-smoke radio-smoke compose-up compose-down
 
 setup:
 	go mod download
@@ -11,8 +11,14 @@ test:
 
 check:
 	test -z "$$(gofmt -l $$(find . -name '*.go' -not -path './vendor/*'))"
+	sh -n ringringctl $$(find scripts -name '*.sh' -type f)
+	./scripts/ringringctl-test.sh
 	go vet ./...
 	go test -race ./...
+
+admin-test:
+	sh -n ringringctl $$(find scripts -name '*.sh' -type f)
+	./scripts/ringringctl-test.sh
 
 backup:
 	./scripts/backup.sh

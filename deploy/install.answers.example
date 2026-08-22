@@ -1,0 +1,13 @@
+# Copy this file outside the checkout, replace the required blanks, then:
+#   chmod 0600 /root/ringring-install.answers
+#   sudo ./ringringctl install --answers /root/ringring-install.answers
+
+RINGRING_DOMAIN=ringring.example.com
+TZ=America/New_York
+HOST_SIGNUP_CODE=
+
+# Optional. Leave empty to run without automatic party AI provisioning.
+OPENAI_ADMIN_KEY=
+
+# USD cents. 1000 means a $10.00 new-party default and host ceiling.
+OPENAI_PARTY_SPEND_LIMIT_CENTS=1000

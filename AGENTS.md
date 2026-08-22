@@ -75,6 +75,7 @@ make setup
 make dev
 make test
 make check
+make admin-test
 make sip-smoke
 make nat-smoke
 make linphone-smoke

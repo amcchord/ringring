@@ -40,7 +40,7 @@
 ## Milestone 4 — Dependable self-hosting
 
 - [x] Reproducible Docker Compose deployment and SIP firewall installer.
-- [ ] Guided installation and upgrade command.
+- [x] Guided installation and upgrade command with secret-safe input, verified backups, and exact interrupted-operation resume.
 - [x] Backup, restore, and disaster-recovery verification.
 - [ ] SIP TLS device compatibility matrix.
 - [ ] Observability without call-content collection.

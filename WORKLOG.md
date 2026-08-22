@@ -2,6 +2,33 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Guided self-host installation and verified upgrades
+
+### Shipped
+
+- Added root-level `ringringctl install`, `upgrade`, and `doctor` commands. A clean Debian/Ubuntu host can now generate its state directories and independent application/session/AMI keys, render service-specific root-only environments, build the complete Compose stack, and prove app, Asterisk, AMI, state, Fail2Ban, public readiness, and settled app logs through one guided flow.
+- Added a documented root-only answers template plus hidden interactive secret prompts. The command accepts no secret flags, validates exact known keys and safe value shapes, refuses loose files, symlinks, occupied SIP/RTP/web ports, dirty checkouts, unpublished source commits, mismatched deployed configuration, and accidental fresh-install overwrites.
+- Put only the non-secret deployment domain in the checkout's private Compose `.env`, keeping Caddy's substitution environment separate from OpenAI, encryption, session, family-access, and AMI credentials. Fresh install creates the Asterisk security log and installs the checked-in Fail2Ban jail before starting the public SIP listener.
+- Added exact fast-forward upgrades with drilled pre- and post-upgrade backups, a root-only old/target/backup marker, immutable-controller execution across its own Git replacement, full-stack reconciliation, firewall-policy refresh, and exact retry after interruption. Added read-only `doctor`, guided/manual deployment and recovery documentation, and a narrow `make admin-test` target.
+
+### Decisions
+
+- Support clean Debian/Ubuntu servers first because the existing SIP firewall installer uses `apt`; Docker installation, DNS, SSH policy, and provider firewalls remain explicit operator prerequisites instead of partially managed host state.
+- Keep secrets out of shell history, process listings, Git, Compose's Caddy environment, pending markers, and normal output. An interrupted install must reuse the generated configuration rather than accept replacement answers, while an interrupted upgrade must reuse its exact target and already-drilled backup.
+- Never automate rollback across a forward-only database migration. A failed upgrade keeps the known recovery point and resumes forward only after the operator fixes the reported condition.
+
+### Verification
+
+- The isolated POSIX fixture suite covers a complete install, exact environment rendering and permissions, independent 32-byte keys, AMI-secret agreement, public/private checks, firewall-before-listener ordering, doctor, overwrite refusal, no-mutation dry runs, invalid permissions/domain/access code, symlink refusal, build failure and secret-preserving install resume, exact fast-forward upgrade, two backups and drills, firewall refresh, controller replacement during execution, no-mutation upgrade dry run, and a failed/resumed upgrade that does not repeat its pre-backup.
+- `sh -n`, focused ShellCheck, `git diff --check`, and `make check` pass. The full check includes the new fixtures, Go formatting and vet, and the complete race-enabled Go suite.
+- This operator-tool release did not read or change the live deployment's environment, family records, OpenAI resources, containers, firewall, database, or generated phone routing.
+
+### Remaining
+
+- Complete the physical-device usability gate: configure real family ATAs/phones, call across two remote networks, and verify foreground/background ringing plus Wi-Fi/cellular transitions.
+- Complete the external child-safety review and confirm OpenAI Zero Data Retention before enabling AI for any caller under 13.
+- Add a SIP TLS device matrix, privacy-preserving observability, further threat-model tests, and the optional PostgreSQL path.
+
 ## 2026-08-22 — Web accessibility and simulated mobile usability
 
 ### Shipped
