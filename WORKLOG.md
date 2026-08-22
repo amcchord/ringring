@@ -20,10 +20,17 @@ This is the durable, chronological project record. Add new entries at the top. C
 
 - Renderer tests require the exact answer, beep, echo, completion, and hangup sequence in isolated party contexts, including when every optional service is disabled.
 - Web tests require the setup and host pages to explain `*10`. A disposable real-browser flow verified the splash, host panel, and one-time setup card at desktop and phone widths with no horizontal overflow; it also exposed and fixed an existing mobile hero-decoration overflow.
+- A clean candidate checkout on the deployment Docker host passed the extended harness: two challenged registrations, the `101` to `102` extension call, the single-phone `*10` call, and matching bidirectional PCMU patterns. The harness removed its exact containers, network, generated state, and temporary checkout.
+
+### Production
+
+- GitHub Actions passed commit `a73bc75`. Deployed only the rebuilt app container from the clean production checkout, leaving Asterisk and Caddy running; startup telephony reconciliation completed without a warning.
+- Public readiness and the live `*10` splash copy pass, app/Asterisk/Caddy are healthy, the SIP Fail2Ban jail is active, and settled app logs contain no warnings or errors.
+- Created a verified root-only post-deploy recovery archive. Its sealed report confirms unchanged one-host/one-party state, SQLite and foreign-key integrity, and party-key decryption; no production member, device, invitation, access code, or OpenAI project was changed.
 
 ### Remaining
 
-- Run the extended isolated SIP/RTP harness on a Docker host, then deploy and exercise `*10` from real remote hardware.
+- Exercise `*10` from real remote hardware.
 - Complete a two-way-audio call between two remote physical devices.
 
 ## 2026-08-22 — Guarded member, party, and account deletion
