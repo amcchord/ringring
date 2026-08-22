@@ -17,6 +17,7 @@ import (
 
 	"github.com/amcchord/ringring/internal/model"
 	"github.com/amcchord/ringring/internal/openairuntime"
+	"github.com/amcchord/ringring/internal/store"
 	"github.com/amcchord/ringring/internal/weather"
 )
 
@@ -24,6 +25,10 @@ var safePartyID = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 type PartySource interface {
 	PartyVoiceSettings(context.Context, string) (model.Party, model.PartyServices, error)
+}
+
+type ExtensionManager interface {
+	ChangeMemberExtensionByDevice(context.Context, string, string, string) error
 }
 
 type SecretDecryptor interface {
@@ -40,6 +45,8 @@ type SpeechSource interface {
 
 type Server struct {
 	Source            PartySource
+	Extensions        ExtensionManager
+	Reconcile         func(context.Context) error
 	Cipher            SecretDecryptor
 	Weather           WeatherSource
 	Speech            SpeechSource
@@ -88,10 +95,102 @@ func (s *Server) handle(connection net.Conn) {
 		s.handleWeather(reader, writer, environment)
 	case "ai-authorize":
 		s.handleAIAuthorize(reader, writer, environment)
+	case "choose-extension":
+		s.handleChooseExtension(reader, writer, environment)
 	default:
 		_ = agiCommand(reader, writer, "EXEC Playback ss-noservice")
 	}
 	return
+}
+
+func (s *Server) handleChooseExtension(reader *bufio.Reader, writer *bufio.Writer, environment map[string]string) {
+	partyID := environment["agi_arg_1"]
+	endpoint := environment["agi_arg_2"]
+	if s.Extensions == nil || !safePartyID.MatchString(partyID) || !safePartyID.MatchString(endpoint) {
+		_ = agiCommand(reader, writer, "EXEC Playback ss-noservice")
+		return
+	}
+
+	for attempt := 0; attempt < 3; attempt++ {
+		extension, err := agiCommandResult(reader, writer, "GET DATA agent-newlocation 5000 5")
+		if err != nil || extension == "-1" {
+			return
+		}
+		if !validExtension(extension) {
+			if err := agiCommand(reader, writer, "EXEC Playback invalid"); err != nil {
+				return
+			}
+			continue
+		}
+
+		commands := []string{
+			`STREAM FILE "you-entered" ""`,
+			`SAY DIGITS ` + extension + ` ""`,
+			`STREAM FILE "if-correct-press" ""`,
+			`SAY DIGITS 1 ""`,
+		}
+		for _, command := range commands {
+			if err := agiCommand(reader, writer, command); err != nil {
+				return
+			}
+		}
+		confirmation, err := agiCommandResult(reader, writer, "WAIT FOR DIGIT 5000")
+		if err != nil || confirmation == "-1" {
+			return
+		}
+		if confirmation != "49" { // AGI returns the ASCII value for DTMF 1.
+			if err := agiCommand(reader, writer, "EXEC Playback please-try-again"); err != nil {
+				return
+			}
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		changeErr := s.Extensions.ChangeMemberExtensionByDevice(ctx, partyID, endpoint, extension)
+		if errors.Is(changeErr, store.ErrExtensionTaken) || errors.Is(changeErr, store.ErrInvalidExtension) {
+			cancel()
+			if playbackErr := agiCommand(reader, writer, "EXEC Playback invalid"); playbackErr != nil {
+				return
+			}
+			continue
+		}
+		if changeErr != nil {
+			cancel()
+			s.logger().Warn("change extension from phone", "party_id", partyID, "error", changeErr)
+			_ = agiCommand(reader, writer, "EXEC Playback ss-noservice")
+			return
+		}
+		if s.Reconcile != nil {
+			if reconcileErr := s.Reconcile(ctx); reconcileErr != nil {
+				s.logger().Warn("reconcile phones after extension change", "party_id", partyID, "error", reconcileErr)
+			}
+		}
+		cancel()
+
+		for _, command := range []string{
+			"EXEC Playback auth-thankyou",
+			`STREAM FILE "vm-extension" ""`,
+			`SAY DIGITS ` + extension + ` ""`,
+		} {
+			if err := agiCommand(reader, writer, command); err != nil {
+				return
+			}
+		}
+		return
+	}
+	_ = agiCommand(reader, writer, "EXEC Playback goodbye")
+}
+
+func validExtension(extension string) bool {
+	if len(extension) < 2 || len(extension) > 5 {
+		return false
+	}
+	for _, character := range extension {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) handleWeather(reader *bufio.Reader, writer *bufio.Writer, environment map[string]string) {
@@ -199,23 +298,40 @@ func readEnvironment(reader *bufio.Reader) (map[string]string, error) {
 }
 
 func agiCommand(reader *bufio.Reader, writer *bufio.Writer, command string) error {
-	if command == "" || strings.ContainsAny(command, "\r\n") {
-		return errors.New("invalid FastAGI command")
-	}
-	if _, err := writer.WriteString(command + "\n"); err != nil {
-		return err
-	}
-	if err := writer.Flush(); err != nil {
-		return err
-	}
-	response, err := reader.ReadString('\n')
+	result, err := agiCommandResult(reader, writer, command)
 	if err != nil {
 		return err
 	}
-	if !strings.HasPrefix(response, "200 result=") {
-		return fmt.Errorf("FastAGI command failed")
+	if result == "-1" {
+		return errors.New("FastAGI channel is unavailable")
 	}
 	return nil
+}
+
+func agiCommandResult(reader *bufio.Reader, writer *bufio.Writer, command string) (string, error) {
+	if command == "" || strings.ContainsAny(command, "\r\n") {
+		return "", errors.New("invalid FastAGI command")
+	}
+	if _, err := writer.WriteString(command + "\n"); err != nil {
+		return "", err
+	}
+	if err := writer.Flush(); err != nil {
+		return "", err
+	}
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+	response = strings.TrimSpace(response)
+	const prefix = "200 result="
+	if !strings.HasPrefix(response, prefix) {
+		return "", errors.New("FastAGI command failed")
+	}
+	result := strings.TrimPrefix(response, prefix)
+	if separator := strings.IndexAny(result, " \t("); separator >= 0 {
+		result = result[:separator]
+	}
+	return result, nil
 }
 
 func atomicWrite(path string, content []byte) error {

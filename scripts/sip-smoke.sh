@@ -3,7 +3,7 @@ set -eu
 
 repository=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
 network=ringring-sip-smoke
-containers="ringring-sip-smoke-asterisk ringring-sip-smoke-register-a ringring-sip-smoke-register-b ringring-sip-smoke-phone-a ringring-sip-smoke-phone-b"
+containers="ringring-sip-smoke-app ringring-sip-smoke-asterisk ringring-sip-smoke-register-a ringring-sip-smoke-register-b ringring-sip-smoke-phone-a ringring-sip-smoke-phone-b"
 
 if docker network inspect "$network" >/dev/null 2>&1; then
   echo "The isolated Docker network $network already exists; another smoke test may be running." >&2
@@ -81,32 +81,62 @@ run_and_wait() {
   return "$result"
 }
 
-echo "Building pinned Asterisk and SIPp smoke-test images..."
+echo "Building RingRing plus pinned Asterisk and SIPp smoke-test images..."
+docker build --quiet --tag ringring-app-sip-smoke:local \
+  --file "$repository/Dockerfile" "$repository" >/dev/null
 docker build --quiet --tag ringring-asterisk-sip-smoke:22.10.1 \
   --file "$repository/deploy/asterisk/Dockerfile" "$repository/deploy/asterisk" >/dev/null
 docker build --quiet --tag ringring-sipp-smoke:3.7.7 \
   --file "$repository/deploy/sip-smoke/Dockerfile" "$repository/deploy/sip-smoke" >/dev/null
 
-echo "Rendering the same party-scoped configuration used by RingRing..."
-mkdir -p "$work_directory/logs/ringring-sip-smoke-register-a" \
+echo "Creating disposable RingRing state for two party phones..."
+mkdir -p "$work_directory/app" "$work_directory/state" \
+  "$work_directory/logs/ringring-sip-smoke-register-a" \
   "$work_directory/logs/ringring-sip-smoke-register-b" \
   "$work_directory/logs/ringring-sip-smoke-phone-a" \
   "$work_directory/logs/ringring-sip-smoke-phone-b"
-docker run --rm --network none \
-  --volume "$repository:/src:ro" --volume "$work_directory:/out" --workdir /src \
-  golang:1.26-bookworm go run ./scripts/render-sip-smoke-config.go /out/state
+(cd "$repository" && go run ./scripts/sip-smoke-state "$work_directory/app/ringring.db")
+chmod -R a+rwX "$work_directory/app" "$work_directory/state"
+
+docker network create --internal --subnet 172.31.89.0/24 "$network" >/dev/null
+docker run -d --name ringring-sip-smoke-app \
+  --network "$network" --network-alias app --ip 172.31.89.10 \
+  --env APP_ENV=development --env HTTP_ADDR=:8080 \
+  --env APP_BASE_URL=http://ringring-sip-smoke.test \
+  --env DATABASE_PATH=/data/ringring.db --env SIP_PUBLIC_HOST=172.31.89.20 \
+  --env ASTERISK_CONFIG_DIR=/asterisk --env ASTERISK_AMI_ADDR=172.31.89.20:5038 \
+  --env ASTERISK_AMI_USER=ringring --env ASTERISK_AMI_SECRET=isolatedsmoketest \
+  --env FASTAGI_ADDR=:4573 --env AI_AUDIO_ADDR=:4574 \
+  --volume "$work_directory/app:/data" --volume "$work_directory/state:/asterisk" \
+  ringring-app-sip-smoke:local >/dev/null
+
+app_ready=0
+for elapsed in $(seq 1 30); do
+  if docker exec ringring-sip-smoke-app curl --fail --silent http://127.0.0.1:8080/readyz >/dev/null 2>&1; then
+    app_ready=1
+    break
+  fi
+  sleep 1
+done
+if test "$app_ready" -ne 1; then
+  echo "The isolated RingRing app did not become ready." >&2
+  docker logs ringring-sip-smoke-app >&2 || true
+  exit 1
+fi
 grep -q '^direct_media=no$' "$work_directory/state/pjsip.conf"
 grep -q '^context=rr-party-pty-smoke$' "$work_directory/state/pjsip.conf"
 grep -Fq 'exten => *10,1,Answer()' "$work_directory/state/extensions.conf"
 grep -Fq ' same => n,Echo()' "$work_directory/state/extensions.conf"
+grep -Fq 'exten => *15,1,Answer()' "$work_directory/state/extensions.conf"
+grep -Fq 'choose-extension,pty_smoke,${CHANNEL(endpoint)}' "$work_directory/state/extensions.conf"
 grep -q '^exten => 102,1,NoOp(RingRing party call)$' "$work_directory/state/extensions.conf"
 
-docker network create --internal --subnet 172.31.89.0/24 "$network" >/dev/null
 docker run -d --name ringring-sip-smoke-asterisk \
   --network "$network" --ip 172.31.89.20 \
   --env SIP_PUBLIC_HOST=172.31.89.20 --env ASTERISK_AMI_SECRET=isolatedsmoketest \
   --volume "$work_directory/state:/var/lib/ringring/asterisk:ro" \
   --volume "$repository/scripts/sip-smoke/pjsip.conf.in:/etc/asterisk/pjsip.conf.in:ro" \
+  --volume "$repository/scripts/sip-smoke/manager.conf.in:/etc/asterisk/manager.conf.in:ro" \
   ringring-asterisk-sip-smoke:22.10.1 >/dev/null
 
 ready=0
@@ -213,4 +243,50 @@ run_and_wait ringring-sip-smoke-phone-a 30 \
 
 channels=$(docker exec ringring-sip-smoke-asterisk asterisk -rx 'core show channels count')
 printf '%s\n' "$channels" | grep -q '^0 active channels'
-echo "SIP smoke test passed: 2 authenticated registrations, extension call, *10 echo test, and bidirectional RTP."
+
+docker rm ringring-sip-smoke-phone-a >/dev/null
+find "$work_directory/logs/ringring-sip-smoke-phone-a" -type f -delete
+echo "Choosing extension 103 through the authenticated *15 voice flow..."
+run_and_wait ringring-sip-smoke-phone-a 35 \
+  --network "$network" --ip 172.31.89.40 --volume "$scenario_mount" \
+  --volume "$work_directory/logs/ringring-sip-smoke-phone-a:/logs" --workdir /logs \
+  "$sipp_image" 172.31.89.20:5060 -sf /scenarios/choose-extension.xml \
+  -i 172.31.89.40 -p 5061 -mi 172.31.89.40 -mp 4000 \
+  -s '*15' -au rr_smoke_a -ap smoke-only-a-7Qm4s9Vx -m 1 -aa \
+  -key branch_tag choosea -trace_msg -trace_err
+
+updated=0
+for elapsed in $(seq 1 10); do
+  if grep -q '^exten => 103,1,NoOp(RingRing party call)$' "$work_directory/state/extensions.conf"; then
+    updated=1
+    break
+  fi
+  sleep 1
+done
+if test "$updated" -ne 1; then
+  echo "The authenticated extension selection did not update generated routing." >&2
+  docker logs --tail 200 ringring-sip-smoke-app >&2 || true
+  exit 1
+fi
+if grep -q '^exten => 101,1,NoOp(RingRing party call)$' "$work_directory/state/extensions.conf"; then
+  echo "The previous extension remained in generated routing." >&2
+  exit 1
+fi
+grep -q '^exten => 102,1,NoOp(RingRing party call)$' "$work_directory/state/extensions.conf"
+grep -Fq 'callerid=RingRing 103 <103>' "$work_directory/state/pjsip.conf"
+grep -Fq 'password=smoke-only-a-7Qm4s9Vx' "$work_directory/state/pjsip.conf"
+docker exec ringring-sip-smoke-asterisk \
+  asterisk -rx 'dialplan show 103@rr-party-pty-smoke' | grep -Fq 'Dial(PJSIP/rr_smoke_a,30)'
+if docker exec ringring-sip-smoke-asterisk \
+  asterisk -rx 'dialplan show 101@rr-party-pty-smoke' | grep -Fq 'Dial(PJSIP/rr_smoke_a,30)'; then
+  echo "Asterisk still routed the previous extension after reload." >&2
+  exit 1
+fi
+if docker logs ringring-sip-smoke-app 2>&1 | grep -Eq 'change extension from phone|reconcile phones after extension change'; then
+  echo "The extension selection app path logged a failure." >&2
+  docker logs ringring-sip-smoke-app >&2 || true
+  exit 1
+fi
+channels=$(docker exec ringring-sip-smoke-asterisk asterisk -rx 'core show channels count')
+printf '%s\n' "$channels" | grep -q '^0 active channels'
+echo "SIP smoke test passed: 2 authenticated registrations, extension call, *10 echo, bidirectional RTP, and authenticated *15 DTMF extension selection."

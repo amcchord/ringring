@@ -42,6 +42,13 @@ func TestRenderIsolatesPartyDialplans(t *testing.T) {
 			t.Fatalf("%s party missing the always-available echo test:\n%s", name, party)
 		}
 	}
+	if !strings.Contains(blue, "exten => *15,1,Answer()\n same => n,Wait(1)\n same => n,Set(AGIEXITONHANGUP=yes)\n same => n,AGI(agi://app:4573/choose-extension,pty_blue,${CHANNEL(endpoint)})") ||
+		!strings.Contains(gold, "choose-extension,pty_gold,${CHANNEL(endpoint)}") {
+		t.Fatalf("party extension chooser must receive the authenticated endpoint identity:\n%s", dialplan)
+	}
+	if strings.Contains(dialplan, "choose-extension,pty_blue,${CALLERID") {
+		t.Fatal("extension chooser must not trust caller ID")
+	}
 	if !strings.Contains(blue, "exten => *11") {
 		t.Fatal("time service should be present in each party")
 	}
@@ -82,6 +89,9 @@ func TestRenderOmitsDisabledSpecialNumbers(t *testing.T) {
 	dialplan := string(config.Dialplan)
 	if !strings.Contains(dialplan, "exten => *10,1,Answer()") || !strings.Contains(dialplan, "same => n,Echo()") {
 		t.Fatalf("echo test must remain available when optional services are disabled:\n%s", dialplan)
+	}
+	if !strings.Contains(dialplan, "exten => *15,1,Answer()") || !strings.Contains(dialplan, "choose-extension,pty_quiet,${CHANNEL(endpoint)}") {
+		t.Fatalf("voice extension selection must remain available when optional services are disabled:\n%s", dialplan)
 	}
 	for _, number := range []string{"*11", "*12", "*13", "*14"} {
 		if strings.Contains(dialplan, "exten => "+number) {

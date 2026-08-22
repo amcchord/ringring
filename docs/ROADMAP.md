@@ -20,7 +20,7 @@
 - [x] Host member directory and device controls.
 - [x] Self-service two-way echo test.
 - [x] Host-only live registration and reachability hints.
-- [ ] Voice-guided extension selection.
+- [x] Authenticated voice-guided extension selection with DTMF confirmation.
 - [x] Host-controlled time and weather service lines.
 - [x] Internet radio line with a safe fixed station.
 - [ ] Vetted host station selection without arbitrary URL injection.

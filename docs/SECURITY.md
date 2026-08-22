@@ -20,6 +20,8 @@ The Linphone QR is rendered inside RingRing and contains a one-time HTTPS URL ra
 
 The `*10` phone test is an in-memory Asterisk media loop inside the caller's party context. It sends the caller's RTP straight back to that same authenticated channel and does not record, persist, transcribe, or send audio to another service.
 
+The `*15` extension chooser trusts only Asterisk's authenticated PJSIP endpoint identity, not caller ID or a user-entered identity. Its database update requires an active device mapped to the supplied party and accepts only 2–5 ASCII digits; uniqueness is enforced inside that party. It changes only the member extension, sends no data outside the private app/PBX network, and records no prompt audio or DTMF. Invalid, occupied, revoked, unknown, and cross-party attempts receive generic phone prompts.
+
 ## Deletion lifecycle
 
 - A host can delete a member only after retyping that member's extension. The member record and every attached encrypted SIP credential are removed together, then RingRing regenerates and reloads Asterisk configuration.
@@ -79,4 +81,4 @@ Do not open a public issue for a vulnerability that could expose credentials or 
 
 ## Known preview gaps
 
-HTTPS/TLS, narrow published ports, cross-party configuration isolation, native account recovery, one-time Linphone provisioning, official Linphone-engine XML import, SIP registration, party calling, echoed bidirectional audio, simulated distinct NAT paths, SIP credential rotation/revocation, retry-safe party OpenAI key replacement, guarded member/party/account deletion, live authentication blocking, and isolated backup/restore are verified in code and disposable environments. The Linphone mobile UI, push/background ringing, real household and carrier-grade NAT paths, and a two-way call between two remote physical devices still need to pass on family hardware before the service leaves preview status.
+HTTPS/TLS, narrow published ports, cross-party configuration isolation, native account recovery, one-time Linphone provisioning, official Linphone-engine XML import, SIP registration, party calling, echoed bidirectional audio, authenticated DTMF extension selection, simulated distinct NAT paths, SIP credential rotation/revocation, retry-safe party OpenAI key replacement, guarded member/party/account deletion, live authentication blocking, and isolated backup/restore are verified in code and disposable environments. The Linphone mobile UI, push/background ringing, real household and carrier-grade NAT paths, and a two-way call between two remote physical devices still need to pass on family hardware before the service leaves preview status.

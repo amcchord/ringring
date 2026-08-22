@@ -18,6 +18,7 @@ var (
 	ErrNotFound         = errors.New("not found")
 	ErrInviteUsed       = errors.New("invitation has already been used")
 	ErrInviteExpired    = errors.New("invitation has expired")
+	ErrInvalidExtension = errors.New("extension must contain 2 to 5 digits")
 	ErrExtensionTaken   = errors.New("extension is already in use")
 	ErrUsernameTaken    = errors.New("username is already in use")
 	ErrRecoveryCode     = errors.New("invalid recovery code")
@@ -697,6 +698,43 @@ func (s *Store) ListMembers(ctx context.Context, partyID string) ([]model.Member
 		}
 	}
 	return members, rows.Err()
+}
+
+// ChangeMemberExtensionByDevice lets an authenticated, active SIP endpoint
+// change the extension of its own member inside the supplied party. The
+// endpoint identity comes from Asterisk's authenticated channel, not caller ID.
+func (s *Store) ChangeMemberExtensionByDevice(ctx context.Context, partyID, sipUsername, extension string) error {
+	if !validExtensionValue(extension) {
+		return ErrInvalidExtension
+	}
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE members SET extension = ?
+		WHERE party_id = ? AND id = (
+			SELECT member_id FROM devices
+			WHERE sip_username = ? AND revoked_at IS NULL
+		)`, extension, partyID, sipUsername)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			return ErrExtensionTaken
+		}
+		return fmt.Errorf("change member extension by device: %w", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func validExtensionValue(extension string) bool {
+	if len(extension) < 2 || len(extension) > 5 {
+		return false
+	}
+	for _, character := range extension {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Store) MemberForHost(ctx context.Context, partyID, hostUserID, memberID string) (model.Party, model.Member, error) {

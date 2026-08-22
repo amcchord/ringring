@@ -96,6 +96,76 @@ func TestExtensionUniqueWithinParty(t *testing.T) {
 	}
 }
 
+func TestActiveDeviceCanChangeOnlyItsPartyMemberExtension(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Date(2026, 8, 22, 14, 0, 0, 0, time.UTC)
+	host, _ := s.UpsertGoogleUser(ctx, GoogleProfile{Subject: "extension-host", Email: "host@example.test", Name: "Host"}, now, "usr_extension")
+	party, _ := s.CreateParty(ctx, NewParty{ID: "pty_extension", Name: "Extension party", Slug: "extension-party", HostUserID: host.ID, CreatedAt: now})
+	otherParty, _ := s.CreateParty(ctx, NewParty{ID: "pty_other_extension", Name: "Other party", Slug: "other-extension-party", HostUserID: host.ID, CreatedAt: now})
+
+	claim := func(inviteID, token, memberID, deviceID, sipUsername, extension, partyID string) {
+		t.Helper()
+		if err := s.CreateInvitation(ctx, NewInvitation{
+			ID: inviteID, PartyID: partyID, CreatedByUserID: host.ID,
+			TokenHash: secure.Hash(token), ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, _, err := s.ClaimInvitation(ctx, NewClaim{
+			TokenHash: secure.Hash(token), MemberID: memberID, DisplayName: "Member", Extension: extension,
+			DeviceID: deviceID, DeviceLabel: "Phone", SIPUsername: sipUsername,
+			SIPSecretCiphertext: "cipher-" + deviceID, Provisioning: testProvisioning("provision-"+deviceID, now), Now: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claim("inv_extension_a", "invite-extension-a", "mem_extension_a", "dev_extension_a", "rrd_extension_a", "101", party.ID)
+	claim("inv_extension_b", "invite-extension-b", "mem_extension_b", "dev_extension_b", "rrd_extension_b", "102", party.ID)
+	claim("inv_extension_other", "invite-extension-other", "mem_extension_other", "dev_extension_other", "rrd_extension_other", "103", otherParty.ID)
+
+	for _, invalid := range []string{"1", "123456", "10*", "１２３"} {
+		if err := s.ChangeMemberExtensionByDevice(ctx, party.ID, "rrd_extension_a", invalid); !errors.Is(err, ErrInvalidExtension) {
+			t.Fatalf("invalid extension %q error = %v", invalid, err)
+		}
+	}
+	if err := s.ChangeMemberExtensionByDevice(ctx, otherParty.ID, "rrd_extension_a", "104"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-party endpoint error = %v", err)
+	}
+	if err := s.ChangeMemberExtensionByDevice(ctx, party.ID, "rrd_unknown", "104"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown endpoint error = %v", err)
+	}
+	if err := s.ChangeMemberExtensionByDevice(ctx, party.ID, "rrd_extension_a", "103"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ChangeMemberExtensionByDevice(ctx, party.ID, "rrd_extension_a", "102"); !errors.Is(err, ErrExtensionTaken) {
+		t.Fatalf("occupied extension error = %v", err)
+	}
+
+	routing, err := s.RoutingDevices(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extensions := make(map[string]string, len(routing))
+	for _, device := range routing {
+		extensions[device.SIPUsername] = device.Extension
+	}
+	if extensions["rrd_extension_a"] != "103" || extensions["rrd_extension_b"] != "102" || extensions["rrd_extension_other"] != "103" {
+		t.Fatalf("unexpected party-scoped extensions: %#v", extensions)
+	}
+
+	if err := s.RevokeDevice(ctx, party.ID, host.ID, "dev_extension_a", now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ChangeMemberExtensionByDevice(ctx, party.ID, "rrd_extension_a", "104"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoked endpoint error = %v", err)
+	}
+}
+
 func TestHostCanRevokeAndReconnectDevice(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(":memory:")

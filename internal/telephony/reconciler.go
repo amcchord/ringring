@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/amcchord/ringring/internal/model"
 )
@@ -27,12 +28,15 @@ type Reconciler struct {
 	Cipher    SecretDecryptor
 	ConfigDir string
 	Reloader  Reloader
+	mu        sync.Mutex
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context) error {
 	if r == nil || r.ConfigDir == "" {
 		return nil
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	devices, err := r.Source.RoutingDevices(ctx)
 	if err != nil {
 		return err

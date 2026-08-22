@@ -104,8 +104,8 @@ h1 em, h2 em { color: var(--coral); font-style: normal; }
 .kicker.light { color: var(--yellow); }.playground-section p { max-width: 520px; color: #ddd6ff; font-size: 1.1rem; }
 .number-pad { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .number-pad div { min-height: 140px; padding: 22px; display: flex; flex-direction: column; justify-content: space-between; border: 2px solid var(--ink); border-radius: 22px; box-shadow: 5px 5px 0 var(--ink); }
-.number-pad div:nth-child(1) { color: var(--ink); background: var(--yellow); }.number-pad div:nth-child(2) { color: var(--ink); background: var(--mint); }.number-pad div:nth-child(3) { color: var(--ink); background: var(--pink); }.number-pad div:nth-child(4) { color: var(--ink); background: var(--blue); }.number-pad div:nth-child(5) { color: var(--ink); background: var(--coral); }
-.number-pad .number-pad-test { min-height: 112px; grid-column: 1 / -1; }
+.number-pad div:nth-child(1) { color: var(--ink); background: var(--yellow); }.number-pad div:nth-child(2) { color: var(--ink); background: var(--mint); }.number-pad div:nth-child(3) { color: var(--ink); background: var(--pink); }.number-pad div:nth-child(4) { color: var(--ink); background: var(--blue); }.number-pad div:nth-child(5) { color: var(--ink); background: var(--coral); }.number-pad div:nth-child(6) { color: var(--ink); background: var(--yellow); }
+.number-pad .number-pad-test, .number-pad .number-pad-choose { min-height: 112px; grid-column: 1 / -1; }
 .number-pad strong { font-size: 2.7rem; letter-spacing: -.07em; }.number-pad span { font-weight: 800; }
 
 .trust-grid { display: grid; grid-template-columns: .9fr 1.1fr; gap: 90px; }
@@ -229,6 +229,7 @@ input:focus { border-color: var(--purple); box-shadow: 0 0 0 4px rgba(108,76,255
 .setup-card { margin: 40px 0 24px; overflow: hidden; text-align: left; background: var(--white); border: 2px solid var(--ink); border-radius: var(--radius); box-shadow: 8px 8px 0 var(--ink); }.setup-card div { min-height: 74px; padding: 16px 22px; display: flex; align-items: center; justify-content: space-between; gap: 30px; border-bottom: 1.5px solid var(--line); }.setup-card div:last-child { border-bottom: 0; }.setup-card span { color: var(--muted); font-size: .85rem; }.setup-card strong { font-family: ui-monospace, monospace; overflow-wrap: anywhere; text-align: right; }.setup-card .secret-value { background: var(--yellow); }.warning-card { padding: 18px; background: var(--pink); border: 2px solid var(--ink); border-radius: 16px; }.warning-card p { margin: 5px 0 0; }
 .phone-test-card { margin-top: 22px; padding: 18px; display: grid; grid-template-columns: 58px 1fr; gap: 16px; align-items: start; color: var(--ink); background: var(--mint); border: 2px solid var(--ink); border-radius: 16px; text-align: left; }
 .phone-test-card .service-number { min-width: 54px; min-height: 38px; font-size: 1rem; }.phone-test-card p { margin: 5px 0 0; color: var(--muted); line-height: 1.5; }
+.extension-pick-card { background: var(--yellow); }
 .setup-guides { margin-top: 72px; text-align: left; }
 .setup-guide-heading { max-width: 640px; margin-bottom: 26px; }
 .setup-guide-heading h2 { margin: 10px 0 12px; font-size: clamp(2.5rem, 5vw, 4rem); }

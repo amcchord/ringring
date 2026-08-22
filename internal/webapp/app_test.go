@@ -284,7 +284,7 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 		"csrf": {joinCSRF}, "display_name": {"Blue phone"}, "extension": {"101"}, "device_label": {"ATA"},
 	})
 	setupBody := readBody(t, setup)
-	if setup.StatusCode != http.StatusOK || !strings.Contains(setupBody, "You are extension 101") || !strings.Contains(setupBody, "sip.example.test") || !strings.Contains(setupBody, "Scan it with <em>Linphone.</em>") || !strings.Contains(setupBody, "data:image/png;base64,") || !strings.Contains(setupBody, "href=\"sip-linphone:?linphone-fetch-config=http%3A%2F%2F") || strings.Contains(setupBody, "#ZgotmplZ") || !strings.Contains(setupBody, "Use Linphone’s scanner—not the regular Camera app") || !strings.Contains(setupBody, "Test both directions") || !strings.Contains(setupBody, "dial <strong>*10</strong>") {
+	if setup.StatusCode != http.StatusOK || !strings.Contains(setupBody, "You are extension 101") || !strings.Contains(setupBody, "sip.example.test") || !strings.Contains(setupBody, "Scan it with <em>Linphone.</em>") || !strings.Contains(setupBody, "data:image/png;base64,") || !strings.Contains(setupBody, "href=\"sip-linphone:?linphone-fetch-config=http%3A%2F%2F") || strings.Contains(setupBody, "#ZgotmplZ") || !strings.Contains(setupBody, "Use Linphone’s scanner—not the regular Camera app") || !strings.Contains(setupBody, "Test both directions") || !strings.Contains(setupBody, "dial <strong>*10</strong>") || !strings.Contains(setupBody, "Pick a different extension by phone") || !strings.Contains(setupBody, "Dial <strong>*15</strong>") || !strings.Contains(setupBody, "press <strong>1</strong> to save") {
 		t.Fatalf("setup response was not successful: status=%d", setup.StatusCode)
 	}
 	oldUsername := firstMatch(t, setupBody, `(rrd_[A-Za-z0-9_-]+)`)
@@ -340,8 +340,8 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 
 	hostParty := get(t, client, server.URL+"/parties/"+partyID)
 	hostPartyBody := readBody(t, hostParty)
-	if !strings.Contains(hostPartyBody, "Phone echo test") || !strings.Contains(hostPartyBody, "Always ready") {
-		t.Fatal("party page omitted the always-available echo test")
+	if !strings.Contains(hostPartyBody, "Phone echo test") || !strings.Contains(hostPartyBody, "Always ready") || !strings.Contains(hostPartyBody, "Pick an extension") || !strings.Contains(hostPartyBody, "*15") || !strings.Contains(hostPartyBody, "authenticated phone") {
+		t.Fatal("party page omitted an always-available phone utility")
 	}
 	if !strings.Contains(hostPartyBody, "status unavailable") || !strings.Contains(hostPartyBody, "Live phone status is temporarily unavailable") {
 		t.Fatal("party page did not fail safely when live presence was unconfigured")

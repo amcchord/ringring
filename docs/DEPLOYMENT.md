@@ -174,3 +174,7 @@ Run `make backup` before schema-changing upgrades. Generated Asterisk files can 
 ### `*14` upgrade and rollback
 
 The `*14` release adds `party_services.ai_enabled` with a forward-only startup migration. Take the app-state backup while the app is stopped, then restart the old version before beginning the normal update. The column defaults to disabled and older RingRing builds ignore it, so rolling the app image and checkout back leaves the migrated database usable; the four `AI_*` environment variables are also ignored by older builds. Keep the database backup until the upgraded app, private port `4574`, and generated Asterisk dialplan have all been verified. Do not publish port `4574` during either upgrade or rollback.
+
+### `*15` upgrade and rollback
+
+The voice extension chooser adds no schema, secret, environment variable, public port, or external service. Upgrading the app regenerates each party dialplan with `*15`; the private FastAGI listener already used by weather handles the interaction. Rollback regenerates the dialplan without `*15`. Any extension a member already selected remains an ordinary compatible `members.extension` value, while its SIP username and encrypted password remain unchanged.

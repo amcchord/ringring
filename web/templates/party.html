@@ -33,6 +33,10 @@
         <span class="service-number">*10</span>
         <span><strong>Phone echo test</strong><small>Always ready. Speak after the beep and hear your voice come back; press # or hang up to finish.</small></span>
       </div>
+      <div class="always-line">
+        <span class="service-number">*15</span>
+        <span><strong>Pick an extension</strong><small>Always ready. The authenticated phone enters a new 2–5 digit number, hears it back, and presses 1 to save.</small></span>
+      </div>
       {{$voiceReady := eq .Party.OpenAIStatus "ready"}}
       <form class="service-form" method="post" action="/parties/{{.Party.ID}}/services">
         <input type="hidden" name="csrf" value="{{.CSRF}}">

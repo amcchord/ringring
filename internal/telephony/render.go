@@ -102,6 +102,11 @@ func Render(devices []DialDevice, services []model.RoutingServices) (Configurati
 		dialplan.WriteString(" same => n,Echo()\n")
 		dialplan.WriteString(" same => n,Playback(demo-echodone)\n")
 		dialplan.WriteString(" same => n,Hangup()\n")
+		dialplan.WriteString("exten => *15,1,Answer()\n")
+		dialplan.WriteString(" same => n,Wait(1)\n")
+		dialplan.WriteString(" same => n,Set(AGIEXITONHANGUP=yes)\n")
+		fmt.Fprintf(&dialplan, " same => n,AGI(agi://app:4573/choose-extension,%s,${CHANNEL(endpoint)})\n", partyIDs[contextName])
+		dialplan.WriteString(" same => n,Hangup()\n")
 		service := serviceByParty[partyIDs[contextName]]
 		if service.TimeEnabled {
 			dialplan.WriteString("exten => *11,1,Answer()\n")
