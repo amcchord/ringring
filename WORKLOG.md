@@ -2,6 +2,40 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Suggested safe extensions and forgiving invitation forms
+
+### Shipped
+
+- Made one-time invitation pages prefill the party's first available extension beginning at `101`. The page tells the family they can keep the suggestion or choose another number, without exposing any existing member name or number.
+- Kept the phone-book name and optional device label on validation errors, highlighted only the affected fields for assistive technology, and replaced an occupied or reserved extension with a fresh suggestion. Oversized forms now fail before invitation processing and do not consume the invite.
+- Centralized extension rules across invitation claims, authenticated `*15` voice changes, storage, and Asterisk rendering. RingRing will not assign the familiar public emergency/crisis numbers `000`, `111`, `112`, `911`, `988`, or `999`; this does not add PSTN or emergency calling.
+- Added an idempotent, schema-free startup migration that moves any legacy reserved value to the first unoccupied ordinary extension within the same party. Documented upgrade and rollback behavior plus the official public-safety references behind the deliberately small reserved set.
+
+### Decisions
+
+- Treat a suggested extension as a convenience, not a reservation. The database transaction and per-party unique constraint remain authoritative when two invitees submit concurrently; the collision page simply offers the next current suggestion.
+- Query only extension strings after an invitation has been validated and return only one suggestion. Do not expose a directory or reveal which numbers are occupied on the public join page.
+- Reserve familiar emergency and crisis numbers even though RingRing cannot route to the public telephone network. A family member must never appear to answer a number a child may associate with public help.
+
+### Verification
+
+- Focused extension, store, telephony, voice, web, and maintenance tests cover formatting, every reserved number, safe suggestion gaps, invitation non-consumption, preserved fields, occupied-number collisions, authenticated voice rejection, renderer rejection, and idempotent per-party legacy migration.
+- A disposable 390×844 browser walkthrough found no horizontal overflow, a 54px primary target, and a prefilled `101` with the public-safety explanation. The disposable app/database were stopped, its directory was moved to Trash, and the temporary tab and viewport override were removed; no production invitation was opened or used.
+- `make check` passes the security contracts, formatting, shell/operator fixtures, vet, and complete race-enabled suite. `make security` reports no reachable vulnerability and retains only the previously accepted non-reachable module advisory. GitHub CI run `32581919969` and Security run `32581919970` passed exact feature commit `fafc282241ec028c4e1d4dbdeeaf48629f367d7c`.
+- From an isolated checkout of that exact commit on the reference host, `make sip-smoke`, `make nat-smoke`, and `make linphone-smoke` passed TLS 1.2 and UDP registration, mixed-transport party calling, `*10`, authenticated `*15`, bidirectional PCMU/RTP through two household NATs, one-time Linphone provisioning, and official-engine two-way audio. The candidate checkout, containers, networks, generated identities, and state were removed.
+
+### Production
+
+- The guarded fast-forward used verified pre-upgrade backup `/root/ringring-backups/ringring-20260822T153509Z-ef5093e.tar.gz` and post-upgrade backup `/root/ringring-backups/ringring-20260822T153650Z-fafc282.tar.gz`. Both passed checksums, safe extraction, SQLite integrity/foreign keys, credential decryption, isolated readiness, and telephony-regeneration drills.
+- Production is clean at exact runtime commit `fafc282241ec028c4e1d4dbdeeaf48629f367d7c`. Doctor passes, both SIP jails remain active, public splash/signup/readiness return `200`, public `/metrics` returns `404`, and there are zero contacts, channels, or calls. The app, Asterisk, and Caddy container identities are `1448bd1d594462066eae5f278203384bc4a8f51eb3a616eef4e1e4e06bf0d6ed`, `63539d12e7e9c0ad62f4861ef3abaaaf1688bc92d57e99f13478d1e553af4f9f`, and `5980f6b45b199a098a82e2f4ab53c66d92f5282877d25f39a0d9a4206be5d59a`.
+- The sealed aggregate remains one user, one party, one invitation, one session, eight recovery codes, one decryptable party key, and zero members, devices, provisioning tokens, readiness records, or device secrets. Both root environment hashes and both empty generated-routing hashes are unchanged. The memorable family access phrase remains configured outside Git without its value being printed; no family, OpenAI, SIP credential, invitation, session, or route record was submitted or changed.
+
+### Remaining
+
+- Complete the physical ATA, desk-phone, and mobile softphone matrix across two real networks, including incoming/outgoing audio, certificate behavior, background ringing, and Wi-Fi/cellular transitions.
+- Complete the external child-safety review and confirm OpenAI Zero Data Retention before enabling AI for callers under 13.
+- Copy verified backups to encrypted off-host storage with a retention schedule, and design the optional PostgreSQL/multi-node migration path.
+
 ## 2026-08-22 — Executable threat model and tenant-boundary hardening
 
 ### Shipped
