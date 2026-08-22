@@ -23,6 +23,11 @@ This is the durable, chronological project record. Add new entries at the top. C
 - The existing `make sip-smoke` harness still passes two authenticated SIPp registrations, an extension call, the `*10` echo route, and bidirectional PCMU after the new helper was kept separate from its network-disabled renderer.
 - `make check`, Python bytecode compilation, POSIX shell syntax checks, and `git diff --check` pass locally.
 
+### Production
+
+- GitHub Actions passed feature commit `67444f5`. Fast-forwarded the production checkout to that commit without rebuilding or recreating the app, Asterisk, or Caddy; all three container identities and both root-readable environment files remained exact.
+- Public readiness, private aggregate-only AMI verification, and the SIP Fail2Ban jail pass after the checkout update. No production account, party, invitation, device, credential, OpenAI project, database, or running service changed.
+
 ### Remaining
 
 - Scan a production setup QR in the current Linphone mobile app and verify its user-visible import flow, foreground ringing, push/background behavior, and Wi-Fi/cellular transitions.
