@@ -2,6 +2,39 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Copy-ready real-phone setup handoff
+
+### Shipped
+
+- Turned the one-time manual phone card into a copy-ready setup sheet. A person can copy the registrar, generated SIP username, one-time password, extension, or transport individually, or copy all six values as a plain private setup note for the person configuring the phone.
+- Added a visible warning that the complete note contains the password and should be pasted only into the device or a private message that is removed after setup. Copy actions are always user-initiated, announce their result through an ARIA live status, and leave the original selectable values usable when browser copying is unavailable.
+- Added a field-name translator for the inconsistent labels used by ATAs, desk phones, and softphones: registrar/proxy, SIP user/authentication ID, display number, realm/domain, and outbound proxy. Expanded the device guides with generated-username versus extension guidance, NAT keep-alive/rport, no router port forwarding, registration, and `*10` acceptance steps.
+- Kept the core setup path script-free. The optional helper is one embedded local asset whose exact SHA-256 is required by both Subresource Integrity and Content Security Policy; inline JavaScript and arbitrary same-origin scripts remain blocked.
+
+### Decisions
+
+- Prefer a vendor-neutral field translator over claiming untested automatic provisioning for particular ATA models. RingRing can make the common setup values unambiguous now while keeping each physical model in the still-open compatibility matrix until real hardware proves it.
+- Permit only the exact reviewed copy helper rather than broadly changing CSP to `script-src 'self'`. An executable contract recomputes the asset digest and rejects network, browser-storage, cookie, navigation, and logging primitives in the helper.
+- Do not send a copy event or credential back to RingRing. The helper reads only the already visible one-time values after a tap and writes only to the browser/operating-system clipboard; clipboard lifetime is outside RingRing's control and is stated in the security documentation.
+
+### Verification
+
+- Focused web and security-contract tests cover the rendered controls, distinct accessible labels, the ARIA status, private-message warning, no-script fallback, field translator, exact SRI/CSP digest agreement, and absence of the bounded transmission/persistence primitives. `make check` passes formatting, operator/certificate fixtures, vet, and the complete race-enabled suite; `make security` reports no reachable vulnerability and only the previously accepted non-reachable module advisory.
+- A disposable browser host, party, member, and rotated setup card exercised individual and complete-note copy actions. At 390×844 and 1280×900 the page had no horizontal overflow, all eight enhanced controls were at least 44px tall, and the credential card plus field translator fit the one-column phone layout. The helper reported successful copy without reading the clipboard back. The tab and viewport override were removed, the app and four listeners stopped, and the disposable database was moved to Trash.
+- From an isolated checkout of exact candidate `a44413529acc69a7b92850413822334f213625d6` on the reference host, `make sip-smoke`, `make nat-smoke`, and `make linphone-smoke` passed TLS 1.2 and UDP registration, mixed-transport calling, `*10`, authenticated `*15`, two-household NAT media, one-time Linphone provisioning, and official-engine two-way audio. GitHub CI run `32583330840` and Security run `32583330817` passed the same candidate. The candidate checkout, containers, networks, generated identities, and state were removed.
+
+### Production
+
+- The guarded fast-forward used verified pre-upgrade backup `/root/ringring-backups/ringring-20260822T160220Z-fafc282.tar.gz` and post-upgrade backup `/root/ringring-backups/ringring-20260822T160402Z-a444135.tar.gz`. Both passed checksums, safe extraction, SQLite integrity/foreign keys, credential decryption, isolated readiness, and telephony-regeneration drills.
+- Production is clean at exact runtime commit `a44413529acc69a7b92850413822334f213625d6`. Doctor passes; splash, signup, readiness, and the new static helper return `200`; public `/metrics` returns `404`; and there are zero contacts, channels, or calls. The public helper body matches the pinned digest, and both the SRI tag and restrictive CSP carry that same digest. The app, Asterisk, and Caddy container identities are `ed10bd2420f20f15e8cef5e26d24ba799d63caaef4bb89124c429d8367dfc36c`, `8c4a9ee2467e8393db0e7eacccc0bc98055920258655510ba10e8646f820b273`, and `db58ae76f0cbc631b736cc59e017e21e66604425c725062f516f1fb3d9a849c6`.
+- The sealed aggregate remains one user, one party, one invitation, one session, eight recovery codes, one decryptable party key, and zero members, devices, provisioning tokens, readiness records, or device secrets. Both root environment hashes and both empty generated-routing hashes are unchanged. The memorable family access phrase remains configured outside Git without its value being printed; no production setup card, family record, OpenAI control, SIP credential, invitation, session, or route was opened or changed.
+
+### Remaining
+
+- Complete the physical ATA, desk-phone, and mobile softphone matrix across two real networks, including incoming/outgoing audio, certificate behavior, background ringing, and Wi-Fi/cellular transitions.
+- Complete the external child-safety review and confirm OpenAI Zero Data Retention before enabling AI for callers under 13.
+- Copy verified backups to encrypted off-host storage with a retention schedule, and design the optional PostgreSQL/multi-node migration path.
+
 ## 2026-08-22 — Suggested safe extensions and forgiving invitation forms
 
 ### Shipped
