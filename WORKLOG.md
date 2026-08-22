@@ -19,6 +19,14 @@ This is the durable, chronological project record. Add new entries at the top. C
 
 - A focused regression proves a matching opaque invitation form is accepted, while the same request with a missing/mismatched token and an arbitrary cross-site origin is rejected. The existing production test continues to prove the host/admin origin policy rejects `null`.
 - `make check`, `make security`, and `make admin-test` pass, including formatting, shell/operator fixtures, vet, the complete race-enabled suite, executable boundary contracts, and the reachable-vulnerability scan.
+- GitHub CI run `32596112467` and Security run `32596112530` passed exact candidate `b569daa692a1b1861266e3787a0f58c3673803d6`.
+
+### Production
+
+- Masked live logs proved both failed submissions had a present cookie and hidden token but failed only the origin check. The configured base URL and request host were both canonical `https://ringring.live`; the bearer token and submitted member values were never logged or replayed.
+- The guarded fast-forward created and restore-drilled checksummed pre/post archives `ringring-20260822T201530Z-fb8d468.tar.gz` and `ringring-20260822T201712Z-b569daa.tar.gz`. Production runs exact candidate `b569daa692a1b1861266e3787a0f58c3673803d6`.
+- A live fake-token probe with a matching cookie and opaque origin passed the CSRF boundary and reached the nonexistent-invitation response. The same fake request with an arbitrary cross-site origin or mismatched token remained `403`; the real invitation was never submitted.
+- After clearing only those intentional probe warnings by recreating the stateless app container, doctor and public readiness pass. The sealed aggregate remains one user, one party, one invitation, one session, eight recovery codes, one decryptable party key, and zero members, devices, provisioning tokens, readiness records, contacts, channels, or calls.
 
 ### Remaining
 
