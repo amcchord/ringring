@@ -20,12 +20,20 @@ This is the durable, chronological project record. Add new entries at the top. C
 - Focused web, accessibility, QR, and executable security-contract tests cover the local data URI, no-store first reveal, disappearance on the next party view, privacy warning, associated accessible description, and absence of network QR-provider primitives.
 - A disposable browser host created an invitation and opened its card at 1280×900 and 390×844. The PNG loaded at a crisp 270×270 intrinsic size and a 202px rendered square, the link field remained 52px tall, the mobile card had no horizontal overflow, and the code plus privacy warning stayed legible. Refresh removed both link and image while the saved disposable link still opened the join form. The viewport/tab/listeners were removed and the database was moved to Trash.
 - `make check`, `make security`, and `make admin-test` pass locally, including formatting, shell/operator fixtures, vet, the complete race-enabled suite, and the reachable-vulnerability scan. The accepted module advisory remains unreachable from RingRing.
+- From an isolated checkout of exact candidate `b991d834953f80c366a4bffb5121baca6bc2a593` created under `umask 077`, `make sip-smoke`, `make nat-smoke`, and `make linphone-smoke` passed same-extension fan-out, TLS 1.2 and UDP registration, incoming ring testing, mixed-transport calling, `*10`, authenticated `*15`, two-household NAT media, one-use provisioning, and official-engine two-way audio. GitHub CI run `32589241085` and Security run `32589241093` passed the same candidate; smoke containers were gone and the isolated checkout was moved to root's Trash.
+
+### Production
+
+- The guarded fast-forward used verified pre-upgrade backup `/root/ringring-backups/ringring-20260822T175939Z-4cf2fb1.tar.gz` and post-upgrade backup `/root/ringring-backups/ringring-20260822T180123Z-b991d83.tar.gz`. Both passed checksums, safe extraction, SQLite integrity/foreign keys, credential decryption, isolated readiness, and telephony-regeneration drills.
+- Production is clean at exact runtime commit `b991d834953f80c366a4bffb5121baca6bc2a593`. Doctor passes; splash, signup, and readiness return `200`; public `/metrics` returns `404`; `pbx_config` is running; the fixed incoming-check context has no dialing primitive; and the actual AMI account remains ACL-bound with only `system,command,originate` write access. There are zero SIP contacts, channels, calls, or CDR files.
+- The sealed aggregate remains one user, one party, one invitation, one session, eight recovery codes, one decryptable party key, and zero members, devices, provisioning tokens, readiness records, or device secrets. The authenticated party page and outstanding invitation were never requested, so the real one-view reveal was not consumed or replaced. The app/Asterisk environment hashes remain `b8b0380b49d0351023b3ab083ce61862f5dc753c3dedd48a99d5387f97ac16e1` and `a26e7c0b918957a56e5f78dbabb950c1d65a1aac6e48f60b79f6e2a578d7727a`; both generated-routing hashes remain `36ca1c5d8684333af387db0fdedbf2ab9e9f2306b4334bc5d741998ac7f7b5a5`. The AI operator gate remains tested default-closed, and no family record, party key, provider setting, secret, invitation, or route changed.
+- The app, Asterisk, and Caddy container identities are `b6e24b41b3a87cc33ff73c5798a987ded07b136d57cc0c23a1b27792048e690b`, `a3b7159c2416a45519b472cfa1b1a730d783980d3a51bab760eee54e43d5489b`, and `ffa03393fc145868e885ada7ca93542137f4093a6769995926d2428d6342ed28`. The only deployment-window application warning was the expected initial AMI lookup race while Asterisk was being recreated; settled app, Caddy, and Asterisk configuration warning/error checks are zero.
 
 ### Remaining
 
-- Complete the exact-candidate SIP/NAT/Linphone tests, guarded production upgrade, and zero-mutation production audit without opening the real outstanding family invitation.
 - Complete the physical ATA, desk-phone, and mobile softphone matrix across two real networks.
 - Obtain the external child-safety review and OpenAI Zero Data Retention eligibility before opening the AI conversation gate.
+- Copy verified backups to encrypted off-host storage with a retention schedule, and design the optional PostgreSQL/multi-node migration path.
 
 ## 2026-08-22 — One extension, several independent phones
 
