@@ -56,7 +56,7 @@ On startup, the app regenerates all telephony configuration from the database.
 
 ## Host authentication
 
-Native host accounts use a case-insensitive username and an Argon2id password hash with a unique salt. Production signup additionally requires a high-entropy, deployment-level family access code so a public splash page cannot be used to create paid OpenAI resources anonymously. Eight random recovery codes are shown once, stored only as hashes, and rotated together after a successful password reset. Recovery invalidates every existing session.
+Native host accounts use a case-insensitive username and an Argon2id password hash with a unique salt. Production signup additionally requires a deployment-level family access code, shared out of band with trusted hosts, so a public splash page cannot be used to create paid OpenAI resources anonymously. Eight random recovery codes are shown once, stored only as hashes, and rotated together after a successful password reset. Recovery invalidates every existing session.
 
 Google OpenID Connect remains an optional integration, not a prerequisite for operating or joining RingRing.
 

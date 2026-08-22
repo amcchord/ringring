@@ -36,8 +36,8 @@ HTTP_ADDR=:8080
 DATABASE_PATH=/data/ringring.db
 RINGRING_MASTER_KEY=<base64 32-byte key>
 SESSION_SECRET=<base64 32-byte key>
-# High-entropy code shared out of band with trusted party hosts.
-HOST_SIGNUP_CODE=<random family access code>
+# Deployment-chosen code shared out of band with trusted party hosts.
+HOST_SIGNUP_CODE=<family access code>
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 OPENAI_ADMIN_KEY=<organization admin key>
@@ -61,7 +61,7 @@ ASTERISK_AMI_SECRET=<same AMI secret>
 TZ=America/New_York
 ```
 
-Generate application keys with `openssl rand -base64 32`, the AMI secret with `openssl rand -hex 32`, and the family access code with `openssl rand -hex 16`. Do not place any of them inside the repository.
+Generate application keys with `openssl rand -base64 32` and the AMI secret with `openssl rand -hex 32`. Choose a family access code that is easy to share with trusted hosts; a multi-word phrase is safer than one common word. Do not place any of these values inside the repository.
 
 Native username/password login is always available. In production, new-account signup is open only while `HOST_SIGNUP_CODE` is nonempty; trusted hosts enter that shared code once during account creation. No email address or confirmation is required. A host must save the one-time recovery codes because the server cannot email a reset link.
 
