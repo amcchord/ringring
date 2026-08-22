@@ -41,6 +41,7 @@ if test "$1" = compose; then
       case "$*" in
         *verify-state*) printf '{"status":"ok","users":0}\n' ;;
         *verify-ami*) printf '{"status":"ok","contact_count":0}\n' ;;
+        *"pjsip show transport transport-tls"*) printf 'Transport: transport-tls TLS 0.0.0.0:5061\n' ;;
       esac
       exit 0
       ;;
@@ -75,6 +76,16 @@ write_fixture_scripts() {
 set -eu
 printf 'firewall %s\n' "$*" >>"$RINGRING_TEST_LOG"
 EOF
+  cat >"$checkout/scripts/test-tls-operator.sh" <<'EOF'
+#!/bin/sh
+set -eu
+printf 'tls %s\n' "$*" >>"$RINGRING_TEST_LOG"
+EOF
+  cat >"$checkout/scripts/test-tls-probe.sh" <<'EOF'
+#!/bin/sh
+set -eu
+printf 'tls-probe %s\n' "$*" >>"$RINGRING_TEST_LOG"
+EOF
   cat >"$checkout/scripts/backup.sh" <<'EOF'
 #!/bin/sh
 set -eu
@@ -95,7 +106,8 @@ test -f "$1.sha256"
 printf 'restore %s\n' "$1" >>"$RINGRING_TEST_LOG"
 printf 'Restore drill passed.\n'
 EOF
-  chmod 0700 "$checkout/scripts/test-firewall.sh" "$checkout/scripts/backup.sh" "$checkout/scripts/restore-drill.sh"
+  chmod 0700 "$checkout/scripts/test-firewall.sh" "$checkout/scripts/test-tls-operator.sh" \
+    "$checkout/scripts/test-tls-probe.sh" "$checkout/scripts/backup.sh" "$checkout/scripts/restore-drill.sh"
 }
 
 new_fixture() {
@@ -138,6 +150,9 @@ run_ctl() {
     RINGRINGCTL_TEST_CONFIG_DIR="$config" \
     RINGRINGCTL_TEST_BACKUP_ROOT="$backups" \
     RINGRINGCTL_TEST_FIREWALL_INSTALLER="$checkout/scripts/test-firewall.sh" \
+    RINGRINGCTL_TEST_TLS_INSTALLER="$checkout/scripts/test-tls-operator.sh" \
+    RINGRINGCTL_TEST_TLS_SYNCHRONIZER="$checkout/scripts/test-tls-operator.sh" \
+    RINGRINGCTL_TEST_TLS_PROBE="$checkout/scripts/test-tls-probe.sh" \
     RINGRING_TEST_LOG="$log" \
     "$checkout/ringringctl" "$@"
 }
@@ -176,12 +191,16 @@ assert_successful_install() {
   for path in "$checkout/deploy/state/app" "$checkout/deploy/state/asterisk" "$checkout/deploy/state/log/asterisk"; do
     test -d "$path" || fail "state directory is missing: $path"
   done
+  test -d "$config/tls" || fail 'root-only SIP TLS directory is missing'
   grep -q '^docker compose build$' "$log" || fail 'install did not build the stack'
   grep -q '^docker compose up -d --remove-orphans$' "$log" || fail 'install did not start the stack'
   grep -q '^firewall install ' "$log" || fail 'install did not configure the SIP firewall'
   firewall_line=$(grep -n '^firewall install ' "$log" | cut -d: -f1)
   up_line=$(grep -n '^docker compose up -d --remove-orphans$' "$log" | cut -d: -f1)
   test "$firewall_line" -lt "$up_line" || fail 'install exposed SIP before configuring the firewall'
+  grep -q '^tls install ' "$log" || fail 'install did not install automatic SIP TLS synchronization'
+  grep -q '^tls sync .* required$' "$log" || fail 'install did not require initial trusted SIP TLS synchronization'
+  grep -q '^tls-probe phone.example.test$' "$log" || fail 'install did not verify the public SIP TLS endpoint'
   grep -q '^curl .*https://phone.example.test/readyz' "$log" || fail 'install did not verify public readiness'
   test -z "$(git -C "$checkout" status --porcelain)" || fail 'install dirtied the checkout'
   doctor_output=$(run_ctl doctor 2>&1) || fail "doctor rejected the installed fixture: $doctor_output"
@@ -240,6 +259,9 @@ assert_install_resume() {
     RINGRINGCTL_TEST_CONFIG_DIR="$config" \
     RINGRINGCTL_TEST_BACKUP_ROOT="$backups" \
     RINGRINGCTL_TEST_FIREWALL_INSTALLER="$checkout/scripts/test-firewall.sh" \
+    RINGRINGCTL_TEST_TLS_INSTALLER="$checkout/scripts/test-tls-operator.sh" \
+    RINGRINGCTL_TEST_TLS_SYNCHRONIZER="$checkout/scripts/test-tls-operator.sh" \
+    RINGRINGCTL_TEST_TLS_PROBE="$checkout/scripts/test-tls-probe.sh" \
     RINGRING_TEST_LOG="$log" \
     "$checkout/ringringctl" install --answers "$answers" --yes >/dev/null 2>&1; then
     fail 'the forced install build failure unexpectedly succeeded'
@@ -253,6 +275,9 @@ assert_install_resume() {
     RINGRINGCTL_TEST_CONFIG_DIR="$config" \
     RINGRINGCTL_TEST_BACKUP_ROOT="$backups" \
     RINGRINGCTL_TEST_FIREWALL_INSTALLER="$checkout/scripts/test-firewall.sh" \
+    RINGRINGCTL_TEST_TLS_INSTALLER="$checkout/scripts/test-tls-operator.sh" \
+    RINGRINGCTL_TEST_TLS_SYNCHRONIZER="$checkout/scripts/test-tls-operator.sh" \
+    RINGRINGCTL_TEST_TLS_PROBE="$checkout/scripts/test-tls-probe.sh" \
     RINGRING_TEST_LOG="$log" \
     "$checkout/ringringctl" install --yes 2>&1)
   printf '%s\n' "$output" | grep -q 'Resuming the pending RingRing install' || fail 'install did not announce its resume'
@@ -286,12 +311,14 @@ prepare_upgrade() {
 
 assert_successful_upgrade() {
   prepare_upgrade upgrade-success
-  output=$(run_ctl upgrade --yes --skip-public-check 2>&1)
+  output=$(run_ctl upgrade --yes 2>&1)
   test "$(git -C "$checkout" rev-parse HEAD)" = "$target_commit" || fail 'upgrade did not reach the target commit'
   test ! -e "$config/upgrade.pending" || fail 'upgrade marker was not removed'
   test "$(grep -c '^backup ' "$log")" -eq 2 || fail 'upgrade did not create exactly two backups'
   test "$(grep -c '^restore ' "$log")" -eq 2 || fail 'upgrade did not drill exactly two backups'
   grep -q '^firewall refresh ' "$log" || fail 'upgrade did not refresh the checked-in SIP firewall policy'
+  grep -q '^tls install ' "$log" || fail 'upgrade did not refresh automatic SIP TLS synchronization'
+  grep -q '^tls sync .* required$' "$log" || fail 'upgrade did not synchronize the trusted SIP TLS certificate'
   printf '%s\n' "$output" | grep -q "Upgrade complete at $target_commit" || fail 'upgrade success message is missing'
   test -z "$(git -C "$checkout" status --porcelain)" || fail 'upgrade dirtied the checkout'
 }
@@ -333,6 +360,9 @@ assert_upgrade_resume() {
     RINGRINGCTL_TEST_CONFIG_DIR="$config" \
     RINGRINGCTL_TEST_BACKUP_ROOT="$backups" \
     RINGRINGCTL_TEST_FIREWALL_INSTALLER="$checkout/scripts/test-firewall.sh" \
+    RINGRINGCTL_TEST_TLS_INSTALLER="$checkout/scripts/test-tls-operator.sh" \
+    RINGRINGCTL_TEST_TLS_SYNCHRONIZER="$checkout/scripts/test-tls-operator.sh" \
+    RINGRINGCTL_TEST_TLS_PROBE="$checkout/scripts/test-tls-probe.sh" \
     RINGRING_TEST_LOG="$log" \
     "$checkout/ringringctl" upgrade --yes --skip-public-check >/dev/null 2>&1; then
     fail 'the forced build failure unexpectedly succeeded'
@@ -348,6 +378,9 @@ assert_upgrade_resume() {
     RINGRINGCTL_TEST_CONFIG_DIR="$config" \
     RINGRINGCTL_TEST_BACKUP_ROOT="$backups" \
     RINGRINGCTL_TEST_FIREWALL_INSTALLER="$checkout/scripts/test-firewall.sh" \
+    RINGRINGCTL_TEST_TLS_INSTALLER="$checkout/scripts/test-tls-operator.sh" \
+    RINGRINGCTL_TEST_TLS_SYNCHRONIZER="$checkout/scripts/test-tls-operator.sh" \
+    RINGRINGCTL_TEST_TLS_PROBE="$checkout/scripts/test-tls-probe.sh" \
     RINGRING_TEST_LOG="$log" \
     "$checkout/ringringctl" upgrade --yes --skip-public-check 2>&1)
   printf '%s\n' "$output" | grep -q 'Resuming the exact pending upgrade' || fail 'upgrade did not announce its exact resume'

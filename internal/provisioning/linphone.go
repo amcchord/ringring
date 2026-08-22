@@ -59,7 +59,7 @@ func LinphoneXML(input LinphoneConfig) ([]byte, error) {
 		return nil, errors.New("invalid extension")
 	}
 
-	proxy := "<sip:" + host + ":5060;transport=udp>"
+	proxy := "<sip:" + host + ":5061;transport=tls>"
 	identity := fmt.Sprintf(`"RingRing %s" <sip:%s@%s>`, input.Extension, input.Username, host)
 	document := linphoneDocument{
 		XMLNS: linphoneNamespace,

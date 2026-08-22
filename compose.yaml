@@ -36,8 +36,10 @@ services:
     volumes:
       - ./deploy/state/asterisk:/var/lib/ringring/asterisk:ro
       - ./deploy/state/log/asterisk:/var/log/asterisk
+      - ${RINGRING_TLS_DIR:-/etc/ringring/tls}:/run/ringring-host-tls:ro
     ports:
       - "5060:5060/udp"
+      - "5061:5061/tcp"
       - "10000-10199:10000-10199/udp"
     networks:
       ringring:

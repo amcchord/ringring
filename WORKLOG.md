@@ -2,6 +2,34 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Trusted SIP TLS and compatibility evidence
+
+### Shipped
+
+- Added Asterisk PJSIP TLS 1.2 on public `5061/tcp` while preserving UDP `5060` for older adapters. Generated Linphone accounts and the one-time setup page now prefer TLS; the page names UDP as a fallback and explicitly distinguishes encrypted SIP signaling from the current unencrypted, server-relayed RTP media.
+- Kept Caddy as the sole ACME owner. A hardened root systemd timer exports Caddy storage, safely selects only the exact deployment hostname's matching certificate/key with at least one week remaining, stages a narrow mode-`0600` copy, and asks Asterisk to reload PJSIP only when no calls are active. Initial startup can use a short self-signed fallback, but guided public verification rejects it.
+- Extended the guided installer, upgrader, and read-only doctor with TLS directory safety, occupied-port checks, timer installation, required/deferred certificate synchronization, trusted public hostname verification, and separate Fail2Ban status for TCP `5061`. Added recovery and rollback guidance plus an evidence-based compatibility matrix that keeps physical-device claims open.
+- Built SIPp 3.7.7 from its checksum-pinned official source with TLS support. The isolated call suite now holds a real TLS registration connection, verifies a disposable CA and exact DNS name, calls between TLS and UDP phones, checks PCMU media and `*10`, and completes the authenticated `*15` DTMF flow. The official Linphone engine separately enables certificate/name verification before TLS registration and its measured party call.
+
+### Decisions
+
+- Encrypt registration credentials and call setup by default for capable phones without pretending that TLS encrypts RTP. Keep UDP available until the actual family ATA/desk-phone matrix proves it can be retired.
+- Export and validate one certificate pair instead of sharing Caddy's complete storage with Asterisk or running a second ACME client. Treat certificate copies as derived, replaceable state outside the backup boundary.
+- Never interrupt an active call for certificate rotation. A reload deferral is a successful timer outcome, and the persistent timer retries later.
+
+### Verification
+
+- `make check` passes, including POSIX syntax, secret-safe guided-operation fixtures, certificate-sync fixtures, Go formatting/vet, and the complete race-enabled Go suite. Focused ShellCheck and `git diff --check` also pass.
+- On an isolated server candidate, `make sip-smoke`, `make linphone-smoke`, and `make nat-smoke` pass. Evidence covers TLS 1.2 and UDP authentication, exact certificate/name verification, mixed-transport party calling, echoed/bidirectional audio, DTMF extension selection, and two distinct stateful household NAT identities.
+- The real Caddy container's storage export passed the candidate synchronizer in test mode: it selected the exact `ringring.live` certificate, matched its private key, and preserved root-only mode without printing private material or reloading production Asterisk. `systemd-analyze verify` accepts the rendered service and timer. No live family, OpenAI, database, routing, firewall, certificate copy, or running service changed during candidate verification.
+
+### Remaining
+
+- Test TLS registration, incoming/outgoing calls, certificate renewal behavior, and two-way audio on named physical ATAs, desk phones, and mobile softphones across remote networks.
+- Verify Linphone camera import, foreground and push/background ringing, and Wi-Fi/cellular transitions on family phones.
+- Add SRTP only after a device-support and key-management design; until then, keep the unencrypted-RTP boundary prominent.
+- Complete the external child-safety/ZDR gate, privacy-preserving observability, further threat-model tests, and the optional PostgreSQL path.
+
 ## 2026-08-22 — Guided self-host installation and verified upgrades
 
 ### Shipped

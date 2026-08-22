@@ -22,6 +22,14 @@ if test "$test_mode" = 1; then
   if test -n "$firewall_installer"; then
     firewall_installer=$(realpath "$firewall_installer")
   fi
+  tls_installer=${RINGRINGCTL_TEST_TLS_INSTALLER:-}
+  tls_synchronizer=${RINGRINGCTL_TEST_TLS_SYNCHRONIZER:-}
+  tls_probe=${RINGRINGCTL_TEST_TLS_PROBE:-}
+  for test_helper in "$tls_installer" "$tls_synchronizer" "$tls_probe"; do
+    if test -n "$test_helper"; then
+      test -x "$test_helper" || { echo "TLS test helpers must be executable." >&2; exit 1; }
+    fi
+  done
 elif test "$test_mode" = 0; then
   checkout=/opt/ringring
   config_dir=/etc/ringring
@@ -30,7 +38,10 @@ elif test "$test_mode" = 0; then
   state_gid=10001
   log_uid=10002
   firewall_installer=
-  if test -n "${RINGRINGCTL_TEST_CHECKOUT:-}${RINGRINGCTL_TEST_CONFIG_DIR:-}${RINGRINGCTL_TEST_BACKUP_ROOT:-}${RINGRINGCTL_TEST_FIREWALL_INSTALLER:-}"; then
+  tls_installer=
+  tls_synchronizer=
+  tls_probe=
+  if test -n "${RINGRINGCTL_TEST_CHECKOUT:-}${RINGRINGCTL_TEST_CONFIG_DIR:-}${RINGRINGCTL_TEST_BACKUP_ROOT:-}${RINGRINGCTL_TEST_FIREWALL_INSTALLER:-}${RINGRINGCTL_TEST_TLS_INSTALLER:-}${RINGRINGCTL_TEST_TLS_SYNCHRONIZER:-}${RINGRINGCTL_TEST_TLS_PROBE:-}"; then
     echo "Test path overrides require RINGRINGCTL_TEST_MODE=1." >&2
     exit 1
   fi
@@ -332,6 +343,15 @@ ensure_security_log() {
   fi
 }
 
+ensure_tls_directory() {
+  tls_directory="$config_dir/tls"
+  test ! -L "$tls_directory" || die "The managed SIP TLS directory must not be a symlink."
+  install -d -m 0700 "$tls_directory"
+  if test "$test_mode" != 1; then
+    chown root:root "$tls_directory"
+  fi
+}
+
 write_install_configuration() {
   domain=$1
   timezone=$2
@@ -448,6 +468,22 @@ check_public_ready() {
   test "$ready" -eq 1 || die "Public HTTPS readiness failed for https://$domain/readyz. The install/upgrade marker was kept for a safe retry."
 }
 
+check_sip_tls() {
+  skip=$1
+  transport=$(docker compose exec -T asterisk asterisk -rx 'pjsip show transport transport-tls' </dev/null 2>/dev/null)
+  printf '%s\n' "$transport" | grep -q 'transport-tls' || die "Asterisk's SIP TLS transport is unavailable."
+  if test "$skip" -eq 1; then
+    echo "Skipped the public SIP TLS certificate check by request. Verify $domain:5061 after DNS is ready."
+    return
+  fi
+  if test -n "$tls_probe"; then
+    "$tls_probe" "$domain"
+  elif ! timeout 12 openssl s_client -connect "$domain:5061" -servername "$domain" \
+    -verify_hostname "$domain" -verify_return_error -tls1_2 </dev/null >/dev/null 2>&1; then
+    die "Public SIP TLS verification failed for $domain:5061. The install/upgrade marker was kept for a safe retry."
+  fi
+}
+
 verify_deployment() {
   skip_public=$1
   validate_installed_configuration
@@ -458,7 +494,9 @@ verify_deployment() {
   docker compose exec -T app ringring verify-state </dev/null
   docker compose exec -T app ringring verify-ami </dev/null
   fail2ban-client status ringring-sip >/dev/null
+  fail2ban-client status ringring-sip-tls >/dev/null
   check_public_ready "$domain" "$skip_public"
+  check_sip_tls "$skip_public"
   if docker compose logs --since 10m app 2>&1 | grep -Eq '"level":"(WARN|ERROR)"'; then
     die "The RingRing app logged a warning or error. Review docker compose logs before continuing."
   fi
@@ -475,12 +513,37 @@ run_firewall_installer() {
   fi
 }
 
+run_tls_installer() {
+  if test -n "$tls_installer"; then
+    "$tls_installer" install "$checkout"
+  else
+    "$checkout/scripts/install-sip-tls-sync.sh" "$checkout"
+  fi
+}
+
+run_tls_synchronizer() {
+  skip_public=$1
+  if test -n "$tls_synchronizer"; then
+    if test "$skip_public" -eq 1; then
+      "$tls_synchronizer" sync "$checkout" deferred
+    else
+      "$tls_synchronizer" sync "$checkout" required
+    fi
+  elif test "$skip_public" -eq 1; then
+    if ! "$checkout/scripts/sync-sip-tls.sh"; then
+      echo "Trusted SIP TLS synchronization is deferred until DNS and Caddy issuance are ready."
+    fi
+  else
+    "$checkout/scripts/sync-sip-tls.sh" --wait 180
+  fi
+}
+
 check_fresh_ports() {
   test "$test_mode" = 1 && return
   listeners=$(ss -H -lntu)
-  for port in 80 443 5060; do
+  for port in 80 443 5060 5061; do
     if printf '%s\n' "$listeners" | grep -Eq "[:.]${port}[[:space:]]"; then
-      die "Port $port is already in use. RingRing requires 80/tcp, 443/tcp+udp, and 5060/udp."
+      die "Port $port is already in use. RingRing requires 80/tcp, 443/tcp+udp, 5060/udp, and 5061/tcp."
     fi
   done
   if printf '%s\n' "$listeners" | grep -Eq '[:.](100[0-9]{2}|101[0-9]{2})[[:space:]]'; then
@@ -506,7 +569,7 @@ install_command() {
     esac
   done
 
-  for command_name in realpath git docker openssl curl awk grep sed stat install sha256sum tar; do
+  for command_name in realpath git docker openssl curl awk grep sed stat install sha256sum tar timeout; do
     require_command "$command_name"
   done
   if test "$test_mode" != 1; then
@@ -585,6 +648,7 @@ install_command() {
   fi
 
   failure_note="Install did not finish. Its root-only marker was preserved at $install_marker; fix the reported problem and run '$checkout/ringringctl install --yes' to resume without replacing secrets."
+  ensure_tls_directory
   cd "$checkout"
   docker compose config --quiet
   docker compose build
@@ -593,6 +657,8 @@ install_command() {
   docker compose up -d --remove-orphans
   wait_for_health app
   wait_for_health asterisk
+  run_tls_installer
+  run_tls_synchronizer "$skip_public"
   verify_deployment "$skip_public"
   rm -f -- "$install_marker"
   failure_note=
@@ -656,7 +722,7 @@ upgrade_command() {
   paths_match "$source_checkout" "$checkout" || die "Run upgrades with $checkout/ringringctl."
   require_git_checkout "$checkout"
   validate_installed_configuration
-  for command_name in git docker curl awk grep sed stat sha256sum tar; do
+  for command_name in git docker curl awk grep openssl sed stat sha256sum tar timeout; do
     require_command "$command_name"
   done
   cd "$checkout"
@@ -713,6 +779,7 @@ upgrade_command() {
   fi
   test "$(git rev-parse HEAD)" = "$target_commit" || die "The checkout did not reach the recorded upgrade target."
   test -z "$(git status --porcelain)" || die "The upgraded checkout is dirty."
+  ensure_tls_directory
   docker compose config --quiet
   docker compose build
   ensure_security_log
@@ -720,6 +787,8 @@ upgrade_command() {
   docker compose up -d --remove-orphans
   wait_for_health app
   wait_for_health asterisk
+  run_tls_installer
+  run_tls_synchronizer "$skip_public"
   verify_deployment "$skip_public"
   post_backup=$(create_backup)
   "$checkout/scripts/restore-drill.sh" "$post_backup"
@@ -749,7 +818,7 @@ doctor_command() {
   if test -f "$upgrade_marker"; then
     die "An upgrade is pending. Resume it before running doctor."
   fi
-  for command_name in realpath git docker curl awk grep stat fail2ban-client; do
+  for command_name in realpath git docker curl awk grep openssl stat fail2ban-client timeout; do
     require_command "$command_name"
   done
   verify_deployment "$skip_public"

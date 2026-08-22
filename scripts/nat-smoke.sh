@@ -60,7 +60,7 @@ docker build --quiet --tag ringring-asterisk-sip-smoke:22.10.1 \
   --file "$repository/deploy/asterisk/Dockerfile" "$repository/deploy/asterisk" >/dev/null
 docker build --quiet --tag ringring-sipp-smoke:3.7.7 \
   --file "$repository/deploy/sip-smoke/Dockerfile" "$repository/deploy/sip-smoke" >/dev/null
-docker build --quiet --tag ringring-nat-smoke:ubuntu24 \
+docker build --quiet --tag ringring-nat-smoke:alpine322 \
   "$repository/deploy/nat-smoke" >/dev/null
 
 echo "Rendering RingRing's production endpoints and party dialplan..."
@@ -76,9 +76,9 @@ grep -q '^force_rport=yes$' "$work_directory/state/pjsip.conf"
 grep -q '^rewrite_contact=yes$' "$work_directory/state/pjsip.conf"
 grep -q '^exten => 102,1,NoOp(RingRing party call)$' "$work_directory/state/extensions.conf"
 
-# The official SIPp image is intentionally scratch-based. Extract its static
-# pinned binary into the disposable topology container so each phone process
-# can run inside its own nested Linux network namespace.
+# Extract the source-checksummed SIPp binary into the matching digest-pinned
+# Alpine topology image so each phone process can run inside its own nested
+# Linux network namespace.
 docker create --name ringring-nat-smoke-sipp-source \
   ringring-sipp-smoke:3.7.7 >/dev/null
 docker cp ringring-nat-smoke-sipp-source:/sipp "$work_directory/sipp" >/dev/null
@@ -99,7 +99,7 @@ docker run -d --name ringring-nat-smoke-topology --privileged \
   --volume "$repository/scripts/sip-smoke:/sip-scenarios:ro" \
   --volume "$repository/scripts/nat-smoke:/nat-scenarios:ro" \
   --volume "$work_directory/logs:/logs" \
-  ringring-nat-smoke:ubuntu24 >/dev/null
+  ringring-nat-smoke:alpine322 >/dev/null
 
 # Give the two household paths distinct public identities, then build a private
 # namespace and veth pair for each phone. The topology container performs SNAT;

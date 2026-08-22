@@ -188,6 +188,13 @@ def run():
 
     quiet_logs()
     core = linphone.Factory.get().create_core("/state/linphonerc", None, None)
+    root_ca = pathlib.Path("/certs/ca.crt")
+    if not root_ca.is_file():
+        server.shutdown()
+        raise SmokeFailure("the TLS test root certificate is missing")
+    core.root_ca = str(root_ca)
+    core.verify_server_certificates(True)
+    core.verify_server_cn(True)
     core.provisioning_uri = "http://127.0.0.1:8080/linphone.xml"
     if core.start() != 0:
         server.shutdown()

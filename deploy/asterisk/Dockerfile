@@ -25,7 +25,7 @@ FROM debian:13-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-      ca-certificates libedit2 libjansson4 libsqlite3-0 libssl3t64 libuuid1 libxml2 mpg123 \
+      ca-certificates libedit2 libjansson4 libsqlite3-0 libssl3t64 libuuid1 libxml2 mpg123 openssl \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 ringring \
     && useradd --uid 10002 --gid 10001 --home-dir /var/lib/asterisk --shell /usr/sbin/nologin asterisk \
@@ -38,7 +38,8 @@ COPY --from=build /stage/usr/ /usr/
 COPY --from=build /stage/var/lib/asterisk/ /var/lib/asterisk/
 COPY config/ /etc/asterisk/
 COPY entrypoint.sh /usr/local/bin/ringring-asterisk-entrypoint
-RUN chmod 0755 /usr/local/bin/ringring-asterisk-entrypoint
+COPY refresh-tls.sh /usr/local/bin/ringring-asterisk-refresh-tls
+RUN chmod 0755 /usr/local/bin/ringring-asterisk-entrypoint /usr/local/bin/ringring-asterisk-refresh-tls
 
-EXPOSE 5060/udp 5038/tcp 10000-10199/udp
+EXPOSE 5060/udp 5061/tcp 5038/tcp 10000-10199/udp
 ENTRYPOINT ["/usr/local/bin/ringring-asterisk-entrypoint"]

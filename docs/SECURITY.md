@@ -36,6 +36,7 @@ Telephony configuration is derived from SQLite. If an Asterisk regeneration or p
 - Deployment secrets live outside Git in a root-readable environment file or secret manager.
 - The guided installer accepts deployment secrets only from hidden terminal input or a root-owned mode-`0400`/`0600` regular answers file. It refuses secret command-line flags, symlinked managed paths, and existing configuration rather than guessing whether an overwrite is safe.
 - Caddy receives only the non-secret `RINGRING_DOMAIN` value from the checkout's private Compose `.env`; OpenAI, encryption, session, family-access, and AMI secrets remain confined to the service-specific files under `/etc/ringring`.
+- Caddy remains the ACME owner. A root-only timer exports its storage, accepts only the exact hostname's matching certificate/key pair with at least one week remaining, and stages mode-`0600` copies under `/etc/ringring/tls`. Asterisk receives that narrow directory read-only and makes a private runtime copy; it never mounts Caddy's complete storage.
 - The application master key encrypts SIP passwords and party-scoped integration keys.
 - Each party's OpenAI key identifier is stored alongside its encrypted value so a host can replace it. During replacement, AI-powered routes pause until RingRing confirms the fresh key exists and every older active key owned by that party's dedicated service account is deleted. Partial failures remain retryable and never reveal a key to the browser.
 - Invitation tokens are random, expire, are single-use, and are stored as hashes.
@@ -52,10 +53,11 @@ Expected public ports are:
 - `22/tcp`: SSH administration, key authentication only.
 - `80/tcp`: ACME and redirect to HTTPS.
 - `443/tcp`: web application.
+- `5061/tcp`: preferred SIP TLS 1.2 registration and call setup; rate limited.
 - `5060/udp`: compatibility SIP registration; rate limited.
 - `10000-10199/udp`: negotiated RTP media.
 
-SIP over TLS on `5061/tcp` is planned but is not part of the first deployment.
+SIP TLS encrypts registration credentials and call-setup signaling between a capable phone and Asterisk. RingRing's RTP is currently unencrypted and server-relayed, so TLS does not protect voice media from the server or an observer on the RTP path. UDP SIP remains an explicit fallback for clients that cannot use TLS; it does not protect the signaling credential in transit. Setup guidance prefers TLS and does not recommend disabling certificate verification.
 
 The database, AMI, metrics, debug endpoints, and container APIs are never public.
 
@@ -69,9 +71,9 @@ The database, AMI, metrics, debug endpoints, and container APIs are never public
 - Hosts can revoke devices, disable integrations, replace a party's OpenAI runtime key, and choose its hard monthly spend limit within the operator's ceiling.
 - New parties and host updates accept an OpenAI project limit only after the provider echoes the exact requested USD cents, monthly interval, and active enforcement. An ambiguous update pauses new AI-powered calls until the same pending amount is retried.
 
-The reference deployment writes Asterisk PJSIP security events to a dedicated file. Fail2Ban uses its maintained Asterisk filter and inserts bans into Docker's `DOCKER-USER` chain, before published-port forwarding. A legitimate first SIP challenge is not a failure; repeated bad authentication responses are banned with increasing durations.
+The reference deployment writes Asterisk PJSIP security events to a dedicated file. Separate UDP `5060` and TCP `5061` Fail2Ban jails use the maintained Asterisk filter and insert bans into Docker's `DOCKER-USER` chain, before published-port forwarding. A legitimate first SIP challenge is not a failure; repeated bad authentication responses are banned with increasing durations.
 
-On a guided fresh install, the security log and Fail2Ban policy are in place before Compose starts the public SIP listener. Upgrades refresh that source-controlled policy before services are reconciled. Both operations retain root-only pending markers on failure; those markers contain only commits, a domain, or a backup path—not deployment credentials. Upgrade rollback is deliberately not automatic because a target may already have applied a forward-only database migration.
+On a guided fresh install, the security log and both Fail2Ban jails are in place before Compose starts the public SIP listeners. Asterisk can create a short-lived self-signed fallback so its TLS transport initializes while Caddy obtains the public certificate, but guided public verification rejects that fallback. The synchronization timer validates hostname, remaining lifetime, and key match, refuses unsafe archives and symlink targets, and defers PJSIP reload while any call is active. Upgrades refresh that source-controlled policy before services are reconciled. Both operations retain root-only pending markers on failure; those markers contain only commits, a domain, or a backup path—not deployment credentials. Upgrade rollback is deliberately not automatic because a target may already have applied a forward-only database migration.
 
 The weather line sends a host-chosen place to Open-Meteo and a short forecast sentence to the party's OpenAI project for speech generation. Its AI-generated voice identifies itself and names Open-Meteo. RingRing does not send caller audio, member names, or SIP credentials to either service for weather playback.
 
@@ -87,4 +89,4 @@ Do not open a public issue for a vulnerability that could expose credentials or 
 
 ## Known preview gaps
 
-HTTPS/TLS, narrow published ports, cross-party configuration isolation, native account recovery, one-time Linphone provisioning, official Linphone-engine XML import, SIP registration, party calling, echoed bidirectional audio, authenticated DTMF extension selection, simulated distinct NAT paths, SIP credential rotation/revocation, retry-safe party OpenAI key replacement, guarded member/party/account deletion, live authentication blocking, and isolated backup/restore are verified in code and disposable environments. The Linphone mobile UI, push/background ringing, real household and carrier-grade NAT paths, and a two-way call between two remote physical devices still need to pass on family hardware before the service leaves preview status.
+HTTPS, SIP TLS 1.2 with certificate/name verification, narrow published ports, cross-party configuration isolation, native account recovery, one-time Linphone provisioning, official Linphone-engine TLS registration, mixed-transport party calling, echoed bidirectional audio, authenticated DTMF extension selection, simulated distinct NAT paths, SIP credential rotation/revocation, retry-safe party OpenAI key replacement, guarded member/party/account deletion, live authentication blocking, and isolated backup/restore are verified in code and disposable environments. SIP media is not yet encrypted. The physical ATA/desk-phone TLS matrix, Linphone mobile UI, push/background ringing, real household and carrier-grade NAT paths, and a two-way call between two remote physical devices still need to pass on family hardware before the service leaves preview status.

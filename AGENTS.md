@@ -77,6 +77,7 @@ make test
 make check
 make admin-test
 make sip-smoke
+make sip-tls-smoke
 make nat-smoke
 make linphone-smoke
 make compose-up
@@ -88,8 +89,8 @@ Before handing off a change:
 2. Run `make check` before committing.
 3. Render or open changed pages at mobile and desktop widths when UI changed.
 4. Validate generated Asterisk configuration when telephony changed.
-5. Run `make nat-smoke` when NAT-sensitive endpoint or transport behavior changes.
-6. Run `make linphone-smoke` when the Linphone provisioning format changes.
+5. Run `make nat-smoke` when NAT-sensitive endpoint behavior changes.
+6. Run `make sip-tls-smoke` when SIP transport, certificates, or Linphone provisioning changes.
 7. Update `WORKLOG.md` with what changed, decisions, verification, and remaining work.
 
 ## Git and change hygiene

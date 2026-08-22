@@ -20,5 +20,6 @@ sed "s|__SIP_PUBLIC_HOST__|${SIP_PUBLIC_HOST}|g" /etc/asterisk/pjsip.conf.in > /
 chmod 0640 /etc/asterisk/manager.conf /etc/asterisk/pjsip.conf
 chown asterisk:ringring /etc/asterisk/manager.conf /etc/asterisk/pjsip.conf
 install -d -o asterisk -g ringring /var/run/asterisk /var/log/asterisk /var/spool/asterisk
+/usr/local/bin/ringring-asterisk-refresh-tls --prepare
 
 exec /usr/sbin/asterisk -f -U asterisk -G ringring

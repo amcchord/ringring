@@ -41,8 +41,22 @@ docker build --quiet --tag ringring-linphone-smoke:5.5.3 \
 
 echo "Rendering Asterisk state and Linphone XML with RingRing's production code..."
 mkdir -p "$work_directory/state" "$work_directory/provision" "$work_directory/client" \
-  "$work_directory/logs/register-b" "$work_directory/logs/phone-b"
+  "$work_directory/certs" "$work_directory/logs/register-b" "$work_directory/logs/phone-b"
 chmod 0777 "$work_directory/client"
+openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 30 \
+  -subj '/CN=RingRing Linphone smoke CA' \
+  -keyout "$work_directory/certs/ca.key" -out "$work_directory/certs/ca.crt" >/dev/null 2>&1
+openssl req -newkey rsa:2048 -nodes -sha256 -subj '/CN=172.31.90.20' \
+  -keyout "$work_directory/certs/private-key.pem" \
+  -out "$work_directory/certs/server.csr" >/dev/null 2>&1
+printf '%s\n' 'subjectAltName=IP:172.31.90.20' 'extendedKeyUsage=serverAuth' \
+  >"$work_directory/certs/server.ext"
+openssl x509 -req -sha256 -days 30 -in "$work_directory/certs/server.csr" \
+  -CA "$work_directory/certs/ca.crt" -CAkey "$work_directory/certs/ca.key" \
+  -CAcreateserial -extfile "$work_directory/certs/server.ext" \
+  -out "$work_directory/certs/certificate.pem" >/dev/null 2>&1
+chmod 0444 "$work_directory/certs/ca.crt" "$work_directory/certs/certificate.pem"
+chmod 0400 "$work_directory/certs/ca.key" "$work_directory/certs/private-key.pem"
 docker run --rm \
   --volume "$repository:/src:ro" --volume "$work_directory:/out" --workdir /src \
   golang:1.26-bookworm go run ./scripts/linphone-smoke-config /out/generated 172.31.90.20
@@ -53,18 +67,19 @@ chmod 0444 "$work_directory/state/pjsip.conf" "$work_directory/state/extensions.
   "$work_directory/provision/linphone.xml"
 find "$work_directory/generated" -depth -delete
 grep -Fq 'xmlns="http://www.linphone.org/xsds/lpconfig.xsd"' "$work_directory/provision/linphone.xml"
-grep -Fq '&lt;sip:172.31.90.20:5060;transport=udp&gt;' "$work_directory/provision/linphone.xml"
+grep -Fq '&lt;sip:172.31.90.20:5061;transport=tls&gt;' "$work_directory/provision/linphone.xml"
 
 docker network create --internal --subnet 172.31.90.0/24 "$network" >/dev/null
 docker run -d --name ringring-linphone-smoke-asterisk \
   --network "$network" --ip 172.31.90.20 \
   --env SIP_PUBLIC_HOST=172.31.90.20 --env ASTERISK_AMI_SECRET=isolatedsmoketest \
   --volume "$work_directory/state:/var/lib/ringring/asterisk:ro" \
+  --volume "$work_directory/certs:/run/ringring-host-tls:ro" \
   --volume "$repository/scripts/sip-smoke/pjsip.conf.in:/etc/asterisk/pjsip.conf.in:ro" \
   ringring-asterisk-sip-smoke:22.10.1 >/dev/null
 
 ready=0
-for elapsed in $(seq 1 30); do
+for _ in $(seq 1 30); do
   if docker exec ringring-linphone-smoke-asterisk asterisk -rx 'core show uptime' >/dev/null 2>&1; then
     ready=1
     break
@@ -78,6 +93,8 @@ if test "$ready" -ne 1; then
 fi
 docker exec ringring-linphone-smoke-asterisk \
   asterisk -rx 'core set verbose 3' >/dev/null
+docker exec ringring-linphone-smoke-asterisk \
+  asterisk -rx 'pjsip show transport transport-tls' | grep -q 'transport-tls'
 
 scenario_mount="$repository/scripts/sip-smoke:/scenarios:ro"
 sipp_image=ringring-sipp-smoke:3.7.7
@@ -97,7 +114,7 @@ docker run -d --name ringring-linphone-smoke-phone-b \
   -mi 172.31.90.30 -mp 6000 -aa -rtp_echo -trace_err >/dev/null
 
 qualified=0
-for elapsed in $(seq 1 15); do
+for _ in $(seq 1 15); do
   if docker exec ringring-linphone-smoke-asterisk asterisk -rx 'pjsip show contacts' | grep -Eq 'rr_smoke_b/.*Avail'; then
     qualified=1
     break
@@ -124,11 +141,12 @@ echo "Asking Linphone to fetch the XML and register its provisioned account..."
 docker run -d --name ringring-linphone-smoke-client \
   --network "$network" --ip 172.31.90.40 \
   --volume "$work_directory/provision:/provision:ro" \
+  --volume "$work_directory/certs:/certs:ro" \
   --volume "$work_directory/client:/state" \
   ringring-linphone-smoke:5.5.3 >/dev/null
 
 registered=0
-for elapsed in $(seq 1 35); do
+for _ in $(seq 1 35); do
   if test -f "$work_directory/client/registered"; then
     registered=1
     break
@@ -146,7 +164,7 @@ if test "$registered" -ne 1; then
 fi
 
 available=0
-for elapsed in $(seq 1 15); do
+for _ in $(seq 1 15); do
   if docker exec ringring-linphone-smoke-asterisk asterisk -rx 'pjsip show contacts' | grep -Eq 'rr_smoke_a/.*Avail'; then
     available=1
     break
@@ -157,11 +175,14 @@ if test "$available" -ne 1; then
   echo "Asterisk did not find the Linphone contact reachable." >&2
   exit 1
 fi
+docker exec ringring-linphone-smoke-asterisk grep -Eq \
+  'SecurityEvent="SuccessfulAuth".*AccountID="rr_smoke_a".*LocalAddress="IPV4/TLS/' \
+  /var/log/asterisk/security
 
 echo "Calling extension 102 from provisioned Linphone and checking echoed RTP..."
 touch "$work_directory/client/call"
 call_complete=0
-for elapsed in $(seq 1 35); do
+for _ in $(seq 1 35); do
   if test -f "$work_directory/client/call-complete"; then
     call_complete=1
     break
@@ -181,7 +202,7 @@ if test "$call_complete" -ne 1; then
 fi
 
 phone_b_done=0
-for elapsed in $(seq 1 15); do
+for _ in $(seq 1 15); do
   if test "$(docker inspect --format '{{.State.Running}}' ringring-linphone-smoke-phone-b)" != true; then
     phone_b_done=1
     break
@@ -209,7 +230,7 @@ printf '%s\n' "$channels" | grep -q '^0 active channels'
 
 touch "$work_directory/client/stop"
 client_done=0
-for elapsed in $(seq 1 20); do
+for _ in $(seq 1 20); do
   if test "$(docker inspect --format '{{.State.Running}}' ringring-linphone-smoke-client)" != true; then
     client_done=1
     break

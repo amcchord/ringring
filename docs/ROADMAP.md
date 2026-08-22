@@ -42,7 +42,8 @@
 - [x] Reproducible Docker Compose deployment and SIP firewall installer.
 - [x] Guided installation and upgrade command with secret-safe input, verified backups, and exact interrupted-operation resume.
 - [x] Backup, restore, and disaster-recovery verification.
-- [ ] SIP TLS device compatibility matrix.
+- [x] SIP TLS 1.2 transport, trusted-certificate handoff, UDP fallback, and automated SIPp/Linphone compatibility matrix.
+- [ ] Physical ATA, desk-phone, and softphone SIP TLS compatibility matrix.
 - [ ] Observability without call-content collection.
 - [ ] Security review and threat-model tests.
 - [ ] Optional PostgreSQL and multi-node migration path.

@@ -54,3 +54,4 @@ fail2ban-client -t
 systemctl enable --now fail2ban
 fail2ban-client reload
 fail2ban-client status ringring-sip
+fail2ban-client status ringring-sip-tls

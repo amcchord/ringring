@@ -10,3 +10,16 @@ bantime = 15m
 bantime.increment = true
 bantime.factor = 2
 bantime.maxtime = 24h
+
+[ringring-sip-tls]
+enabled = true
+filter = asterisk
+backend = polling
+logpath = /opt/ringring/deploy/state/log/asterisk/security
+action = iptables-multiport[name=ringring-sip-tls, port="5061", protocol=tcp, chain=DOCKER-USER]
+maxretry = 10
+findtime = 10m
+bantime = 15m
+bantime.increment = true
+bantime.factor = 2
+bantime.maxtime = 24h

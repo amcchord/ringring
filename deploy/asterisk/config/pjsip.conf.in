@@ -15,4 +15,24 @@ external_signaling_address=__SIP_PUBLIC_HOST__
 external_media_address=__SIP_PUBLIC_HOST__
 allow_reload=yes
 
+[transport-tls]
+type=transport
+protocol=tls
+bind=0.0.0.0:5061
+local_net=172.31.88.0/24
+external_signaling_address=__SIP_PUBLIC_HOST__
+external_signaling_port=5061
+external_media_address=__SIP_PUBLIC_HOST__
+cert_file=/run/ringring-tls/certificate.pem
+priv_key_file=/run/ringring-tls/private-key.pem
+method=tlsv1_2
+verify_client=no
+require_client_cert=no
+symmetric_transport=yes
+tcp_keepalive_enable=yes
+tcp_keepalive_idle_time=30
+tcp_keepalive_interval_time=5
+tcp_keepalive_probe_count=3
+allow_reload=yes
+
 #include /var/lib/ringring/asterisk/pjsip.conf

@@ -6,6 +6,7 @@ The reference deployment runs the Go app, Asterisk 22 LTS, and Caddy with Docker
 
 - `80/tcp` and `443/tcp` for the web app and automatic TLS.
 - `443/udp` for HTTP/3.
+- `5061/tcp` for preferred SIP TLS 1.2 registration and call setup.
 - `5060/udp` for compatibility SIP registration.
 - `10000-10199/udp` for RTP media.
 
@@ -13,7 +14,7 @@ No database, app origin, Docker API, or Asterisk Manager Interface port is publi
 
 ## Guided fresh install
 
-The guided command supports a clean Debian or Ubuntu host. Install Docker Engine, the Compose v2 plugin, Git, OpenSSL, cURL, and GNU Make first; point the deployment hostname's DNS records at the server; and confirm ports `80`, `443`, `5060/udp`, and `10000-10199/udp` are allowed by the provider firewall. RingRing configures its checked-in SIP authentication jail, but it does not change SSH policy, cloud firewall rules, DNS, or install Docker for the operator.
+The guided command supports a clean Debian or Ubuntu host. Install Docker Engine, the Compose v2 plugin, Git, OpenSSL, cURL, and GNU Make first; point the deployment hostname's DNS records at the server; and confirm ports `80`, `443`, `5061/tcp`, `5060/udp`, and `10000-10199/udp` are allowed by the provider firewall. RingRing configures its checked-in SIP authentication jails, but it does not change SSH policy, cloud firewall rules, DNS, or install Docker for the operator.
 
 Clone a clean published checkout, prepare the root-only answers file, and review a no-mutation plan:
 
@@ -31,7 +32,7 @@ Fill every required blank before running the command. The domain is a hostname s
 
 Instead of an answers file, `sudo ./ringringctl install` asks for ordinary settings and reads the access code and optional administrator key with terminal echo disabled. Secrets are deliberately not accepted as command-line flags, where shell history and process listings could retain them. `--yes` approves the displayed non-secret plan for unattended execution. Use `--skip-public-check` only while DNS or certificate issuance is pending, then run `sudo /opt/ringring/ringringctl doctor` without that option as soon as the public name is ready.
 
-The installer refuses a dirty or unpublished source commit, existing configuration, occupied public ports, symlinked managed paths, and unsafe answer-file ownership or permissions. It generates separate 32-byte application and session keys plus the private AMI secret, writes root-only app/Asterisk environments, and puts only `RINGRING_DOMAIN` in the checkout's mode-`0600` Compose `.env`. After building, it creates the Asterisk security log and installs Fail2Ban before starting any public SIP listener. Success requires app and Asterisk health, sealed state verification, private AMI verification, the SIP jail, public readiness unless explicitly deferred, and clean recent app logs.
+The installer refuses a dirty or unpublished source commit, existing configuration, occupied public ports, symlinked managed paths, and unsafe answer-file ownership or permissions. It generates separate 32-byte application and session keys plus the private AMI secret, writes root-only app/Asterisk environments, and puts only `RINGRING_DOMAIN` in the checkout's mode-`0600` Compose `.env`. After building, it creates the Asterisk security log and installs both Fail2Ban jails before starting any public SIP listener. It installs a root-only certificate synchronization timer, waits for Caddy's exact trusted hostname certificate unless public checks were explicitly deferred, and gives Asterisk that validated pair. Success requires app and Asterisk health, sealed state verification, private AMI verification, both SIP jails, public HTTPS and SIP TLS readiness unless explicitly deferred, and clean recent app logs.
 
 An interrupted install retains `/etc/ringring/install.pending` and the already-generated secrets. Fix the reported condition and run:
 
@@ -52,6 +53,7 @@ install -d -o 10001 -g 10001 -m 0770 /opt/ringring/deploy/state/app
 install -d -o 10001 -g 10001 -m 0770 /opt/ringring/deploy/state/asterisk
 install -d -o 10002 -g 10001 -m 0770 /opt/ringring/deploy/state/log/asterisk
 install -d -m 0700 /etc/ringring
+install -d -m 0700 /etc/ringring/tls
 ```
 
 ## Secrets
@@ -100,7 +102,7 @@ Native username/password login is always available. In production, new-account s
 
 Google OAuth is optional. If desired, create a web application and register `https://ringring.live/auth/google/callback` as an authorized redirect URI, then set the two Google fields. Leaving them empty does not affect native login.
 
-Linphone QR setup requires no additional environment variable or public port. The QR points back to the deployment's `APP_BASE_URL`, so production must keep that origin on trusted HTTPS. The first startup of this release adds an additive `device_provisioning_tokens` table; a rollback to the prior app binary safely ignores it, and rotating a device after returning to this release creates a fresh link. Do not place a provisioning URL into monitoring probes because a real `GET` intentionally consumes it.
+Linphone QR setup requires no additional environment variable. The QR points back to the deployment's `APP_BASE_URL`, so production must keep that origin on trusted HTTPS; its generated account uses verified SIP TLS on public port `5061`. The first startup of this release adds an additive `device_provisioning_tokens` table; a rollback to the prior app binary safely ignores it, and rotating a device after returning to this release creates a fresh link. Do not place a provisioning URL into monitoring probes because a real `GET` intentionally consumes it.
 
 Party OpenAI key replacement adds a nullable `parties.openai_api_key_id` column on startup. Existing party keys remain usable with an empty identifier; their first host-requested replacement records the fresh key ID before retiring all older keys owned by the dedicated service account. Older app builds ignore the additive column. If rollback occurs while a party says its key is rotating or needs retry, its AI-powered routes remain paused; return to this release and use the host's **Finish key replacement** action before re-enabling them. Never test this control against production merely as a deployment probe because a successful submission deliberately revokes the current party key.
 
@@ -116,14 +118,29 @@ Asterisk already limits unidentified request tracking and uses globally random S
 /opt/ringring/scripts/install-sip-firewall.sh
 ```
 
-The guided installer runs this after the image build and security-log creation but before `docker compose up`, so the SIP listener is never intentionally published without the jail. Guided upgrades refresh the checked-in jail without repeating package installation.
+The guided installer runs this after the image build and security-log creation but before `docker compose up`, so neither SIP listener is intentionally published without its jail. Guided upgrades refresh both checked-in jails without repeating package installation.
 
 The jail reads Asterisk's dedicated security log and inserts its jump in Docker's `DOCKER-USER` chain, which Docker processes before its forwarding rules. Ten failures in ten minutes produce a 15-minute ban; repeat bans grow up to 24 hours. Check it with:
 
 ```sh
 fail2ban-client status ringring-sip
+fail2ban-client status ringring-sip-tls
 iptables -n -L DOCKER-USER
 ```
+
+## SIP TLS certificate lifecycle
+
+Caddy owns ACME issuance and renewal in its persistent storage. RingRing does not make Asterisk a second ACME client. Install the root-only synchronization timer after the Compose `.env` contains the exact deployment hostname and Caddy has started:
+
+```sh
+sudo /opt/ringring/scripts/install-sip-tls-sync.sh /opt/ringring
+sudo /opt/ringring/scripts/sync-sip-tls.sh --wait 180
+systemctl status ringring-sip-tls-sync.timer
+```
+
+Every six hours, with a randomized delay, the timer asks Caddy's official `storage export` command for an archive. The synchronizer rejects unsafe archive entries, selects only a certificate whose SAN matches `RINGRING_DOMAIN`, requires its private key to match and at least seven days of validity to remain, and stages the pair as mode `0600` files under `/etc/ringring/tls`. Asterisk makes its own runtime copy with a mode-`0600` key. It reloads PJSIP only after confirming that zero calls are active; an active or indeterminate call returns a successful deferral status so the persistent timer retries later.
+
+On first startup, Asterisk may create a two-day self-signed fallback so the configured transport can initialize while Caddy is still issuing. That fallback is not public-ready: `ringringctl install`, `upgrade`, and `doctor` require a system-trusted certificate for the exact hostname unless `--skip-public-check` was explicitly used. Do not distribute a fallback certificate, copy Caddy's entire data directory into Asterisk, or disable phone certificate verification.
 
 ## Deploy and verify
 
@@ -136,6 +153,9 @@ curl --fail https://ringring.live/readyz
 docker compose exec asterisk asterisk -rx 'pjsip show transports'
 docker compose exec -T app ringring verify-ami
 fail2ban-client status ringring-sip
+fail2ban-client status ringring-sip-tls
+systemctl is-active ringring-sip-tls-sync.timer
+openssl s_client -connect ringring.live:5061 -servername ringring.live -verify_hostname ringring.live -verify_return_error -tls1_2 </dev/null
 ```
 
 `verify-ami` exercises the private manager login and complete PJSIP contact-list action, then prints only an `ok` status and aggregate contact count. It never prints endpoint names, contact URIs, addresses, user agents, or credentials. Review `docker compose logs --tail=100` after every deployment. Asterisk is compiled from the pinned official source release and its published SHA-256 file is checked during the image build.
@@ -163,7 +183,7 @@ cd /opt/ringring
 make sip-smoke
 ```
 
-The test renders two disposable devices through the production telephony code, authenticates both with SIPp, calls extension `102` from extension `101`, dials the single-phone `*10` echo route, and requires the expected bidirectional PCMU patterns through Asterisk. It uses a dedicated internal Docker network, fixed smoke-only credentials, no production environment or database, and no published host ports. Exact-name collision checks prevent it from disturbing an already-running smoke test; its containers, network, and generated state are removed on exit. Passing these software loops does not replace a call between remote physical devices across real NATs.
+The test renders two disposable devices through the production telephony code and builds SIPp 3.7.7 from its checksum-pinned official source release with TLS support. A disposable CA proves a TLS 1.2 handshake with exact hostname verification. One SIPp phone authenticates and calls through TLS while the other uses compatibility UDP; they must call extension `102` from `101`, complete the single-phone `*10` echo route, exchange the expected bidirectional PCMU patterns, and complete authenticated `*15`. It uses a dedicated internal Docker network, fixed smoke-only credentials, no production environment or database, and no published host ports. Exact-name collision checks prevent it from disturbing an already-running smoke test; its containers, network, generated state, and certificates are removed on exit. Passing these software loops does not replace a call between remote physical devices across real NATs.
 
 ## Isolated two-household NAT smoke test
 
@@ -187,9 +207,9 @@ cd /opt/ringring
 make linphone-smoke
 ```
 
-The target builds a test-only image from the checksum-pinned official Linphone Python wheel, renders two disposable members through RingRing's production telephony functions, and starts Linphone with a local HTTP provisioning URI for extension `101`. It requires exactly one XML fetch, exactly one imported account, successful authenticated registration, and independently reachable Asterisk contacts for Linphone and SIPp extension `102`. Linphone then calls `102` through the generated party dialplan using a file-backed 440 Hz input while SIPp echoes RTP. The test requires an established media state, an allowed codec, more than 100 RTP packets sent and received, the expected tone in Linphone's returned-audio WAV, clean dialog teardown, and no remaining Asterisk channels.
+The target builds a test-only image from the checksum-pinned official Linphone Python wheel, renders two disposable members through RingRing's production telephony functions, and starts Linphone with a local HTTP provisioning URI for extension `101`. It installs a disposable root CA and explicitly enables server-certificate and common-name verification before starting the engine. The generated account must use TLS `5061`, fetch exactly once, import exactly one account, authenticate successfully, and appear as a reachable Asterisk contact alongside UDP SIPp extension `102`. Linphone then calls `102` through the generated party dialplan using a file-backed 440 Hz input while SIPp echoes RTP. The test requires an established media state, an allowed codec, more than 100 RTP packets sent and received, the expected tone in Linphone's returned-audio WAV, clean dialog teardown, and no remaining Asterisk channels.
 
-Image/dependency acquisition happens before the runtime check; the actual clients and Asterisk run on a dedicated internal network with fixed smoke-only credentials, no production environment or database, and no published host ports. Exact-name collision checks and an exit trap remove the containers, network, generated XML and audio, Linphone state, and Asterisk state.
+Image/dependency acquisition happens before the runtime check; the actual clients and Asterisk run on a dedicated internal network with fixed smoke-only credentials, no production environment or database, and no published host ports. Exact-name collision checks and an exit trap remove the containers, network, generated XML and audio, certificates, Linphone state, and Asterisk state. `make sip-tls-smoke` runs both TLS-aware client suites; see the evidence in [SIP TLS compatibility](SIP_TLS_COMPATIBILITY.md).
 
 The official wheel is GPLv3 and intentionally remains outside the MIT-licensed RingRing binary and production images. This headless check does not replace scanning a real QR in the mobile app or testing push, background ringing, Wi-Fi/cellular changes, and remote NAT behavior on family hardware.
 
@@ -215,7 +235,7 @@ sudo ./ringringctl upgrade --dry-run
 sudo ./ringringctl upgrade
 ```
 
-The real upgrade fetches again, resolves one exact target commit, and refuses any non-fast-forward history. Before moving Git it creates and drills a checksummed backup, then records the old commit, target commit, and backup path in root-only `/etc/ringring/upgrade.pending`. It runs from an immutable temporary copy so replacing `ringringctl` in the target commit cannot corrupt the operation in progress. It fast-forwards, builds the complete stack, refreshes the checked-in Fail2Ban policy, reconciles services, verifies private and public health, and creates and drills a post-upgrade backup.
+The real upgrade fetches again, resolves one exact target commit, and refuses any non-fast-forward history. Before moving Git it creates and drills a checksummed backup, then records the old commit, target commit, and backup path in root-only `/etc/ringring/upgrade.pending`. It runs from an immutable temporary copy so replacing `ringringctl` in the target commit cannot corrupt the operation in progress. It fast-forwards, builds the complete stack, refreshes both checked-in Fail2Ban jails, installs the certificate synchronization timer, reconciles services, synchronizes the trusted SIP certificate, verifies private and public health, and creates and drills a post-upgrade backup.
 
 If any post-backup step fails, keep the named backup and marker, fix the reported condition, and run `sudo /opt/ringring/ringringctl upgrade --yes`. Resume uses the exact recorded target and does not repeat the pre-upgrade backup or drill. RingRing never attempts an automatic Git or database rollback across a forward migration; follow the release-specific notes below before considering a manual rollback.
 
@@ -241,9 +261,16 @@ make backup
 git pull --ff-only
 docker compose build
 docker compose up -d --remove-orphans
+scripts/install-sip-firewall.sh --skip-packages /opt/ringring
+scripts/install-sip-tls-sync.sh /opt/ringring
+scripts/sync-sip-tls.sh --wait 180
 ```
 
 Drill the backup and perform every verification from **Deploy and verify** when using the manual path. Generated Asterisk files can be regenerated from the database and do not need separate backups. The guided upgrade is preferred because it binds the verified backup, exact commit, failure marker, service checks, and post-upgrade recovery point into one resumable operation.
+
+### SIP TLS upgrade and rollback
+
+The SIP TLS release adds public `5061/tcp`, a read-only `/etc/ringring/tls` mount, a second Fail2Ban jail, the root synchronization timer, and TLS-first Linphone XML. It adds no database column or application secret. Before upgrading, allow `5061/tcp` at the provider firewall and confirm it is unused. A rollback removes TLS-first provisioning and may stop publishing `5061`; already configured TLS-only phones will then lose registration until the release is restored or those clients are deliberately changed to UDP. Keep UDP `5060` available during the compatibility period. The copied certificate/key are replaceable derived state and can be removed only after Asterisk no longer mounts them and the timer has been disabled; Caddy's own storage must remain intact.
 
 ### `*14` upgrade and rollback
 

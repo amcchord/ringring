@@ -1,0 +1,20 @@
+[Unit]
+Description=Synchronize RingRing SIP TLS certificate from Caddy
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+WorkingDirectory=__RINGRING_CHECKOUT__
+ExecStart=__RINGRING_CHECKOUT__/scripts/sync-sip-tls.sh
+SuccessExitStatus=75
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/etc/ringring/tls /run/docker.sock
+NoNewPrivileges=true
+RestrictSUIDSGID=true

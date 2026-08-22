@@ -99,10 +99,34 @@ docker build --quiet --tag ringring-sipp-smoke:3.7.7 \
 
 echo "Creating disposable RingRing state for two party phones..."
 mkdir -p "$work_directory/app" "$work_directory/state" \
+  "$work_directory/certs" \
   "$work_directory/logs/ringring-sip-smoke-register-a" \
   "$work_directory/logs/ringring-sip-smoke-register-b" \
   "$work_directory/logs/ringring-sip-smoke-phone-a" \
   "$work_directory/logs/ringring-sip-smoke-phone-b"
+openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 30 \
+  -subj '/CN=RingRing SIP smoke CA' \
+  -keyout "$work_directory/certs/ca.key" -out "$work_directory/certs/ca.crt" >/dev/null 2>&1
+openssl req -newkey rsa:2048 -nodes -sha256 -subj '/CN=ringring-sip-smoke.test' \
+  -keyout "$work_directory/certs/private-key.pem" \
+  -out "$work_directory/certs/server.csr" >/dev/null 2>&1
+printf '%s\n' \
+  'subjectAltName=DNS:ringring-sip-smoke.test,IP:172.31.89.20' \
+  'extendedKeyUsage=serverAuth' >"$work_directory/certs/server.ext"
+openssl x509 -req -sha256 -days 30 -in "$work_directory/certs/server.csr" \
+  -CA "$work_directory/certs/ca.crt" -CAkey "$work_directory/certs/ca.key" \
+  -CAcreateserial -extfile "$work_directory/certs/server.ext" \
+  -out "$work_directory/certs/certificate.pem" >/dev/null 2>&1
+openssl req -newkey rsa:2048 -nodes -sha256 -subj '/CN=RingRing SIP smoke client' \
+  -keyout "$work_directory/certs/client.key" \
+  -out "$work_directory/certs/client.csr" >/dev/null 2>&1
+printf 'extendedKeyUsage=clientAuth\n' >"$work_directory/certs/client.ext"
+openssl x509 -req -sha256 -days 30 -in "$work_directory/certs/client.csr" \
+  -CA "$work_directory/certs/ca.crt" -CAkey "$work_directory/certs/ca.key" \
+  -CAcreateserial -extfile "$work_directory/certs/client.ext" \
+  -out "$work_directory/certs/client.crt" >/dev/null 2>&1
+chmod 0444 "$work_directory/certs/ca.crt" "$work_directory/certs/certificate.pem" "$work_directory/certs/client.crt"
+chmod 0400 "$work_directory/certs/ca.key" "$work_directory/certs/private-key.pem" "$work_directory/certs/client.key"
 docker run --rm --network none \
   --volume "$work_directory:/out" \
   ringring-app-sip-smoke-builder:local \
@@ -139,13 +163,14 @@ grep -q '^context=rr-party-pty-smoke$' "$work_directory/state/pjsip.conf"
 grep -Fq 'exten => *10,1,Answer()' "$work_directory/state/extensions.conf"
 grep -Fq ' same => n,Echo()' "$work_directory/state/extensions.conf"
 grep -Fq 'exten => *15,1,Answer()' "$work_directory/state/extensions.conf"
-grep -Fq 'choose-extension,pty_smoke,${CHANNEL(endpoint)}' "$work_directory/state/extensions.conf"
+grep -Fq "choose-extension,pty_smoke,\${CHANNEL(endpoint)}" "$work_directory/state/extensions.conf"
 grep -q '^exten => 102,1,NoOp(RingRing party call)$' "$work_directory/state/extensions.conf"
 
 docker run -d --name ringring-sip-smoke-asterisk \
-  --network "$network" --ip 172.31.89.20 \
+  --network "$network" --network-alias ringring-sip-smoke.test --ip 172.31.89.20 \
   --env SIP_PUBLIC_HOST=172.31.89.20 --env ASTERISK_AMI_SECRET=isolatedsmoketest \
   --volume "$work_directory/state:/var/lib/ringring/asterisk:ro" \
+  --volume "$work_directory/certs:/run/ringring-host-tls:ro" \
   --volume "$repository/scripts/sip-smoke/pjsip.conf.in:/etc/asterisk/pjsip.conf.in:ro" \
   --volume "$repository/scripts/sip-smoke/manager.conf.in:/etc/asterisk/manager.conf.in:ro" \
   ringring-asterisk-sip-smoke:22.10.1 >/dev/null
@@ -164,6 +189,14 @@ if test "$ready" -ne 1; then
   exit 1
 fi
 docker exec ringring-sip-smoke-asterisk asterisk -rx 'core set verbose 3' >/dev/null
+docker exec ringring-sip-smoke-asterisk \
+  asterisk -rx 'pjsip show transport transport-tls' | grep -q 'transport-tls'
+tls_report=$(docker exec ringring-sip-smoke-asterisk sh -c \
+  "openssl s_client -brief -tls1_2 -verify_return_error \
+    -verify_hostname ringring-sip-smoke.test -servername ringring-sip-smoke.test \
+    -CAfile /run/ringring-host-tls/ca.crt -connect 127.0.0.1:5061 </dev/null 2>&1")
+printf '%s\n' "$tls_report" | grep -q 'Protocol version: TLSv1.2'
+printf '%s\n' "$tls_report" | grep -q 'Verification: OK'
 
 scenario_mount="$repository/scripts/sip-smoke:/scenarios:ro"
 sipp_image=ringring-sipp-smoke:3.7.7
@@ -198,19 +231,44 @@ if test "$qualified" -ne 1; then
   exit 1
 fi
 
-echo "Registering disposable phone A..."
-run_and_wait ringring-sip-smoke-register-a 20 \
+echo "Registering disposable phone A through verified TLS 1.2..."
+docker run -d --name ringring-sip-smoke-register-a \
   --network "$network" --ip 172.31.89.40 --volume "$scenario_mount" \
+  --volume "$work_directory/certs:/certs:ro" \
   --volume "$work_directory/logs/ringring-sip-smoke-register-a:/logs" --workdir /logs \
-  "$sipp_image" 172.31.89.20:5060 -sf /scenarios/register.xml \
+  "$sipp_image" ringring-sip-smoke.test:5061 -t l1 -tls_version 1.2 \
+  -tls_ca /certs/ca.crt -tls_cert /certs/client.crt -tls_key /certs/client.key \
+  -sf /scenarios/register-hold.xml \
   -i 172.31.89.40 -p 5061 -s rr_smoke_a -au rr_smoke_a -ap smoke-only-a-7Qm4s9Vx \
-  -key branch_tag registera -m 1 -trace_msg -trace_err
-docker rm ringring-sip-smoke-register-a >/dev/null
+  -key branch_tag registera -m 1 -trace_msg -trace_err >/dev/null
 
-contacts=$(docker exec ringring-sip-smoke-asterisk asterisk -rx 'pjsip show contacts')
-printf '%s\n' "$contacts" | grep -q 'rr_smoke_a/'
+registered_a=0
+for elapsed in $(seq 1 10); do
+  contacts=$(docker exec ringring-sip-smoke-asterisk asterisk -rx 'pjsip show contacts')
+  if printf '%s\n' "$contacts" | grep -q 'rr_smoke_a/'; then
+    registered_a=1
+    break
+  fi
+  if test "$(docker inspect --format '{{.State.Running}}' ringring-sip-smoke-register-a 2>/dev/null)" != true; then
+    echo "Disposable phone A closed its TLS registration connection early." >&2
+    wait_for_container ringring-sip-smoke-register-a 1 || true
+    exit 1
+  fi
+  sleep 1
+done
+if test "$registered_a" -ne 1; then
+  echo "Disposable phone A did not create an authenticated TLS contact." >&2
+  exit 1
+fi
+docker exec ringring-sip-smoke-asterisk grep -Eq \
+  'SecurityEvent="SuccessfulAuth".*AccountID="rr_smoke_a".*LocalAddress="IPV4/TLS/' \
+  /var/log/asterisk/security
+docker exec ringring-sip-smoke-asterisk grep -Eq \
+  'SecurityEvent="SuccessfulAuth".*AccountID="rr_smoke_b".*LocalAddress="IPV4/UDP/' \
+  /var/log/asterisk/security
 printf '%s\n' "$contacts" | grep -q 'rr_smoke_b/'
 printf '%s\n' "$contacts" | grep -Eq 'rr_smoke_b/.*Avail'
+docker rm -f ringring-sip-smoke-register-a >/dev/null
 
 docker rm -f ringring-sip-smoke-phone-b >/dev/null
 find "$work_directory/logs/ringring-sip-smoke-phone-b" -type f -delete
@@ -224,8 +282,11 @@ sleep 1
 echo "Calling extension 102 and checking the PCMU RTP round trip..."
 run_and_wait ringring-sip-smoke-phone-a 30 \
   --network "$network" --ip 172.31.89.40 --volume "$scenario_mount" \
+  --volume "$work_directory/certs:/certs:ro" \
   --volume "$work_directory/logs/ringring-sip-smoke-phone-a:/logs" --workdir /logs \
-  "$sipp_image" 172.31.89.20:5060 -sf /scenarios/uac.xml \
+  "$sipp_image" ringring-sip-smoke.test:5061 -t l1 -tls_version 1.2 \
+  -tls_ca /certs/ca.crt -tls_cert /certs/client.crt -tls_key /certs/client.key \
+  -sf /scenarios/uac.xml \
   -i 172.31.89.40 -p 5061 -mi 172.31.89.40 -mp 4000 \
   -s 102 -au rr_smoke_a -ap smoke-only-a-7Qm4s9Vx -m 1 -aa -rtpcheck_debug \
   -key branch_tag calla -trace_msg -trace_err
@@ -246,8 +307,11 @@ find "$work_directory/logs/ringring-sip-smoke-phone-a" -type f -delete
 echo "Calling *10 and checking the single-phone RTP echo..."
 run_and_wait ringring-sip-smoke-phone-a 30 \
   --network "$network" --ip 172.31.89.40 --volume "$scenario_mount" \
+  --volume "$work_directory/certs:/certs:ro" \
   --volume "$work_directory/logs/ringring-sip-smoke-phone-a:/logs" --workdir /logs \
-  "$sipp_image" 172.31.89.20:5060 -sf /scenarios/uac.xml \
+  "$sipp_image" ringring-sip-smoke.test:5061 -t l1 -tls_version 1.2 \
+  -tls_ca /certs/ca.crt -tls_cert /certs/client.crt -tls_key /certs/client.key \
+  -sf /scenarios/uac.xml \
   -i 172.31.89.40 -p 5061 -mi 172.31.89.40 -mp 4000 \
   -s '*10' -au rr_smoke_a -ap smoke-only-a-7Qm4s9Vx -m 1 -aa -rtpcheck_debug \
   -key branch_tag echoa -trace_msg -trace_err
@@ -260,8 +324,11 @@ find "$work_directory/logs/ringring-sip-smoke-phone-a" -type f -delete
 echo "Choosing extension 103 through the authenticated *15 voice flow..."
 run_and_wait ringring-sip-smoke-phone-a 35 \
   --network "$network" --ip 172.31.89.40 --volume "$scenario_mount" \
+  --volume "$work_directory/certs:/certs:ro" \
   --volume "$work_directory/logs/ringring-sip-smoke-phone-a:/logs" --workdir /logs \
-  "$sipp_image" 172.31.89.20:5060 -sf /scenarios/choose-extension.xml \
+  "$sipp_image" ringring-sip-smoke.test:5061 -t l1 -tls_version 1.2 \
+  -tls_ca /certs/ca.crt -tls_cert /certs/client.crt -tls_key /certs/client.key \
+  -sf /scenarios/choose-extension.xml \
   -i 172.31.89.40 -p 5061 -mi 172.31.89.40 -mp 4000 \
   -s '*15' -au rr_smoke_a -ap smoke-only-a-7Qm4s9Vx -m 1 -aa \
   -key branch_tag choosea -trace_msg -trace_err
@@ -300,4 +367,4 @@ if docker logs ringring-sip-smoke-app 2>&1 | grep -Eq 'change extension from pho
 fi
 channels=$(docker exec ringring-sip-smoke-asterisk asterisk -rx 'core show channels count')
 printf '%s\n' "$channels" | grep -q '^0 active channels'
-echo "SIP smoke test passed: 2 authenticated registrations, extension call, *10 echo, bidirectional RTP, and authenticated *15 DTMF extension selection."
+echo "SIP smoke test passed: verified TLS 1.2 plus UDP registration, mixed-transport extension calling, *10 echo, bidirectional RTP, and authenticated *15 DTMF extension selection."

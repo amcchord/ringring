@@ -1,7 +1,6 @@
-FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517
+FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends iproute2 iptables \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache \
+      iproute2 iptables libgcc libpcap libstdc++ ncurses-libs openssl
 
 ENTRYPOINT ["sleep", "infinity"]
