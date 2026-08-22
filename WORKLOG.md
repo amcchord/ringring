@@ -23,6 +23,11 @@ This is the durable, chronological project record. Add new entries at the top. C
 - `make check`, POSIX shell syntax validation, XML parsing, and `git diff --check` pass locally.
 - Every failed development iteration and both passing runs removed the exact test containers, nested namespaces, Docker network, generated Asterisk state, SIPp state, and audio files; no production service or state was mounted or changed.
 
+### Production
+
+- GitHub Actions passed feature commit `1010c22`. Fast-forwarded the production checkout to that commit without rebuilding or recreating the app, Asterisk, or Caddy; all three container identities and both root-readable environment files remained exact.
+- Public readiness, private aggregate-only AMI verification, and the SIP Fail2Ban jail pass after the checkout update. No production account, party, invitation, member, device, credential, OpenAI project, database, or running service changed.
+
 ### Remaining
 
 - Scan a production setup QR in the current Linphone mobile app and verify its user-visible import flow, foreground ringing, push/background behavior, and Wi-Fi/cellular transitions.
