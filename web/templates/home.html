@@ -2,7 +2,7 @@
 {{define "content"}}
 <section class="hero wrap">
   <div class="hero-copy">
-    <span class="eyebrow"><span class="live-dot"></span> A tiny phone network for your favorite people</span>
+    <span class="eyebrow"><span class="live-dot" aria-hidden="true"></span> A tiny phone network for your favorite people</span>
     <h1>Pick up.<br><em>Ring someone.</em><br>Smile.</h1>
     <p class="hero-lede">Give old phones, new VoIP phones, and softphones a private place to call home. Short numbers, trusted people, zero public phone network.</p>
     <div class="hero-actions">
@@ -25,7 +25,7 @@
       </form>
     {{end}}
   </div>
-  <div class="hero-art" aria-label="Two colorful telephones calling each other">
+  <div class="hero-art" role="img" aria-label="Two colorful telephones calling each other">
     <div class="signal signal-one"></div>
     <div class="signal signal-two"></div>
     <div class="phone phone-purple">
@@ -38,8 +38,15 @@
   </div>
 </section>
 
-<section class="ticker" aria-label="RingRing highlights">
-  <div>PRIVATE PARTIES <span>✦</span> SHORT EXTENSIONS <span>✦</span> REAL PHONES <span>✦</span> NO PHONE COMPANY <span>✦</span> JUST RINGRING</div>
+<section class="ticker" aria-labelledby="highlights-title">
+  <h2 class="visually-hidden" id="highlights-title">RingRing highlights</h2>
+  <ul>
+    <li>Private parties</li>
+    <li>Short extensions</li>
+    <li>Real phones</li>
+    <li>No phone company</li>
+    <li>Just RingRing</li>
+  </ul>
 </section>
 
 <section id="how-it-works" class="section wrap">
@@ -51,19 +58,19 @@
   <div class="steps-grid">
     <article class="step-card yellow">
       <span class="step-number">1</span>
-      <div class="step-icon">🎉</div>
+      <div class="step-icon" aria-hidden="true">🎉</div>
       <h3>Start a party</h3>
       <p>Choose a RingRing username, name your private group, and choose the extensions you like. No email required.</p>
     </article>
     <article class="step-card mint">
       <span class="step-number">2</span>
-      <div class="step-icon">💌</div>
+      <div class="step-icon" aria-hidden="true">💌</div>
       <h3>Send one link</h3>
       <p>Your person picks a name and extension. RingRing gives their exact phone settings, and they can change the extension later by voice.</p>
     </article>
     <article class="step-card pink">
       <span class="step-number">3</span>
-      <div class="step-icon">☎️</div>
+      <div class="step-icon" aria-hidden="true">☎️</div>
       <h3>Make it ring</h3>
       <p>Dial a short number. Every call stays inside the party you created.</p>
     </article>

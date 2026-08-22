@@ -395,7 +395,7 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 		t.Fatalf("setup response was not successful: status=%d", setup.StatusCode)
 	}
 	oldUsername := firstMatch(t, setupBody, `(rrd_[A-Za-z0-9_-]+)`)
-	oldPassword := firstMatch(t, setupBody, `<div class="secret-value"><span>Password</span><strong>([^<]+)</strong></div>`)
+	oldPassword := firstMatch(t, setupBody, `<div class="secret-value"><dt>Password</dt><dd><strong>([^<]+)</strong></dd></div>`)
 	provisionURL := firstMatch(t, setupBody, `value="(http://[^"]+/provision/linphone/[A-Za-z0-9_-]{43})"`)
 	if setup.Header.Get("Cache-Control") != "no-store" || setup.Header.Get("Referrer-Policy") != "no-referrer" || !strings.Contains(setup.Header.Get("X-Robots-Tag"), "noindex") {
 		t.Fatal("setup credentials must not be cached")
@@ -695,8 +695,12 @@ func TestNativeSignupLoginAndOfflineRecovery(t *testing.T) {
 		"signup_code": {"family-door-code"}, "password": {"another colorful phrase"},
 		"password_confirm": {"another colorful phrase"},
 	})
-	if duplicate.StatusCode != http.StatusConflict || !strings.Contains(readBody(t, duplicate), "not available") {
+	duplicateBody := readBody(t, duplicate)
+	if duplicate.StatusCode != http.StatusConflict || !strings.Contains(duplicateBody, "not available") {
 		t.Fatalf("duplicate username status=%d", duplicate.StatusCode)
+	}
+	if !regexp.MustCompile(`id="signup-username"[^>]*aria-describedby="signup-username-help signup-error"[^>]*aria-invalid="true"`).MatchString(duplicateBody) || regexp.MustCompile(`id="signup-name"[^>]*aria-invalid="true"`).MatchString(duplicateBody) {
+		t.Fatal("signup error did not identify only the invalid username field")
 	}
 
 	recoverPage := get(t, client, server.URL+"/recover")
@@ -720,8 +724,14 @@ func TestNativeSignupLoginAndOfflineRecovery(t *testing.T) {
 	oldLogin := postForm(t, client, server.URL+"/login", url.Values{
 		"csrf": {loginCSRF}, "username": {"austin.rings"}, "password": {"a colorful phone party"},
 	})
-	if oldLogin.StatusCode != http.StatusUnauthorized || !strings.Contains(readBody(t, oldLogin), "did not match") {
+	oldLoginBody := readBody(t, oldLogin)
+	if oldLogin.StatusCode != http.StatusUnauthorized || !strings.Contains(oldLoginBody, "did not match") {
 		t.Fatalf("old password remained valid: status=%d", oldLogin.StatusCode)
+	}
+	for _, field := range []string{"login-username", "login-password"} {
+		if !regexp.MustCompile(`id="` + field + `"[^>]*aria-describedby="login-error"[^>]*aria-invalid="true"`).MatchString(oldLoginBody) {
+			t.Fatalf("credential error did not associate %s with the visible alert", field)
+		}
 	}
 	loginPage = get(t, client, server.URL+"/login")
 	loginCSRF = firstMatch(t, readBody(t, loginPage), `name="csrf" value="([^"]+)"`)

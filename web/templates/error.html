@@ -1,7 +1,7 @@
 {{define "title"}}Something did not ring{{end}}
 {{define "content"}}
 <section class="error-shell wrap">
-  <div class="error-phone">☎</div>
+  <div class="error-phone" aria-hidden="true">☎</div>
   <span class="eyebrow">A quiet line</span>
   <h1>{{.ErrorTitle}}</h1>
   <p>{{.ErrorMessage}}</p>

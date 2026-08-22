@@ -120,6 +120,7 @@ type PageData struct {
 	ErrorBackLabel           string
 	AuthCSRF                 string
 	FormError                string
+	FormInvalid              map[string]bool
 	FormUsername             string
 	FormName                 string
 	SignupEnabled            bool
@@ -326,19 +327,19 @@ func (a *App) signup(w http.ResponseWriter, r *http.Request) {
 	username := normalizeUsername(r.FormValue("username"))
 	password := r.FormValue("password")
 	if a.cfg.HostSignupCode != "" && !secure.Equal(r.FormValue("signup_code"), a.cfg.HostSignupCode) {
-		a.authError(w, r, "signup", "That family access code did not match.", http.StatusBadRequest)
+		a.authError(w, r, "signup", "That family access code did not match.", http.StatusBadRequest, "signup-code")
 		return
 	}
 	if utf8.RuneCountInString(name) < 1 || utf8.RuneCountInString(name) > 40 {
-		a.authError(w, r, "signup", "Use a name from 1 to 40 characters.", http.StatusBadRequest)
+		a.authError(w, r, "signup", "Use a name from 1 to 40 characters.", http.StatusBadRequest, "signup-name")
 		return
 	}
 	if !usernamePattern.MatchString(username) {
-		a.authError(w, r, "signup", "Choose 3–32 letters or numbers. Dots, dashes, and underscores are okay in the middle.", http.StatusBadRequest)
+		a.authError(w, r, "signup", "Choose 3–32 letters or numbers. Dots, dashes, and underscores are okay in the middle.", http.StatusBadRequest, "signup-username")
 		return
 	}
 	if message := passwordProblem(password, r.FormValue("password_confirm")); message != "" {
-		a.authError(w, r, "signup", message, http.StatusBadRequest)
+		a.authError(w, r, "signup", message, http.StatusBadRequest, "signup-password", "signup-confirm")
 		return
 	}
 	if !a.takeAuthSlot() {
@@ -374,7 +375,7 @@ func (a *App) signup(w http.ResponseWriter, r *http.Request) {
 		SessionExpiresAt: expires, CreatedAt: a.now(),
 	})
 	if errors.Is(err, store.ErrUsernameTaken) {
-		a.authError(w, r, "signup", "That username is not available. Try a slightly different one.", http.StatusConflict)
+		a.authError(w, r, "signup", "That username is not available. Try a slightly different one.", http.StatusConflict, "signup-username")
 		return
 	}
 	if err != nil {
@@ -439,7 +440,7 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 		valid = false
 	}
 	if err != nil || !valid {
-		a.authError(w, r, "login", "That username and password did not match.", http.StatusUnauthorized)
+		a.authError(w, r, "login", "That username and password did not match.", http.StatusUnauthorized, "login-username", "login-password")
 		return
 	}
 	if err := a.startUserSession(w, r, credential.User); err != nil {
@@ -470,7 +471,7 @@ func (a *App) recover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if message := passwordProblem(r.FormValue("password"), r.FormValue("password_confirm")); message != "" {
-		a.authError(w, r, "recover", message, http.StatusBadRequest)
+		a.authError(w, r, "recover", message, http.StatusBadRequest, "recover-password", "recover-confirm")
 		return
 	}
 	if !a.takeAuthSlot() {
@@ -491,7 +492,7 @@ func (a *App) recover(w http.ResponseWriter, r *http.Request) {
 	}
 	err = a.store.RecoverLocalUser(r.Context(), username, localauth.RecoveryCodeHash(r.FormValue("recovery_code")), passwordHash, codeHashes, a.now())
 	if errors.Is(err, store.ErrRecoveryCode) {
-		a.authError(w, r, "recover", "Those account and recovery details did not match.", http.StatusUnauthorized)
+		a.authError(w, r, "recover", "Those account and recovery details did not match.", http.StatusUnauthorized, "recover-username", "recovery-code")
 		return
 	}
 	if err != nil {
@@ -555,10 +556,14 @@ func (a *App) authPageData(w http.ResponseWriter, r *http.Request) PageData {
 	return data
 }
 
-func (a *App) authError(w http.ResponseWriter, r *http.Request, page, message string, status int) {
+func (a *App) authError(w http.ResponseWriter, r *http.Request, page, message string, status int, invalidFields ...string) {
 	data := a.authPageData(w, r)
 	data.BodyClass = "auth-page"
 	data.FormError = message
+	data.FormInvalid = make(map[string]bool, len(invalidFields))
+	for _, field := range invalidFields {
+		data.FormInvalid[field] = true
+	}
 	data.FormUsername = normalizeUsername(r.FormValue("username"))
 	data.FormName = strings.Join(strings.Fields(r.FormValue("name")), " ")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

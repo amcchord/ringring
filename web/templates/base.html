@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="/static/site.css">
 </head>
 <body class="{{.BodyClass}}">
+  <a class="skip-link" href="#main-content">Skip to main content</a>
   <header class="site-header">
     <a class="brand" href="/" aria-label="RingRing home">
       <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
@@ -36,7 +37,7 @@
     </nav>
   </header>
   {{if .Notice}}<div class="global-notice" role="status"><span aria-hidden="true">✓</span>{{.Notice}}</div>{{end}}
-  <main>{{template "content" .}}</main>
+  <main id="main-content" tabindex="-1">{{template "content" .}}</main>
   <footer class="site-footer">
     <p><strong>RingRing never calls the regular phone network.</strong> It cannot make emergency calls.</p>
     <p>Open source with care in 2026.</p>

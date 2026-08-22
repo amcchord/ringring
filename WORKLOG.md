@@ -2,6 +2,35 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Web accessibility and simulated mobile usability
+
+### Shipped
+
+- Added a keyboard-first skip link, a consistent high-contrast three-pixel focus ring, and 44px minimum standalone targets across navigation, account links, compact management actions, disclosure controls, and setup links. Checkbox controls retain their native visual size but expose their full 76px-or-taller labeled card as the hit area.
+- Replaced the automatically moving highlights ticker with a static semantic list, hid decorative emoji and art from assistive technology where appropriate, and retained meaningful image/status labels. Converted the manual SIP credentials into a definition list so each one-time value has an explicit term/value relationship.
+- Added visible, programmatically associated instructions for usernames, recovery codes, extensions, invitation URLs, Linphone provisioning URLs, and OpenAI spend amounts. Authentication errors now identify only the relevant fields with `aria-invalid` and shared descriptions while keeping the existing live alert.
+- Tightened the playful palette to meet measured WCAG contrast, including coral heading/accent variants, muted copy, and white copy on the purple service section. The mobile forms retain 16px inputs, clear required/optional guidance, and one-column reflow without changing the no-JavaScript core flow or exposing a SIP secret to the clipboard.
+
+### Decisions
+
+- Use WCAG 2.2 AA as the web baseline while preserving RingRing's stricter 44px project target. The current W3C AA target-size minimum is smaller, but family phone setup benefits from the larger hit areas already promised in `AGENTS.md`.
+- Remove nonessential automatic motion instead of adding a pause control to a decorative marketing strip. Respecting reduced-motion preferences remains useful for transitions, but it is not a substitute for a generally operable pause/stop mechanism.
+- Keep invitation and provisioning links in labeled read-only fields and manual credentials in semantic HTML without JavaScript copy buttons. The pages still work under the existing `script-src 'none'` policy and avoid silently putting one-time credentials on a persistent system clipboard.
+- Split the roadmap's combined accessibility/device item. The web and simulated mobile pass is complete; actual ATA, desk-phone, mobile-background, Wi-Fi/cellular, and two-household experience evidence remains a separate physical-device gate.
+
+### Verification
+
+- Added embedded-template regression tests for the skip/main relationship, language, visible focus/touch contract, decorative-icon treatment, associated field guidance, semantic setup credentials, the static highlights strip, and calculated WCAG contrast ratios for the core palette.
+- `make check` passes formatting, vet, and the complete race-enabled suite. The full local browser flow created disposable host/party state, issued an invite, claimed a neutral test member, and audited the one-time setup without printing or screenshotting its token or credentials.
+- Browser QA passed at 320×568, 390×844, and 1280×900 with no horizontal overflow. Standalone controls measure at least 44px high; form fields are 52px with 16px text; checkbox card targets measure 81–99px; the skip link measures 48px and shows a solid 3px focus outline with 3px offset; the corrected purple-section text measures 5.1:1. The setup card exposes five definition pairs and the invite/provisioning fields each have a visible associated label and description.
+- The final browser run had no console errors. Its tab and viewport override were closed/reset, and the disposable local server/database were stopped and moved to Trash. No production state, real family record, external provider, or physical phone was used.
+
+### Remaining
+
+- Complete the physical-device usability gate: configure real family ATAs/phones, call across two remote networks, and verify foreground/background ringing plus Wi-Fi/cellular transitions.
+- Complete the external child-safety review and confirm OpenAI Zero Data Retention before enabling AI for any caller under 13.
+- Add guided installation/upgrades, a SIP TLS device matrix, privacy-preserving observability, further threat-model tests, and the optional PostgreSQL path.
+
 ## 2026-08-22 — Host-set hard monthly AI spend limits
 
 ### Shipped

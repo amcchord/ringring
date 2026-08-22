@@ -9,7 +9,7 @@
 <section class="party-layout wrap">
   <div class="party-sidebar">
     <div class="panel invite-panel">
-      <span class="panel-icon">💌</span>
+      <span class="panel-icon" aria-hidden="true">💌</span>
       <h2>Invite one phone</h2>
       <p>The link works once and expires after 48 hours. Send it privately to the person setting up the phone.</p>
       <form method="post" action="/parties/{{.Party.ID}}/invites">
@@ -18,15 +18,15 @@
       </form>
       {{if .InviteURL}}
       <div class="reveal-card" role="status">
-        <strong>Your one-time link</strong>
-        <input value="{{.InviteURL}}" readonly aria-label="Invitation URL">
-        <p>Copy it now—RingRing will not show this token again.</p>
+        <label for="invite-url"><strong>Your one-time link</strong></label>
+        <input id="invite-url" value="{{.InviteURL}}" readonly aria-describedby="invite-url-help" autocomplete="off" autocapitalize="none" spellcheck="false">
+        <p id="invite-url-help">Copy the whole link now—RingRing will not show this token again.</p>
       </div>
       {{end}}
     </div>
 
     <div class="panel service-panel">
-      <span class="panel-icon">✨</span>
+      <span class="panel-icon" aria-hidden="true">✨</span>
       <h2>Fun numbers</h2>
       <p>Choose which special lines phones in this party can dial.</p>
       <div class="always-line">
@@ -64,7 +64,7 @@
           <select class="radio-select" id="radio-station" name="radio_station" aria-describedby="radio-station-note">
             {{range .RadioStations}}<option value="{{.ID}}" {{if eq $.Services.RadioStation .ID}}selected{{end}}>{{.Name}} — {{.Description}}</option>{{end}}
           </select>
-          <small class="radio-station-note" id="radio-station-note">Three fixed, instrumental-leaning SomaFM choices for personal family listening. Live programming is not reviewed by RingRing. <a href="https://somafm.com/support/" rel="external">Support SomaFM</a>.</small>
+          <small class="radio-station-note" id="radio-station-note">Three fixed, instrumental-leaning SomaFM choices for personal family listening. Live programming is not reviewed by RingRing. <a href="https://somafm.com/support/" rel="external">Support SomaFM</a></small>
         </div>
         <div class="service-choice ai-service-choice">
           <label class="service-toggle">
@@ -84,7 +84,7 @@
       <p class="service-note">Special lines stay inside this party. RingRing never routes them to the regular phone network.</p>
       {{if .Party.OpenAIProjectID}}
       <div class="ai-spend-card">
-        <span class="panel-icon">🛟</span>
+        <span class="panel-icon" aria-hidden="true">🛟</span>
         <div>
           <h3>Monthly AI guardrail</h3>
           {{if .OpenAISpendLimit}}<p class="ai-spend-current"><strong>{{.OpenAISpendLimit}} each month</strong> {{if eq .Party.OpenAISpendLimitStatus "ready"}}· confirmed enforcing by OpenAI{{else}}· last confirmed by RingRing{{end}}</p>{{else}}<p class="ai-spend-current"><strong>Not yet verified here</strong></p>{{end}}
@@ -99,8 +99,8 @@
           <form class="ai-spend-form" method="post" action="/parties/{{.Party.ID}}/openai-spend-limit">
             <input type="hidden" name="csrf" value="{{.CSRF}}">
             <label for="openai-spend-limit">Monthly limit in US dollars</label>
-            <span class="money-field"><span aria-hidden="true">$</span><input id="openai-spend-limit" name="spend_limit_dollars" type="number" inputmode="decimal" min="0.01" max="{{.OpenAISpendLimitMaxInput}}" step="0.01" value="{{if .OpenAISpendLimitInput}}{{.OpenAISpendLimitInput}}{{else}}{{.OpenAISpendLimitMaxInput}}{{end}}" required></span>
-            {{if eq .Party.OpenAISpendLimitStatus "unknown"}}<small>Saving verifies an existing party’s limit with OpenAI before RingRing calls it confirmed.</small>{{end}}
+            <span class="money-field"><span aria-hidden="true">$</span><input id="openai-spend-limit" name="spend_limit_dollars" type="number" inputmode="decimal" min="0.01" max="{{.OpenAISpendLimitMaxInput}}" step="0.01" value="{{if .OpenAISpendLimitInput}}{{.OpenAISpendLimitInput}}{{else}}{{.OpenAISpendLimitMaxInput}}{{end}}" aria-describedby="openai-spend-help" required></span>
+            <small id="openai-spend-help">Enter $0.01–{{.OpenAISpendLimitMax}}.{{if eq .Party.OpenAISpendLimitStatus "unknown"}} Saving verifies an existing party’s limit with OpenAI before RingRing calls it confirmed.{{end}}</small>
             <button class="button button-primary" type="submit">Set hard monthly limit</button>
           </form>
           {{else if not .OpenAIAdminConfigured}}
@@ -111,7 +111,7 @@
         </div>
       </div>
       <div class="ai-key-card">
-        <span class="panel-icon">🔐</span>
+        <span class="panel-icon" aria-hidden="true">🔐</span>
         <div>
           <h3>Party AI key</h3>
           {{if and $keyReady (not $spendPaused)}}
@@ -179,7 +179,7 @@
       </article>
       {{end}}
     {{else}}
-      <div class="empty-state"><span>📞</span><p>No phones yet. Make the first invite link!</p></div>
+      <div class="empty-state"><span aria-hidden="true">📞</span><p>No phones yet. Make the first invite link!</p></div>
     {{end}}
   </div>
 </section>

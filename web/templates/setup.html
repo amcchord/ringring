@@ -1,7 +1,7 @@
 {{define "title"}}Your phone setup{{end}}
 {{define "content"}}
 <section class="setup-shell wrap">
-  <div class="success-burst">✓</div>
+  <div class="success-burst" aria-hidden="true">✓</div>
   {{if .SetupForHost}}
   <span class="eyebrow">Fresh phone settings</span>
   <h1>{{.Claim.Member.DisplayName}} is ready to <em>reconnect.</em></h1>
@@ -29,8 +29,8 @@
       <details class="provision-details">
         <summary>Configure Linphone by URL instead</summary>
         <label for="linphone-provision-url">Remote provisioning URL</label>
-        <input id="linphone-provision-url" value="{{.LinphoneProvisionURL}}" readonly autocomplete="off" autocapitalize="none" spellcheck="false">
-        <p>From Linphone’s home screen, choose <strong>Provisioning Link</strong> and paste it there—not into a web browser.</p>
+        <input id="linphone-provision-url" value="{{.LinphoneProvisionURL}}" readonly autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="linphone-provision-help">
+        <p id="linphone-provision-help">Copy the whole URL. From Linphone’s home screen, choose <strong>Provisioning Link</strong> and paste it there—not into a web browser.</p>
       </details>
       <p class="one-time-note">The QR contains a one-time RingRing setup URL, not the SIP password itself. It expires after 30 minutes and stops working after the first fetch.</p>
     </div>
@@ -45,13 +45,13 @@
     <h2>Manual settings</h2>
     <p>Use these for an ATA, desk phone, or any softphone that is not Linphone.</p>
   </div>
-  <div class="setup-card">
-    <div><span>SIP server / registrar</span><strong>{{.SIPPublicHost}}</strong></div>
-    <div><span>Username / auth ID</span><strong>{{.Claim.Device.SIPUsername}}</strong></div>
-    <div class="secret-value"><span>Password</span><strong>{{.Claim.SIPSecret}}</strong></div>
-    <div><span>Your extension</span><strong>{{.Claim.Member.Extension}}</strong></div>
-    <div><span>Transport</span><strong>UDP · port 5060</strong></div>
-  </div>
+  <dl class="setup-card">
+    <div><dt>SIP server / registrar</dt><dd><strong>{{.SIPPublicHost}}</strong></dd></div>
+    <div><dt>Username / auth ID</dt><dd><strong>{{.Claim.Device.SIPUsername}}</strong></dd></div>
+    <div class="secret-value"><dt>Password</dt><dd><strong>{{.Claim.SIPSecret}}</strong></dd></div>
+    <div><dt>Your extension</dt><dd><strong>{{.Claim.Member.Extension}}</strong></dd></div>
+    <div><dt>Transport</dt><dd><strong>UDP · port 5060</strong></dd></div>
+  </dl>
   <div class="warning-card"><strong>Save it before you leave.</strong><p>For safety, RingRing cannot display this password again. If it is lost, the party host can make a fresh one.</p></div>
   <div class="phone-test-card">
     <span class="service-number">*10</span>
@@ -68,9 +68,9 @@
       <p>The labels vary by brand, but the five manual settings above are all most devices need.</p>
     </div>
     <div class="guide-grid">
-      <article><span>☎️</span><h3>Telephone adapter</h3><ol><li>Plug the telephone into <strong>PHONE 1</strong>, not the wall.</li><li>Open the adapter’s Line 1 or FXS page.</li><li>Enter the server as proxy/registrar and the username as both User ID and Auth ID.</li></ol></article>
-      <article><span>📟</span><h3>VoIP desk phone</h3><ol><li>Add a SIP account or line.</li><li>Use the extension as the display number.</li><li>Set transport to UDP and registration expiry to 300–600 seconds.</li></ol></article>
-      <article><span>📱</span><h3>Softphone app</h3><ol><li>Add an account manually—do not choose a public provider.</li><li>Use the server, username, and password exactly as shown.</li><li>Allow microphone access, then call <strong>*10</strong> to test both directions.</li></ol></article>
+      <article><span aria-hidden="true">☎️</span><h3>Telephone adapter</h3><ol><li>Plug the telephone into <strong>PHONE 1</strong>, not the wall.</li><li>Open the adapter’s Line 1 or FXS page.</li><li>Enter the server as proxy/registrar and the username as both User ID and Auth ID.</li></ol></article>
+      <article><span aria-hidden="true">📟</span><h3>VoIP desk phone</h3><ol><li>Add a SIP account or line.</li><li>Use the extension as the display number.</li><li>Set transport to UDP and registration expiry to 300–600 seconds.</li></ol></article>
+      <article><span aria-hidden="true">📱</span><h3>Softphone app</h3><ol><li>Add an account manually—do not choose a public provider.</li><li>Use the server, username, and password exactly as shown.</li><li>Allow microphone access, then call <strong>*10</strong> to test both directions.</li></ol></article>
     </div>
   </section>
   <div class="emergency-note"><strong>RingRing is a private toy phone network.</strong> It cannot call regular or emergency phone numbers. Keep another way to call emergency services.</div>

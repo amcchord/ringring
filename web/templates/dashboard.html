@@ -7,7 +7,7 @@
 </section>
 <section class="dashboard-grid wrap">
   <div class="panel create-panel">
-    <span class="panel-icon">🎈</span>
+    <span class="panel-icon" aria-hidden="true">🎈</span>
     <h2>Start a new party</h2>
     <form method="post" action="/parties" class="stack-form">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
@@ -21,13 +21,13 @@
     {{if .Parties}}
       {{range .Parties}}
       <a class="party-row" href="/parties/{{.ID}}">
-        <span class="party-avatar">☎</span>
+        <span class="party-avatar" aria-hidden="true">☎</span>
         <span><strong>{{.Name}}</strong><small>AI voice: {{if or (eq .OpenAIStatus "rotating") (eq .OpenAIStatus "rotation-error")}}paused for key safety{{else if or (eq .OpenAISpendLimitStatus "updating") (eq .OpenAISpendLimitStatus "update-error")}}paused for limit safety{{else if eq .OpenAIStatus "ready"}}ready{{else if eq .OpenAIStatus "pending"}}getting ready{{else}}unavailable{{end}}</small></span>
         <span class="row-arrow">→</span>
       </a>
       {{end}}
     {{else}}
-      <div class="empty-state"><span>✨</span><p>Your first party will appear here.</p></div>
+      <div class="empty-state"><span aria-hidden="true">✨</span><p>Your first party will appear here.</p></div>
     {{end}}
   </div>
 </section>
