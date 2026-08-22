@@ -58,4 +58,4 @@ Do not open a public issue for a vulnerability that could expose credentials or 
 
 ## Known preview gaps
 
-HTTPS/TLS, narrow published ports, cross-party configuration isolation, native account recovery, SIP credential rotation/revocation, and reproducible authentication blocking are implemented. The service remains a preview until the live firewall jail is verified after deployment, backup/restore is exercised, two remote physical devices pass two-way audio, and host/member deletion flows exist.
+HTTPS/TLS, narrow published ports, cross-party configuration isolation, native account recovery, SIP credential rotation/revocation, and live authentication blocking are verified. The service remains a preview until backup/restore is exercised, two remote physical devices pass two-way audio, and host/member deletion flows exist.

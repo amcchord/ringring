@@ -24,12 +24,20 @@ This is the durable, chronological project record. Add new entries at the top. C
 
 - `make check` passes with formatting, vet, and race-enabled tests. Coverage includes native signup/login/recovery, duplicate usernames, one-time recovery reveal, old-session and old-password invalidation, host-scoped device changes, party-scoped service routing, weather lookup, speech conversion, disclosure text, and cache-disable behavior.
 - The complete native signup and sign-in flow passed in a real browser at desktop and 390×844 mobile viewports. The recovery screen issued exactly eight codes and the second reveal was rejected.
-- Shell syntax and whitespace checks pass. Modified Compose images, the live Fail2Ban jail, FastAGI connectivity, and Asterisk media applications still require production deployment verification.
+- Shell syntax, Compose configuration, and whitespace checks pass.
 - Production image verification confirmed that `MP3Player` is loaded and `mpg123` can decode the fixed SomaFM stream over HTTP; the HTTPS form fails because this decoder has no TLS URL support.
+
+### Production
+
+- Took an offline, root-only backup of the closed SQLite state before migration, restarted the old app successfully, then deployed commit `c427b06` from the clean `/opt/ringring` checkout.
+- Generated a high-entropy family access code in the root-only app environment. Google credentials remain empty and are not needed.
+- Verified healthy app and Asterisk containers, the live native signup/login/recovery pages at a 390×844 viewport, secure/HTTP-only/strict authentication CSRF cookies, CSP/HSTS/no-store headers, generic invalid-login behavior, and rejection of an invalid family code. Verification created no user, party, device, or OpenAI project.
+- Verified the forward-created `local_credentials`, `recovery_codes`, and `party_services` tables; private FastAGI connectivity; Asterisk's UDP transport; and the loaded `MP3Player` application.
+- Installed Fail2Ban 1.1.0, validated the Asterisk jail, and exercised a reversible ban of the reserved test address `192.0.2.1`. The rule appeared before Docker's `RETURN` in `DOCKER-USER` and was removed afterward.
+- Production logs contained no application or Asterisk errors/warnings after deployment.
 
 ### Remaining
 
-- Deploy this release and verify native host signup, the SIP firewall, special lines, and rollback safety at `ringring.live`.
 - Verify registration and two-way audio with two remote physical devices.
 - Exercise backup/restore and add host/member deletion flows.
 - Design the interactive OpenAI voice line with child-appropriate instructions, clear disclosure, and no default transcript retention.
