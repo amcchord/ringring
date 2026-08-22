@@ -302,12 +302,27 @@ set +e
 wait_for_container ringring-sip-smoke-phone-b 25
 ring_result=$?
 set -e
-test "$ring_result" -eq 0
-grep -R -q 'RingRing setup' "$work_directory/logs/ringring-sip-smoke-phone-b"
-docker logs ringring-sip-smoke-asterisk 2>&1 | grep -q "Playing 'hello\."
-docker exec ringring-sip-smoke-asterisk test ! -e /var/log/asterisk/cdr-csv/Master.csv
+if test "$ring_result" -ne 0; then
+  echo "The incoming ring-test phone did not complete cleanly." >&2
+  exit 1
+fi
+if ! grep -R -q 'RingRing setup' "$work_directory/logs/ringring-sip-smoke-phone-b"; then
+  echo "The incoming ring-test INVITE did not carry the fixed caller label." >&2
+  exit 1
+fi
+if ! docker logs ringring-sip-smoke-asterisk 2>&1 | grep -q "Playing 'hello\."; then
+  echo "Asterisk did not play the first bundled ring-test prompt." >&2
+  exit 1
+fi
+if ! docker exec ringring-sip-smoke-asterisk test ! -e /var/log/asterisk/cdr-csv/Master.csv; then
+  echo "The CDR-disabled ring-test unexpectedly created a CSV call record." >&2
+  exit 1
+fi
 channels=$(docker exec ringring-sip-smoke-asterisk asterisk -rx 'core show channels count')
-printf '%s\n' "$channels" | grep -q '^0 active channels'
+if ! printf '%s\n' "$channels" | grep -q '^0 active channels'; then
+  echo "The incoming ring test left an active Asterisk channel." >&2
+  exit 1
+fi
 
 docker rm -f ringring-sip-smoke-phone-b >/dev/null
 find "$work_directory/logs/ringring-sip-smoke-phone-b" -type f -delete
