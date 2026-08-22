@@ -14,6 +14,8 @@ RingRing is designed for family use and may handle children's voices and names. 
 
 RingRing stores a host name and username, member display labels, extensions, device labels, and operational timestamps. An email address is neither requested nor required by native accounts. It does not record calls. RingRing does not persist AI input audio, output audio, or transcript events. Provider-side API retention is controlled separately by the OpenAI organization's data controls. The default frontend includes no advertising, behavioral analytics, or third-party trackers.
 
+Current SIP contact presence is visible only to the authenticated host of that party. The app queries it on demand over private AMI and keeps only the generated SIP username plus a normalized state long enough to render the no-store response. It does not persist or expose the registered contact URI, network address, port, call ID, or phone user-agent. Public, signup, login, invitation, and one-time setup pages do not query or reveal presence.
+
 The `*10` phone test is an in-memory Asterisk media loop inside the caller's party context. It sends the caller's RTP straight back to that same authenticated channel and does not record, persist, transcribe, or send audio to another service.
 
 ## Deletion lifecycle

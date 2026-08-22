@@ -73,16 +73,18 @@
   </div>
   <div class="directory">
     <div class="list-heading"><h2>Phone book</h2><span>Dial inside this party</span></div>
+    {{if .PresenceNotice}}<p class="presence-notice" role="status">{{.PresenceNotice}}</p>{{end}}
     {{if .Members}}
-      {{$party := .Party}}{{$csrf := .CSRF}}
+      {{$root := .}}{{$party := .Party}}{{$csrf := .CSRF}}
       {{range .Members}}
       <article class="member-row">
         <span class="extension">{{.Extension}}</span>
         <span class="member-details">
           <strong>{{.DisplayName}}</strong>
           {{range .Devices}}
+          {{$phone := index $root.DevicePresence .ID}}
           <span class="device-line">
-            <span><small>{{.Label}} · {{if .RevokedAt}}disconnected{{else}}ready{{end}}</small></span>
+            <span><small>{{.Label}} · <span class="device-presence {{$phone.CSSClass}}">{{$phone.Label}}</span></small></span>
             <details class="device-actions">
               <summary>{{if .RevokedAt}}Reconnect{{else}}Manage{{end}}</summary>
               <div class="device-action-card">
@@ -103,7 +105,8 @@
           {{end}}
           <a class="member-remove-link" href="/parties/{{$party.ID}}/members/{{.ID}}/delete">Remove this member</a>
         </span>
-        <span class="status-dot{{range .Devices}}{{if .RevokedAt}} status-off{{end}}{{end}}" title="Phone status"></span>
+        {{$memberStatus := index $root.MemberPresence .ID}}
+        <span class="status-dot {{$memberStatus.CSSClass}}" role="img" aria-label="{{$memberStatus.Label}}" title="{{$memberStatus.Label}}"></span>
       </article>
       {{end}}
     {{else}}

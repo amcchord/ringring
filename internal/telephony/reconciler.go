@@ -1,15 +1,10 @@
 package telephony
 
 import (
-	"bufio"
 	"context"
-	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
-	"strings"
-	"time"
 
 	"github.com/amcchord/ringring/internal/model"
 )
@@ -97,74 +92,4 @@ func atomicWrite(path string, content []byte) error {
 		return fmt.Errorf("replace config: %w", err)
 	}
 	return nil
-}
-
-type AMI struct {
-	Address  string
-	Username string
-	Secret   string
-	Timeout  time.Duration
-}
-
-func (a AMI) Reload(ctx context.Context) error {
-	if a.Address == "" || a.Secret == "" {
-		return nil
-	}
-	timeout := a.Timeout
-	if timeout == 0 {
-		timeout = 5 * time.Second
-	}
-	dialer := net.Dialer{Timeout: timeout}
-	connection, err := dialer.DialContext(ctx, "tcp", a.Address)
-	if err != nil {
-		return fmt.Errorf("connect to AMI: %w", err)
-	}
-	defer connection.Close()
-	_ = connection.SetDeadline(time.Now().Add(timeout))
-
-	reader := bufio.NewReader(connection)
-	if _, err := reader.ReadString('\n'); err != nil {
-		return fmt.Errorf("read AMI greeting: %w", err)
-	}
-	login := "Action: Login\r\nUsername: " + a.Username + "\r\nSecret: " + a.Secret + "\r\nEvents: off\r\n\r\n"
-	if _, err := connection.Write([]byte(login)); err != nil {
-		return fmt.Errorf("write AMI login: %w", err)
-	}
-	if err := expectResponse(reader, "Success"); err != nil {
-		return fmt.Errorf("AMI login: %w", err)
-	}
-	if _, err := connection.Write([]byte("Action: Command\r\nCommand: core reload\r\n\r\n")); err != nil {
-		return fmt.Errorf("write AMI reload: %w", err)
-	}
-	if err := expectResponse(reader, "Success", "Follows"); err != nil {
-		return fmt.Errorf("AMI reload: %w", err)
-	}
-	_, _ = connection.Write([]byte("Action: Logoff\r\n\r\n"))
-	return nil
-}
-
-func expectResponse(reader *bufio.Reader, allowed ...string) error {
-	var response string
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			return err
-		}
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			break
-		}
-		if strings.HasPrefix(strings.ToLower(trimmed), "response:") {
-			response = strings.TrimSpace(strings.TrimPrefix(trimmed, "Response:"))
-		}
-	}
-	if response == "" {
-		return errors.New("response had no status")
-	}
-	for _, value := range allowed {
-		if strings.EqualFold(response, value) {
-			return nil
-		}
-	}
-	return fmt.Errorf("response was %s", response)
 }

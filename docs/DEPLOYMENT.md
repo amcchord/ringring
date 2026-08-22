@@ -97,10 +97,11 @@ docker compose up -d
 docker compose ps
 curl --fail https://ringring.live/readyz
 docker compose exec asterisk asterisk -rx 'pjsip show transports'
+docker compose exec -T app ringring verify-ami
 fail2ban-client status ringring-sip
 ```
 
-Review `docker compose logs --tail=100` after every deployment. Asterisk is compiled from the pinned official source release and its published SHA-256 file is checked during the image build.
+`verify-ami` exercises the private manager login and complete PJSIP contact-list action, then prints only an `ok` status and aggregate contact count. It never prints endpoint names, contact URIs, addresses, user agents, or credentials. Review `docker compose logs --tail=100` after every deployment. Asterisk is compiled from the pinned official source release and its published SHA-256 file is checked during the image build.
 
 ## Backup and recovery
 

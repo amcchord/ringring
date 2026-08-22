@@ -1,0 +1,183 @@
+package telephony
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestAMIContactStatuses(t *testing.T) {
+	address, finished := serveAMI(t, func(connection net.Conn, reader *bufio.Reader) error {
+		if err := acceptTestLogin(connection, reader); err != nil {
+			return err
+		}
+		action, err := readAMIFrame(reader)
+		if err != nil {
+			return err
+		}
+		if action["action"] != "PJSIPShowContacts" || action["actionid"] != contactsActionID {
+			return fmt.Errorf("unexpected contact action: %#v", action)
+		}
+		_, err = io.WriteString(connection, strings.Join([]string{
+			"Response: Success\r\nActionID: ringring-contacts\r\nEventList: start\r\n\r\n",
+			"Event: ContactList\r\nActionID: ringring-contacts\r\nEndpoint: rrd_alpha\r\nStatus: Unreachable\r\nUri: sip:secret-address@example.test\r\nUserAgent: private test phone\r\n\r\n",
+			"Event: ContactList\r\nActionID: ringring-contacts\r\nEndpoint: rrd_alpha\r\nStatus: Reachable\r\n\r\n",
+			"Event: ContactList\r\nActionID: ringring-contacts\r\nEndpoint: rrd_beta\r\nStatus: NonQualified\r\n\r\n",
+			"Event: ContactList\r\nActionID: ringring-contacts\r\nEndpoint: rrd_gamma\r\nStatus: FutureStatus\r\n\r\n",
+			"Event: ContactList\r\nActionID: ringring-contacts\r\nEndpoint: invalid/endpoint\r\nStatus: Reachable\r\n\r\n",
+			"Event: ContactListComplete\r\nActionID: ringring-contacts\r\nListItems: 5\r\n\r\n",
+		}, ""))
+		return err
+	})
+
+	statuses, err := (AMI{Address: address, Username: "ringring", Secret: "test-only-secret", Timeout: time.Second}).ContactStatuses(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := <-finished; err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]ContactState{
+		"rrd_alpha": ContactReachable,
+		"rrd_beta":  ContactNonQualified,
+		"rrd_gamma": ContactUnknown,
+	}
+	if len(statuses) != len(want) {
+		t.Fatalf("statuses = %#v, want %#v", statuses, want)
+	}
+	for endpoint, state := range want {
+		if statuses[endpoint] != state {
+			t.Errorf("status for %s = %q, want %q", endpoint, statuses[endpoint], state)
+		}
+	}
+}
+
+func TestAMIContactStatusesFailsClosed(t *testing.T) {
+	address, finished := serveAMI(t, func(connection net.Conn, reader *bufio.Reader) error {
+		if err := acceptTestLogin(connection, reader); err != nil {
+			return err
+		}
+		if _, err := readAMIFrame(reader); err != nil {
+			return err
+		}
+		_, err := io.WriteString(connection, "Response: Error\r\nActionID: ringring-contacts\r\nMessage: Permission denied\r\n\r\n")
+		return err
+	})
+
+	_, err := (AMI{Address: address, Username: "ringring", Secret: "test-only-secret", Timeout: time.Second}).ContactStatuses(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "response was Error") {
+		t.Fatalf("ContactStatuses error = %v", err)
+	}
+	if strings.Contains(err.Error(), "test-only-secret") {
+		t.Fatal("AMI error disclosed the login secret")
+	}
+	if serverErr := <-finished; serverErr != nil {
+		t.Fatal(serverErr)
+	}
+}
+
+func TestAMIReload(t *testing.T) {
+	address, finished := serveAMI(t, func(connection net.Conn, reader *bufio.Reader) error {
+		if err := acceptTestLogin(connection, reader); err != nil {
+			return err
+		}
+		action, err := readAMIFrame(reader)
+		if err != nil {
+			return err
+		}
+		if action["action"] != "Command" || action["command"] != "core reload" {
+			return fmt.Errorf("unexpected reload action: %#v", action)
+		}
+		_, err = io.WriteString(connection, "Response: Follows\r\nPrivilege: Command\r\nOutput: All modules reloaded\r\n\r\n")
+		return err
+	})
+
+	if err := (AMI{Address: address, Username: "ringring", Secret: "test-only-secret", Timeout: time.Second}).Reload(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-finished; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAMIContactStatusesRejectsIncompleteList(t *testing.T) {
+	address, finished := serveAMI(t, func(connection net.Conn, reader *bufio.Reader) error {
+		if err := acceptTestLogin(connection, reader); err != nil {
+			return err
+		}
+		if _, err := readAMIFrame(reader); err != nil {
+			return err
+		}
+		_, err := io.WriteString(connection, "Response: Success\r\nActionID: ringring-contacts\r\nEventList: start\r\n\r\n")
+		return err
+	})
+
+	_, err := (AMI{Address: address, Username: "ringring", Secret: "test-only-secret", Timeout: time.Second}).ContactStatuses(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "read AMI contact query") {
+		t.Fatalf("ContactStatuses error = %v", err)
+	}
+	if serverErr := <-finished; serverErr != nil {
+		t.Fatal(serverErr)
+	}
+}
+
+func TestWriteAMIActionRejectsLineInjection(t *testing.T) {
+	var output strings.Builder
+	err := writeAMIAction(&output, "Login", "Secret", "safe\r\nAction: Command")
+	if err == nil || output.Len() != 0 {
+		t.Fatalf("writeAMIAction = %q, %v", output.String(), err)
+	}
+}
+
+func serveAMI(t *testing.T, handler func(net.Conn, *bufio.Reader) error) (string, <-chan error) {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	finished := make(chan error, 1)
+	go func() {
+		defer close(finished)
+		connection, err := listener.Accept()
+		if err != nil {
+			finished <- err
+			return
+		}
+		defer connection.Close()
+		_ = connection.SetDeadline(time.Now().Add(2 * time.Second))
+		if _, err := io.WriteString(connection, "Asterisk Call Manager/9.9.9\r\n"); err != nil {
+			finished <- err
+			return
+		}
+		finished <- handler(connection, bufio.NewReader(connection))
+	}()
+	t.Cleanup(func() { _ = listener.Close() })
+	return listener.Addr().String(), finished
+}
+
+func acceptTestLogin(connection net.Conn, reader *bufio.Reader) error {
+	login, err := readAMIFrame(reader)
+	if err != nil {
+		return err
+	}
+	if login["action"] != "Login" || login["username"] != "ringring" || login["secret"] != "test-only-secret" || login["events"] != "off" {
+		return fmt.Errorf("unexpected login fields: %#v", login)
+	}
+	_, err = io.WriteString(connection, "Response: Success\r\nMessage: Authentication accepted\r\n\r\n")
+	return err
+}
+
+func TestAMIContactStatusesHonorsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := (AMI{Address: "127.0.0.1:1", Username: "ringring", Secret: "test-only-secret"}).ContactStatuses(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("ContactStatuses error = %v, want context canceled", err)
+	}
+}

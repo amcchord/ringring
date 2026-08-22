@@ -54,6 +54,8 @@ The database is authoritative. When a device or party setting changes, the app:
 
 On startup, the app regenerates all telephony configuration from the database.
 
+The authenticated party page reads current PJSIP contact state through the same private AMI boundary. Asterisk emits one `ContactList` event per registered contact and a completion event; the app immediately reduces those events to a generated SIP username and normalized reachability state. Contact URIs, source addresses, ports, call IDs, and user-agent strings never enter the template or database. Results are not cached or exposed on public or invitation pages. A failed or slow AMI query produces an explicit “status unavailable” hint while leaving host controls usable.
+
 Deletion follows the same source-of-truth rule. Removing a member cascades through its devices; removing a party cascades through invitations, services, members, devices, and encrypted party credentials. The app then reconciles the smaller desired configuration with Asterisk. If the private reload fails, the deletion remains authoritative in SQLite, the host receives an operator-retry warning, and the next successful reconciliation or app startup removes the stale generated route.
 
 A party with an OpenAI project has an additional external boundary: the app retrieves and archives that project before deleting local party state. An archived response is accepted on retry, so a completed external archive followed by a failed local delete can safely be retried. An archive error fails closed and leaves the party, its members, and encrypted runtime key intact. A host account is deleted only after a transaction confirms that it owns no parties.

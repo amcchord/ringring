@@ -2,6 +2,32 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Honest host-only phone presence
+
+### Shipped
+
+- Replaced the host directory's static “ready” claim with live per-device states: online, checking, not reachable, not registered, status unavailable, or deliberately disconnected.
+- Added a bounded private AMI client for Asterisk's `PJSIPShowContacts` event list. It keeps only each generated endpoint identifier and normalized status, rejects unsafe identifiers and oversized/incomplete responses, and preserves the existing reload behavior.
+- Added a safe `ringring verify-ami` operator command that reports only success and the aggregate contact count.
+- Added text labels, accessible aggregate status descriptions, distinct color hints, and a compact availability notice that keep the host controls usable if Asterisk cannot answer.
+
+### Decisions
+
+- Keep presence host-only and ephemeral. The query runs only after party ownership is verified; contact URIs, IP addresses, ports, call IDs, and user agents are discarded before the web layer and nothing is persisted.
+- Treat registration and reachability as different facts. A missing contact is “not registered,” an Asterisk-qualified failure is “not reachable,” and an initial unknown status is “checking.” Revocation always wins and displays “disconnected.”
+- Fail open for administration but closed for claims: a two-second timeout or protocol error yields “status unavailable,” never a false offline/online result and never a failed party page.
+
+### Verification
+
+- Fake AMI protocol tests cover authenticated login, complete event-list parsing, duplicate-contact precedence, known and future statuses, unsafe endpoint rejection, permission errors without secret disclosure, incomplete lists, canceled contexts, line-injection rejection, and the existing reload action.
+- Authenticated web tests cover every rendered state, explicit AMI failure fallback, revocation overriding a previously online contact, accessible member labels, and denial before any presence query for another signed-in host.
+- `make check` passes with formatting, vet, and the full race-enabled suite. A disposable browser flow created and claimed a phone, then verified the unavailable-state directory at desktop and 390×844 widths with no horizontal overflow; its browser tab and all temporary state were removed.
+
+### Remaining
+
+- Verify the new AMI action against the production manager account and deploy after GitHub Actions passes.
+- Register real remote hardware so the live dashboard can exercise reachable and unreachable transitions.
+
 ## 2026-08-22 — One-phone two-way audio test
 
 ### Shipped

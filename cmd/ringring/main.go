@@ -17,6 +17,7 @@ import (
 	"github.com/amcchord/ringring/internal/openairuntime"
 	"github.com/amcchord/ringring/internal/secure"
 	"github.com/amcchord/ringring/internal/store"
+	"github.com/amcchord/ringring/internal/telephony"
 	"github.com/amcchord/ringring/internal/voice"
 	"github.com/amcchord/ringring/internal/weather"
 	"github.com/amcchord/ringring/internal/webapp"
@@ -32,18 +33,41 @@ func main() {
 		os.Exit(1)
 	}
 	if len(os.Args) > 1 {
-		if len(os.Args) != 2 || os.Args[1] != "verify-state" {
+		if len(os.Args) != 2 {
 			logger.Error("unknown command")
 			os.Exit(2)
 		}
-		report, err := maintenance.VerifyState(context.Background(), cfg.DatabasePath, cfg.MasterKey)
-		if err != nil {
-			logger.Error("verify restored state", "error", err)
-			os.Exit(1)
-		}
-		if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
-			logger.Error("write verification report", "error", err)
-			os.Exit(1)
+		switch os.Args[1] {
+		case "verify-state":
+			report, err := maintenance.VerifyState(context.Background(), cfg.DatabasePath, cfg.MasterKey)
+			if err != nil {
+				logger.Error("verify restored state", "error", err)
+				os.Exit(1)
+			}
+			if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
+				logger.Error("write verification report", "error", err)
+				os.Exit(1)
+			}
+		case "verify-ami":
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			statuses, err := (telephony.AMI{
+				Address: cfg.AsteriskAMIAddr, Username: cfg.AsteriskAMIUser, Secret: cfg.AsteriskAMISecret,
+			}).ContactStatuses(ctx)
+			if err != nil {
+				logger.Error("verify AMI contact access", "error", err)
+				os.Exit(1)
+			}
+			if err := json.NewEncoder(os.Stdout).Encode(struct {
+				Status       string `json:"status"`
+				ContactCount int    `json:"contact_count"`
+			}{Status: "ok", ContactCount: len(statuses)}); err != nil {
+				logger.Error("write AMI verification report", "error", err)
+				os.Exit(1)
+			}
+		default:
+			logger.Error("unknown command")
+			os.Exit(2)
 		}
 		return
 	}

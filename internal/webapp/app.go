@@ -51,6 +51,7 @@ type App struct {
 	cipher    *secure.Cipher
 	openAI    openAIProjectManager
 	telephony *telephony.Reconciler
+	presence  contactPresenceSource
 	weather   weatherGeocoder
 	oauth     *oauth2.Config
 	logger    *slog.Logger
@@ -71,6 +72,15 @@ type weatherGeocoder interface {
 	Geocode(context.Context, string) (weather.Location, error)
 }
 
+type contactPresenceSource interface {
+	ContactStatuses(context.Context) (map[string]telephony.ContactState, error)
+}
+
+type PresenceView struct {
+	Label    string
+	CSSClass string
+}
+
 type PageData struct {
 	BodyClass      string
 	User           *model.User
@@ -81,6 +91,9 @@ type PageData struct {
 	Party          model.Party
 	Member         model.Member
 	Members        []model.Member
+	DevicePresence map[string]PresenceView
+	MemberPresence map[string]PresenceView
+	PresenceNotice string
 	Services       model.PartyServices
 	InviteURL      string
 	JoinCSRF       string
@@ -173,10 +186,14 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 			Scopes:      []string{"openid", "email", "profile"}, Endpoint: google.Endpoint,
 		}
 	}
+	ami := telephony.AMI{Address: cfg.AsteriskAMIAddr, Username: cfg.AsteriskAMIUser, Secret: cfg.AsteriskAMISecret}
+	if cfg.AsteriskAMIAddr != "" && cfg.AsteriskAMISecret != "" {
+		app.presence = ami
+	}
 	if cfg.AsteriskConfigDir != "" {
 		app.telephony = &telephony.Reconciler{
 			Source: database, Cipher: cipher, ConfigDir: cfg.AsteriskConfigDir,
-			Reloader: telephony.AMI{Address: cfg.AsteriskAMIAddr, Username: cfg.AsteriskAMIUser, Secret: cfg.AsteriskAMISecret},
+			Reloader: ami,
 		}
 	}
 
@@ -794,6 +811,7 @@ func (a *App) party(w http.ResponseWriter, r *http.Request, session authSession)
 	data := a.pageData(&session)
 	data.Party = party
 	data.Members = members
+	data.DevicePresence, data.MemberPresence, data.PresenceNotice = a.phonePresence(r.Context(), members)
 	data.Services = services
 	data.InviteURL = a.readInviteFlash(w, r, party.ID)
 	if r.URL.Query().Get("deleted") == "member" {
@@ -804,6 +822,92 @@ func (a *App) party(w http.ResponseWriter, r *http.Request, session authSession)
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	a.render(w, "party", data)
+}
+
+func (a *App) phonePresence(ctx context.Context, members []model.Member) (map[string]PresenceView, map[string]PresenceView, string) {
+	deviceViews := make(map[string]PresenceView)
+	memberViews := make(map[string]PresenceView)
+	activeDevices := false
+	for _, member := range members {
+		for _, device := range member.Devices {
+			if device.RevokedAt == nil {
+				activeDevices = true
+			}
+		}
+	}
+
+	var (
+		statuses  map[string]telephony.ContactState
+		available = !activeDevices
+		notice    string
+	)
+	if activeDevices && a.presence != nil {
+		queryContext, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		var err error
+		statuses, err = a.presence.ContactStatuses(queryContext)
+		if err != nil {
+			a.logger.Warn("load live phone status", "error", err)
+		} else {
+			available = true
+		}
+	}
+	if activeDevices && !available {
+		notice = "Live phone status is temporarily unavailable. Phone settings and controls still work."
+	}
+
+	for _, member := range members {
+		memberView := PresenceView{Label: "No phone connected", CSSClass: "presence-off"}
+		memberRank := 0
+		for _, device := range member.Devices {
+			view, rank := devicePresenceView(device, statuses, available)
+			deviceViews[device.ID] = view
+			if rank > memberRank {
+				memberRank = rank
+				memberView = memberPresenceView(view)
+			}
+		}
+		memberViews[member.ID] = memberView
+	}
+	return deviceViews, memberViews, notice
+}
+
+func devicePresenceView(device model.Device, statuses map[string]telephony.ContactState, available bool) (PresenceView, int) {
+	if device.RevokedAt != nil {
+		return PresenceView{Label: "disconnected", CSSClass: "presence-off"}, 1
+	}
+	if !available {
+		return PresenceView{Label: "status unavailable", CSSClass: "presence-unknown"}, 2
+	}
+	state, registered := statuses[device.SIPUsername]
+	if !registered {
+		return PresenceView{Label: "not registered", CSSClass: "presence-waiting"}, 3
+	}
+	switch state {
+	case telephony.ContactReachable, telephony.ContactNonQualified:
+		return PresenceView{Label: "online", CSSClass: "presence-online"}, 6
+	case telephony.ContactUnreachable:
+		return PresenceView{Label: "not reachable", CSSClass: "presence-trouble"}, 4
+	default:
+		return PresenceView{Label: "checking", CSSClass: "presence-checking"}, 5
+	}
+}
+
+func memberPresenceView(device PresenceView) PresenceView {
+	switch device.CSSClass {
+	case "presence-online":
+		return PresenceView{Label: "At least one phone is online", CSSClass: device.CSSClass}
+	case "presence-checking":
+		return PresenceView{Label: "Checking phone status", CSSClass: device.CSSClass}
+	case "presence-trouble":
+		return PresenceView{Label: "Phone is not reachable", CSSClass: device.CSSClass}
+	case "presence-waiting":
+		return PresenceView{Label: "Phone is not registered", CSSClass: device.CSSClass}
+	case "presence-unknown":
+		return PresenceView{Label: "Phone status is unavailable", CSSClass: device.CSSClass}
+	default:
+		return PresenceView{Label: "All phones are disconnected", CSSClass: "presence-off"}
+	}
 }
 
 func (a *App) updateServices(w http.ResponseWriter, r *http.Request, session authSession) {

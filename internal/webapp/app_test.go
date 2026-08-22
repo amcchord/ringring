@@ -18,6 +18,7 @@ import (
 	"github.com/amcchord/ringring/internal/openaiadmin"
 	"github.com/amcchord/ringring/internal/secure"
 	"github.com/amcchord/ringring/internal/store"
+	"github.com/amcchord/ringring/internal/telephony"
 	"github.com/amcchord/ringring/internal/weather"
 )
 
@@ -29,6 +30,25 @@ type fakeOpenAIProjects struct {
 	archiveAttempts int
 	archived        []string
 	archiveErr      error
+}
+
+type fakeContactPresence struct {
+	statuses map[string]telephony.ContactState
+	err      error
+}
+
+func (f fakeContactPresence) ContactStatuses(context.Context) (map[string]telephony.ContactState, error) {
+	return f.statuses, f.err
+}
+
+type countingContactPresence struct {
+	calls    int
+	statuses map[string]telephony.ContactState
+}
+
+func (f *countingContactPresence) ContactStatuses(context.Context) (map[string]telephony.ContactState, error) {
+	f.calls++
+	return f.statuses, nil
 }
 
 func (*fakeOpenAIProjects) Provision(context.Context, string, string) (openaiadmin.ProvisionedProject, error) {
@@ -181,6 +201,28 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if !strings.Contains(hostPartyBody, "Phone echo test") || !strings.Contains(hostPartyBody, "Always ready") {
 		t.Fatal("party page omitted the always-available echo test")
 	}
+	if !strings.Contains(hostPartyBody, "status unavailable") || !strings.Contains(hostPartyBody, "Live phone status is temporarily unavailable") {
+		t.Fatal("party page did not fail safely when live presence was unconfigured")
+	}
+	presenceCounter := &countingContactPresence{statuses: map[string]telephony.ContactState{oldUsername: telephony.ContactReachable}}
+	app.presence = presenceCounter
+	outsiderJar, _ := cookiejar.New(nil)
+	outsiderClient := &http.Client{Transport: server.Client().Transport, Jar: outsiderJar}
+	outsiderLogin := postForm(t, outsiderClient, server.URL+"/auth/dev", url.Values{"email": {"another-host@example.test"}})
+	_ = readBody(t, outsiderLogin)
+	outsiderParty := get(t, outsiderClient, server.URL+"/parties/"+partyID)
+	if outsiderParty.StatusCode != http.StatusNotFound || presenceCounter.calls != 0 {
+		t.Fatalf("another host reached party presence: status=%d calls=%d", outsiderParty.StatusCode, presenceCounter.calls)
+	}
+	_ = readBody(t, outsiderParty)
+	hostParty = get(t, client, server.URL+"/parties/"+partyID)
+	hostPartyBody = readBody(t, hostParty)
+	onlineRendered := strings.Contains(hostPartyBody, "presence-online\">online")
+	memberLabelRendered := strings.Contains(hostPartyBody, `aria-label="At least one phone is online"`)
+	unavailableRendered := strings.Contains(hostPartyBody, "Live phone status is temporarily unavailable")
+	if presenceCounter.calls != 1 || !onlineRendered || !memberLabelRendered || unavailableRendered {
+		t.Fatalf("party live presence calls=%d online=%t member_label=%t unavailable=%t", presenceCounter.calls, onlineRendered, memberLabelRendered, unavailableRendered)
+	}
 	deviceID := firstMatch(t, hostPartyBody, `/devices/([^/]+)/rotate`)
 	rotated := postForm(t, client, server.URL+"/parties/"+partyID+"/devices/"+deviceID+"/rotate", url.Values{"csrf": {csrf}})
 	rotatedBody := readBody(t, rotated)
@@ -197,10 +239,33 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 		_ = readBody(t, again)
 	}
 
+	app.presence = fakeContactPresence{statuses: map[string]telephony.ContactState{freshUsername: telephony.ContactUnreachable}}
+	hostParty = get(t, client, server.URL+"/parties/"+partyID)
+	hostPartyBody = readBody(t, hostParty)
+	if !strings.Contains(hostPartyBody, "presence-trouble\">not reachable") {
+		t.Fatal("party page did not distinguish an unreachable registered phone")
+	}
+	app.presence = fakeContactPresence{statuses: map[string]telephony.ContactState{freshUsername: telephony.ContactUnknown}}
+	hostParty = get(t, client, server.URL+"/parties/"+partyID)
+	if !strings.Contains(readBody(t, hostParty), "presence-checking\">checking") {
+		t.Fatal("party page did not distinguish a newly registered phone being checked")
+	}
+	app.presence = fakeContactPresence{statuses: map[string]telephony.ContactState{}}
+	hostParty = get(t, client, server.URL+"/parties/"+partyID)
+	if !strings.Contains(readBody(t, hostParty), "presence-waiting\">not registered") {
+		t.Fatal("party page did not identify an unregistered phone")
+	}
+	app.presence = fakeContactPresence{err: errors.New("temporary AMI failure")}
+	hostParty = get(t, client, server.URL+"/parties/"+partyID)
+	if hostParty.StatusCode != http.StatusOK || !strings.Contains(readBody(t, hostParty), "Live phone status is temporarily unavailable") {
+		t.Fatal("AMI failure blocked the authenticated party page")
+	}
+	app.presence = fakeContactPresence{statuses: map[string]telephony.ContactState{freshUsername: telephony.ContactReachable}}
 	hostParty = get(t, client, server.URL+"/parties/"+partyID)
 	revokeDeviceID := firstMatch(t, readBody(t, hostParty), `/devices/([^/]+)/revoke`)
 	revoked := postForm(t, client, server.URL+"/parties/"+partyID+"/devices/"+revokeDeviceID+"/revoke", url.Values{"csrf": {csrf}})
-	if revoked.StatusCode != http.StatusOK || !strings.Contains(readBody(t, revoked), "disconnected") {
+	revokedBody := readBody(t, revoked)
+	if revoked.StatusCode != http.StatusOK || !strings.Contains(revokedBody, "presence-off\">disconnected") || strings.Contains(revokedBody, "presence-online\">online") {
 		t.Fatalf("revocation response was not successful: status=%d", revoked.StatusCode)
 	}
 	routing, err = database.RoutingDevices(t.Context())
