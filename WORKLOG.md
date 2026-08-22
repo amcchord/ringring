@@ -21,6 +21,7 @@ This is the durable, chronological project record. Add new entries at the top. C
 
 - The isolated POSIX fixture suite covers a complete install, exact environment rendering and permissions, independent 32-byte keys, AMI-secret agreement, public/private checks, firewall-before-listener ordering, doctor, overwrite refusal, no-mutation dry runs, invalid permissions/domain/access code, symlink refusal, build failure and secret-preserving install resume, exact fast-forward upgrade, two backups and drills, firewall refresh, controller replacement during execution, no-mutation upgrade dry run, and a failed/resumed upgrade that does not repeat its pre-backup.
 - `sh -n`, focused ShellCheck, `git diff --check`, and `make check` pass. The full check includes the new fixtures, Go formatting and vet, and the complete race-enabled Go suite.
+- The first public CI run exposed a platform-dependent bare-repository default branch in the upgrade fixture before any product step ran. Pinning that fixture to `main` made it deterministic across Mac and Linux; `make check` then passed again locally and on exact release tip `649bc1b` in GitHub Actions run `32568205300`.
 - This operator-tool release did not read or change the live deployment's environment, family records, OpenAI resources, containers, firewall, database, or generated phone routing.
 
 ### Remaining
