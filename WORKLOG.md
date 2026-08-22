@@ -2,6 +2,32 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Two-household NAT interoperability gate
+
+### Shipped
+
+- Added `make nat-smoke`, an isolated call test that runs two authenticated SIPp phones in separate private Linux network namespaces with distinct public SNAT identities and an Asterisk instance rendered from RingRing's production telephony code.
+- The clients intentionally advertise unreachable private SIP contacts and media addresses. The harness requires Asterisk to retain the rewritten public contacts, route extension `101` to `102` inside the generated party context, keep `direct_media=no`, and finish with no active channels.
+- Added independent raw PCMU sources and router-boundary counters. Each phone must send and receive more than 100 non-SIP UDP media packets across its own NAT path before the test can pass.
+
+### Decisions
+
+- Keep exact audio-content evidence in the existing SIPp echo and official Linphone recording suites. The NAT gate measures the distinct invariant that signaling and media cross both translation boundaries in both directions.
+- Use nested namespaces in one privileged topology container so the private paths and SNAT rules are explicit and observable. The container receives no Docker socket, host network, public port, deployment environment, production state, or family credential and is destroyed on exit.
+- Treat simulated NAT as a stronger software gate, not as completion of the real-device milestone. Household routers, carrier-grade NAT, mobile handoff, ATA behavior, and background ringing remain hardware checks.
+
+### Verification
+
+- Two consecutive isolated server-candidate runs passed two authenticated registrations, distinct rewritten contacts, the real generated party route, bidirectional PCMU across all four NAT directions, clean SIP teardown, and zero remaining Asterisk channels.
+- The existing `make sip-smoke` still passes two authenticated registrations, exact echoed PCMU patterns, extension calling, and `*10`; `make linphone-smoke` still passes official-engine provisioning, registration, party calling, packet checks, and recorded-tone analysis against the same candidate.
+- `make check`, POSIX shell syntax validation, XML parsing, and `git diff --check` pass locally.
+- Every failed development iteration and both passing runs removed the exact test containers, nested namespaces, Docker network, generated Asterisk state, SIPp state, and audio files; no production service or state was mounted or changed.
+
+### Remaining
+
+- Scan a production setup QR in the current Linphone mobile app and verify its user-visible import flow, foreground ringing, push/background behavior, and Wi-Fi/cellular transitions.
+- Complete a two-way-audio call between two remote physical devices across real family networks.
+
 ## 2026-08-22 — Official Linphone party-call interoperability
 
 ### Shipped

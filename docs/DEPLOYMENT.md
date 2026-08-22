@@ -130,6 +130,19 @@ make sip-smoke
 
 The test renders two disposable devices through the production telephony code, authenticates both with SIPp, calls extension `102` from extension `101`, dials the single-phone `*10` echo route, and requires the expected bidirectional PCMU patterns through Asterisk. It uses a dedicated internal Docker network, fixed smoke-only credentials, no production environment or database, and no published host ports. Exact-name collision checks prevent it from disturbing an already-running smoke test; its containers, network, and generated state are removed on exit. Passing these software loops does not replace a call between remote physical devices across real NATs.
 
+## Isolated two-household NAT smoke test
+
+Run the NAT-sensitive gate after changing PJSIP endpoint settings, Asterisk transport behavior, registration handling, or media routing:
+
+```sh
+cd /opt/ringring
+make nat-smoke
+```
+
+The target creates two private phone namespaces with distinct public SNAT identities inside a privileged, disposable topology container. Both SIPp clients advertise private contact and SDP addresses, authenticate through RingRing's production endpoint renderer, and call extension `102` from `101`. The test requires Asterisk to rewrite both contacts to their respective public identities, keep media server-relayed, complete the party call, carry more than 100 non-SIP UDP packets across each NAT in each direction, and finish with no active channels.
+
+The topology container receives no Docker socket, deployment environment, production state, host network, or published port. A fixed internal Docker network connects only that container and disposable Asterisk; an exit trap removes the containers, nested namespaces, network, generated configuration, logs, and audio. The test needs a Docker runtime that permits a privileged container to create nested Linux network namespaces. It models two household paths but does not prove real router, carrier-grade NAT, mobile handoff, or physical-device behavior.
+
 ## Isolated Linphone provisioning and call smoke test
 
 Run the heavier client interoperability check after changing Linphone XML or setup behavior:

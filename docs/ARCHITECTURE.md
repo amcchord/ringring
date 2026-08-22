@@ -41,6 +41,8 @@ Extension `101` can therefore exist in many parties without collision. A device 
 
 Most devices will register outbound from home networks. PJSIP endpoints use symmetric RTP, forced response ports, rewritten contacts, server-relayed media, keepalives, and conservative codecs (`ulaw`, `alaw`, and optional `g722`). The setup UI will give exact registrar, username, secret, transport, and extension values instead of exposing Asterisk terminology.
 
+The optional `make nat-smoke` gate exercises those settings without touching a family phone. Two SIPp clients run in separate private Linux network namespaces and reach an isolated Asterisk through distinct stateful SNAT identities. Each advertises an unreachable private SIP contact and private media address. The test requires Asterisk to retain only the rewritten public contacts, route an authenticated party call, keep `direct_media=no`, and carry more than 100 non-SIP UDP media packets across each NAT in both directions. Exact media content is covered independently by the SIPp echo and official Linphone recording tests. This simulation materially exercises the NAT configuration but does not replace real household routers, carrier-grade NAT, Wi-Fi/cellular changes, or physical-device testing.
+
 UDP SIP is supported for older adapters. SIP TLS is planned for capable devices but is not exposed by the first deployment. Every device has a random registration identity; PJSIP unidentified-request limits and a checked-in Fail2Ban policy provide layered registration protection.
 
 ## Configuration flow

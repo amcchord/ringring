@@ -8,6 +8,7 @@
 - [x] Single-use member invite.
 - [x] Member and device provisioning with one-time SIP setup card.
 - [x] Generated Asterisk PJSIP endpoints and party dialplans.
+- [x] Simulated two-household NAT registration, party-call, and bidirectional-media gate.
 - [ ] Calls between two remotely registered devices, verified with real hardware.
 - [x] Device revocation and credential rotation.
 - [x] Guarded member, party, and host-account deletion with OpenAI project archival.
