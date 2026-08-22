@@ -65,6 +65,7 @@ mv "$work_directory/generated/extensions.conf" "$work_directory/state/extensions
 mv "$work_directory/generated/linphone.xml" "$work_directory/provision/linphone.xml"
 chmod 0444 "$work_directory/state/pjsip.conf" "$work_directory/state/extensions.conf" \
   "$work_directory/provision/linphone.xml"
+chmod 0555 "$work_directory/state"
 find "$work_directory/generated" -depth -delete
 grep -Fq 'xmlns="http://www.linphone.org/xsds/lpconfig.xsd"' "$work_directory/provision/linphone.xml"
 grep -Fq '&lt;sip:172.31.90.20:5061;transport=tls&gt;' "$work_directory/provision/linphone.xml"

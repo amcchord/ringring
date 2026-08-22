@@ -75,6 +75,11 @@ grep -q '^rtp_symmetric=yes$' "$work_directory/state/pjsip.conf"
 grep -q '^force_rport=yes$' "$work_directory/state/pjsip.conf"
 grep -q '^rewrite_contact=yes$' "$work_directory/state/pjsip.conf"
 grep -q '^exten => 102,1,NoOp(RingRing party call)$' "$work_directory/state/extensions.conf"
+# The exact-candidate runner intentionally uses umask 077. Asterisk drops to
+# its dedicated UID, so make only this read-only bind root traversable before
+# it loads the generated includes.
+chmod 0444 "$work_directory/state/pjsip.conf" "$work_directory/state/extensions.conf"
+chmod 0555 "$work_directory/state"
 
 # Extract the source-checksummed SIPp binary into the matching digest-pinned
 # Alpine topology image so each phone process can run inside its own nested
@@ -170,10 +175,8 @@ fi
 docker exec ringring-nat-smoke-asterisk \
   asterisk -rx 'core set verbose 3' >/dev/null
 
-# Docker can report the container and Asterisk CLI ready before a newly created
-# bridge has completed neighbor discovery for packets forwarded out of the two
-# nested household namespaces. Prove both disposable paths with bounded ICMP
-# probes before SIPp starts its one-shot registration transaction.
+# Prove both disposable network paths with bounded ICMP probes before SIPp
+# starts its one-shot registration transaction.
 paths_ready=0
 for elapsed in $(seq 1 20); do
   if docker exec ringring-nat-smoke-topology \
