@@ -281,6 +281,17 @@ The SIP TLS release adds public `5061/tcp`, a read-only `/etc/ringring/tls` moun
 
 The readiness checklist adds only the `device_readiness` table described in environment setup. Take and drill the normal app-state backup before upgrading. Existing rows in every other table remain untouched, no Asterisk configuration changes, and no external service is contacted. The current backup verifier requires this table after migration and reports only its aggregate row count. Older app builds safely ignore it on rollback. If an operator needs to remove the table permanently, first preserve the drilled pre-upgrade backup, stop the app, confirm no readiness evidence must be retained, and use a deliberate SQLite migration rather than editing a live WAL database; normal rollback does not require removal.
 
+### Safe extension suggestion upgrade and rollback
+
+This release adds no schema, secret, public port, or provider call. At startup,
+it idempotently moves any legacy member using `000`, `111`, `112`, `911`, `988`,
+or `999` to that party's first available ordinary extension beginning at `101`.
+This repairs values that older web or `*15` paths could accept and prevents a
+stale public-safety-like route from remaining loaded. The party page immediately
+shows the replacement. Take and drill the normal pre-upgrade backup; an older
+binary accepts the replacement on rollback, so no reverse data migration is
+required. Do not manually restore the reserved value.
+
 ### `*14` upgrade and rollback
 
 The `*14` release adds `party_services.ai_enabled` with a forward-only startup migration. Take the app-state backup while the app is stopped, then restart the old version before beginning the normal update. The column defaults to disabled and older RingRing builds ignore it, so rolling the app image and checkout back leaves the migrated database usable; the four `AI_*` environment variables are also ignored by older builds. Keep the database backup until the upgraded app, private port `4574`, and generated Asterisk dialplan have all been verified. Do not publish port `4574` during either upgrade or rollback.

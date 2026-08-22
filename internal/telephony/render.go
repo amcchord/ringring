@@ -8,13 +8,13 @@ import (
 	"sort"
 	"strings"
 
+	extensionrules "github.com/amcchord/ringring/internal/extension"
 	"github.com/amcchord/ringring/internal/model"
 	"github.com/amcchord/ringring/internal/radio"
 )
 
 var (
 	safeIdentifier = regexp.MustCompile(`^[A-Za-z0-9_-]{1,48}$`)
-	safeExtension  = regexp.MustCompile(`^[0-9]{2,5}$`)
 )
 
 type DialDevice struct {
@@ -193,8 +193,8 @@ func validateDevice(device DialDevice) error {
 	if !safeIdentifier.MatchString(device.SIPUsername) {
 		return errors.New("SIP username contains unsupported characters")
 	}
-	if !safeExtension.MatchString(device.Extension) {
-		return errors.New("extension must contain 2 to 5 digits")
+	if !extensionrules.Valid(device.Extension) {
+		return errors.New("extension is malformed or reserved for public safety")
 	}
 	if strings.ContainsAny(device.SIPSecret, "\r\n") || device.SIPSecret == "" {
 		return errors.New("SIP secret contains unsupported characters")

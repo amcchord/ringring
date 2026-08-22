@@ -133,6 +133,18 @@ func TestRenderRejectsOverlongIdentifiers(t *testing.T) {
 	}
 }
 
+func TestRenderRejectsReservedPublicSafetyExtensions(t *testing.T) {
+	for _, extension := range []string{"000", "111", "112", "911", "988", "999"} {
+		_, err := Render([]DialDevice{{
+			PartyID: "pty_safe", DeviceID: "dev_safe", Extension: extension,
+			SIPUsername: "rrd_safe", SIPSecret: "secret",
+		}}, nil)
+		if err == nil {
+			t.Errorf("reserved public safety extension %q reached Asterisk configuration", extension)
+		}
+	}
+}
+
 func TestRenderHasNoPSTNOrCrossContextDialPrimitive(t *testing.T) {
 	config, err := Render([]DialDevice{
 		{PartyID: "pty_one", DeviceID: "dev_one", Extension: "101", SIPUsername: "rrd_one", SIPSecret: "secret-a"},

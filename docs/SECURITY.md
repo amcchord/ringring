@@ -27,7 +27,21 @@ The authenticated host may save three real-phone setup confirmations: successful
 
 The private metrics listener keeps process-lifetime aggregate counters only. HTTP labels are coarse surfaces rather than paths; voice labels are a fixed service/result vocabulary; SIP presence is reduced immediately to four state counts. Metrics contain no party, host, member, device, SIP username, extension, token, address, user-agent, place, prompt, error, per-call timestamp/duration, audio, or transcript, and RingRing does not persist or remote-write them. Application logs use route templates and omit record identifiers and caller-controlled values. Asterisk's root-restricted authentication security log retains source addresses only for Fail2Ban and needs a short operator-chosen rotation/retention policy. See [Privacy-preserving observability](OBSERVABILITY.md).
 
-The `*15` extension chooser trusts only Asterisk's authenticated PJSIP endpoint identity, not caller ID or a user-entered identity. Its database update requires an active device mapped to the supplied party and accepts only 2–5 ASCII digits; uniqueness is enforced inside that party. It changes only the member extension, sends no data outside the private app/PBX network, and records no prompt audio or DTMF. Invalid, occupied, revoked, unknown, and cross-party attempts receive generic phone prompts.
+The `*15` extension chooser trusts only Asterisk's authenticated PJSIP endpoint identity, not caller ID or a user-entered identity. Its database update requires an active device mapped to the supplied party and accepts only 2–5 ASCII digits that are not reserved for public safety; uniqueness is enforced inside that party. It changes only the member extension, sends no data outside the private app/PBX network, and records no prompt audio or DTMF. Invalid, occupied, revoked, unknown, and cross-party attempts receive generic phone prompts.
+
+Invitation pages suggest the first available ordinary extension, beginning at
+`101`, without exposing the party's existing numbers or names. RingRing never
+assigns familiar public safety numbers `000`, `111`, `112`, `911`, `988`, or
+`999`. They correspond to official emergency or crisis services in
+[Australia](https://www.triplezero.gov.au/Documents/Poster%20-%20Triple%20Zero%20-%20ENGLISH.PDF),
+[New Zealand](https://www.govt.nz/browse/law-crime-and-justice/crimes-and-emergencies/111-emergency-service/),
+[Europe](https://digital-strategy.ec.europa.eu/en/policies/112), the
+[United States](https://www.samhsa.gov/find-support/in-crisis), and the
+[United Kingdom](https://www.gov.uk/guidance/999-and-112-the-uks-national-emergency-numbers).
+This reservation prevents a family member from appearing to answer one of
+those numbers; it does not make RingRing capable of reaching any emergency
+service. Every setup page still tells the family to keep another way to call
+for help.
 
 ## Deletion lifecycle
 

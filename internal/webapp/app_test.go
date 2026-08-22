@@ -387,7 +387,11 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if join.StatusCode != http.StatusOK {
 		t.Fatalf("join status = %d", join.StatusCode)
 	}
-	joinCSRF := firstMatch(t, readBody(t, join), `name="csrf" value="([^"]+)"`)
+	joinBody := readBody(t, join)
+	if !strings.Contains(joinBody, `id="extension" name="extension" value="101"`) || !strings.Contains(joinBody, "RingRing suggested an available number") || !strings.Contains(joinBody, "Public emergency and crisis numbers are unavailable") {
+		t.Fatal("empty-party invitation did not prefill and explain a safe extension")
+	}
+	joinCSRF := firstMatch(t, joinBody, `name="csrf" value="([^"]+)"`)
 	setup := postForm(t, client, inviteURL, url.Values{
 		"csrf": {joinCSRF}, "display_name": {"Blue phone"}, "extension": {"101"}, "device_label": {"ATA"},
 	})
@@ -432,6 +436,47 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	unknownProvision := get(t, client, server.URL+"/provision/linphone/"+strings.Repeat("x", 43))
 	if unknownProvision.StatusCode != http.StatusGone || !strings.Contains(readBody(t, unknownProvision), "setup link is finished") {
 		t.Fatalf("unknown provisioning link did not fail generically: status=%d", unknownProvision.StatusCode)
+	}
+
+	secondInvite := postForm(t, client, server.URL+"/parties/"+partyID+"/invites", url.Values{"csrf": {csrf}})
+	if secondInvite.StatusCode != http.StatusOK {
+		t.Fatalf("second invite status = %d", secondInvite.StatusCode)
+	}
+	secondInviteURL := firstMatch(t, readBody(t, secondInvite), `value="(http://[^"]+/join/[^"]+)"`)
+	secondJoin := get(t, client, secondInviteURL)
+	secondJoinBody := readBody(t, secondJoin)
+	if secondJoin.StatusCode != http.StatusOK || !strings.Contains(secondJoinBody, `id="extension" name="extension" value="102"`) {
+		t.Fatalf("occupied-party suggestion was not 102: status=%d", secondJoin.StatusCode)
+	}
+	secondJoinCSRF := firstMatch(t, secondJoinBody, `name="csrf" value="([^"]+)"`)
+	oversized := postForm(t, client, secondInviteURL, url.Values{
+		"csrf": {secondJoinCSRF}, "display_name": {strings.Repeat("x", 33<<10)}, "extension": {"102"}, "device_label": {"Desk phone"},
+	})
+	if oversized.StatusCode != http.StatusRequestEntityTooLarge || !strings.Contains(readBody(t, oversized), "form is too large") {
+		t.Fatalf("oversized invitation claim was not rejected: status=%d", oversized.StatusCode)
+	}
+	refreshedJoin := get(t, client, secondInviteURL)
+	refreshedJoinBody := readBody(t, refreshedJoin)
+	if refreshedJoin.StatusCode != http.StatusOK || !strings.Contains(refreshedJoinBody, `id="extension" name="extension" value="102"`) {
+		t.Fatalf("oversized claim consumed or changed invitation: status=%d", refreshedJoin.StatusCode)
+	}
+	secondJoinCSRF = firstMatch(t, refreshedJoinBody, `name="csrf" value="([^"]+)"`)
+	reservedNumber := postForm(t, client, secondInviteURL, url.Values{
+		"csrf": {secondJoinCSRF}, "display_name": {"Green phone"}, "extension": {"911"}, "device_label": {"Desk phone"},
+	})
+	reservedBody := readBody(t, reservedNumber)
+	if reservedNumber.StatusCode != http.StatusBadRequest || !strings.Contains(reservedBody, "public emergency or crisis numbers stay unavailable") ||
+		!strings.Contains(reservedBody, `value="Green phone"`) || !strings.Contains(reservedBody, `value="Desk phone"`) ||
+		!strings.Contains(reservedBody, `id="extension" name="extension" value="102"`) || !strings.Contains(reservedBody, `aria-invalid="true"`) {
+		t.Fatalf("reserved extension did not return a preserved, corrected join form: status=%d", reservedNumber.StatusCode)
+	}
+	collidingNumber := postForm(t, client, secondInviteURL, url.Values{
+		"csrf": {secondJoinCSRF}, "display_name": {"Green phone"}, "extension": {"101"}, "device_label": {"Desk phone"},
+	})
+	collisionBody := readBody(t, collidingNumber)
+	if collidingNumber.StatusCode != http.StatusConflict || !strings.Contains(collisionBody, "That number was just claimed") ||
+		!strings.Contains(collisionBody, `id="extension" name="extension" value="102"`) || !strings.Contains(collisionBody, `value="Green phone"`) || !strings.Contains(collisionBody, `value="Desk phone"`) {
+		t.Fatalf("extension collision did not offer a preserved fresh suggestion: status=%d", collidingNumber.StatusCode)
 	}
 
 	used := get(t, client, inviteURL)

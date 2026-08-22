@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	extensionrules "github.com/amcchord/ringring/internal/extension"
 	"github.com/amcchord/ringring/internal/model"
 	"github.com/amcchord/ringring/internal/observability"
 	"github.com/amcchord/ringring/internal/openairuntime"
@@ -121,7 +122,7 @@ func (s *Server) handleChooseExtension(reader *bufio.Reader, writer *bufio.Write
 		if err != nil || extension == "-1" {
 			return
 		}
-		if !validExtension(extension) {
+		if !extensionrules.Valid(extension) {
 			if err := agiCommand(reader, writer, "EXEC Playback invalid"); err != nil {
 				return
 			}
@@ -186,18 +187,6 @@ func (s *Server) handleChooseExtension(reader *bufio.Reader, writer *bufio.Write
 		return
 	}
 	_ = agiCommand(reader, writer, "EXEC Playback goodbye")
-}
-
-func validExtension(extension string) bool {
-	if len(extension) < 2 || len(extension) > 5 {
-		return false
-	}
-	for _, character := range extension {
-		if character < '0' || character > '9' {
-			return false
-		}
-	}
-	return true
 }
 
 func (s *Server) handleWeather(reader *bufio.Reader, writer *bufio.Writer, environment map[string]string) {

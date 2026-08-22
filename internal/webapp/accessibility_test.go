@@ -84,7 +84,9 @@ func TestFormInstructionsAreVisibleAndAssociated(t *testing.T) {
 			path: "templates/join.html",
 			wants: []string{
 				`id="extension-help"`,
-				`aria-describedby="extension-help"`,
+				`aria-describedby="extension-help{{if index .FormInvalid "extension"}} join-error{{end}}"`,
+				`id="join-error" role="alert"`,
+				`aria-invalid="true"`,
 				`<small>optional</small>`,
 			},
 		},

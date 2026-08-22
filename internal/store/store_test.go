@@ -43,11 +43,19 @@ func TestInvitationCanOnlyBeClaimedOnce(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if suggested, err := s.SuggestedExtension(ctx, party.ID); err != nil || suggested != "101" {
+		t.Fatalf("empty-party suggested extension = %q, %v", suggested, err)
+	}
 
 	claim := NewClaim{
 		TokenHash: secure.Hash(token), MemberID: "mem_1", DisplayName: "Blue phone", Extension: "101",
 		DeviceID: "dev_1", DeviceLabel: "Kitchen phone", SIPUsername: "rrd_1",
 		SIPSecretCiphertext: "ciphertext", Provisioning: testProvisioning("provision-1", now), Now: now,
+	}
+	unsafeClaim := claim
+	unsafeClaim.Extension = "911"
+	if _, _, _, err := s.ClaimInvitation(ctx, unsafeClaim); !errors.Is(err, ErrInvalidExtension) {
+		t.Fatalf("reserved invitation extension error = %v", err)
 	}
 	claimedParty, member, _, err := s.ClaimInvitation(ctx, claim)
 	if err != nil {
@@ -55,6 +63,9 @@ func TestInvitationCanOnlyBeClaimedOnce(t *testing.T) {
 	}
 	if claimedParty.ID != party.ID || member.Extension != "101" {
 		t.Fatalf("unexpected claim result: %#v %#v", claimedParty, member)
+	}
+	if suggested, err := s.SuggestedExtension(ctx, party.ID); err != nil || suggested != "102" {
+		t.Fatalf("occupied-party suggested extension = %q, %v", suggested, err)
 	}
 	claim.MemberID = "mem_2"
 	claim.DeviceID = "dev_2"
@@ -97,6 +108,62 @@ func TestExtensionUniqueWithinParty(t *testing.T) {
 	}
 }
 
+func TestLegacyReservedExtensionsMigrateWithinTheirParty(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Date(2026, 8, 22, 16, 0, 0, 0, time.UTC)
+	host, _ := s.UpsertGoogleUser(ctx, GoogleProfile{Subject: "migration-host", Email: "host@example.test", Name: "Host"}, now, "usr_migration")
+	first, _ := s.CreateParty(ctx, NewParty{ID: "pty_migration_one", Name: "One", Slug: "one", HostUserID: host.ID, CreatedAt: now})
+	second, _ := s.CreateParty(ctx, NewParty{ID: "pty_migration_two", Name: "Two", Slug: "two", HostUserID: host.ID, CreatedAt: now})
+	for index, row := range []struct {
+		id, partyID, value string
+	}{
+		{"mem_existing", first.ID, "101"},
+		{"mem_emergency", first.ID, "911"},
+		{"mem_crisis", first.ID, "988"},
+		{"mem_other_party", second.ID, "911"},
+	} {
+		if _, err := s.db.ExecContext(ctx, `INSERT INTO members (id, party_id, display_name, extension, created_at) VALUES (?, ?, ?, ?, ?)`,
+			row.id, row.partyID, "Legacy", row.value, unix(now.Add(time.Duration(index)*time.Second))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := migrateReservedMemberExtensions(s.db); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateReservedMemberExtensions(s.db); err != nil {
+		t.Fatalf("migration was not idempotent: %v", err)
+	}
+	want := map[string]string{
+		"mem_existing": "101", "mem_emergency": "102", "mem_crisis": "103", "mem_other_party": "101",
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, extension FROM members`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, value string
+		if err := rows.Scan(&id, &value); err != nil {
+			t.Fatal(err)
+		}
+		if value != want[id] {
+			t.Errorf("member %s extension = %q, want %q", id, value, want[id])
+		}
+		delete(want, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(want) != 0 {
+		t.Fatalf("migration rows missing: %#v", want)
+	}
+}
+
 func TestActiveDeviceCanChangeOnlyItsPartyMemberExtension(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(":memory:")
@@ -129,7 +196,7 @@ func TestActiveDeviceCanChangeOnlyItsPartyMemberExtension(t *testing.T) {
 	claim("inv_extension_b", "invite-extension-b", "mem_extension_b", "dev_extension_b", "rrd_extension_b", "102", party.ID)
 	claim("inv_extension_other", "invite-extension-other", "mem_extension_other", "dev_extension_other", "rrd_extension_other", "103", otherParty.ID)
 
-	for _, invalid := range []string{"1", "123456", "10*", "１２３"} {
+	for _, invalid := range []string{"1", "123456", "10*", "１２３", "000", "111", "112", "911", "988", "999"} {
 		if err := s.ChangeMemberExtensionByDevice(ctx, party.ID, "rrd_extension_a", invalid); !errors.Is(err, ErrInvalidExtension) {
 			t.Fatalf("invalid extension %q error = %v", invalid, err)
 		}

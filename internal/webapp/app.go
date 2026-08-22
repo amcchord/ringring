@@ -19,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/amcchord/ringring/internal/config"
+	extensionrules "github.com/amcchord/ringring/internal/extension"
 	"github.com/amcchord/ringring/internal/localauth"
 	"github.com/amcchord/ringring/internal/model"
 	"github.com/amcchord/ringring/internal/observability"
@@ -46,7 +47,6 @@ const (
 )
 
 var (
-	extensionPattern      = regexp.MustCompile(`^[0-9]{2,5}$`)
 	usernamePattern       = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._-]{1,30}[a-z0-9])$`)
 	provisionTokenPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 )
@@ -109,6 +109,9 @@ type PageData struct {
 	RadioStations            []radio.Station
 	InviteURL                string
 	JoinCSRF                 string
+	JoinDisplayName          string
+	JoinExtension            string
+	JoinDeviceLabel          string
 	Claim                    model.ClaimedDevice
 	SIPPublicHost            string
 	LinphoneProvisionURL     string
@@ -144,6 +147,12 @@ type PageData struct {
 type authSession struct {
 	User  model.User
 	Token string
+}
+
+type joinFormValues struct {
+	DisplayName string
+	Extension   string
+	DeviceLabel string
 }
 
 type setupFlash struct {
@@ -1625,16 +1634,13 @@ func (a *App) join(w http.ResponseWriter, r *http.Request) {
 		Name: joinCSRFCookie, Value: csrf, Path: r.URL.Path, MaxAge: 15 * 60,
 		HttpOnly: true, Secure: a.secureCookies(), SameSite: http.SameSiteStrictMode,
 	})
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Referrer-Policy", "no-referrer")
-	w.Header().Set("X-Robots-Tag", "noindex, nofollow, noarchive")
-	data := a.pageData(nil)
-	data.Party = party
-	data.JoinCSRF = csrf
-	a.render(w, "join", data)
+	a.renderJoinForm(w, r, party, csrf, http.StatusOK, "", joinFormValues{}, nil)
 }
 
 func (a *App) claimInvitation(w http.ResponseWriter, r *http.Request) {
+	if !a.parseSmallForm(w, r) {
+		return
+	}
 	csrfCookie, err := r.Cookie(joinCSRFCookie)
 	csrfValue := r.FormValue("csrf")
 	originOK := a.sameOrigin(r)
@@ -1645,14 +1651,32 @@ func (a *App) claimInvitation(w http.ResponseWriter, r *http.Request) {
 	}
 	token := r.PathValue("token")
 	displayName := strings.Join(strings.Fields(r.FormValue("display_name")), " ")
-	extension := strings.TrimSpace(r.FormValue("extension"))
+	extensionValue := strings.TrimSpace(r.FormValue("extension"))
 	deviceLabel := strings.Join(strings.Fields(r.FormValue("device_label")), " ")
+	values := joinFormValues{DisplayName: displayName, Extension: extensionValue, DeviceLabel: deviceLabel}
+	invitedParty, err := a.store.PartyByInvitation(r.Context(), secure.Hash(token), a.now())
+	if err != nil {
+		a.invitationError(w, err)
+		return
+	}
 	if deviceLabel == "" {
 		deviceLabel = "My phone"
 	}
-	if utf8.RuneCountInString(displayName) < 1 || utf8.RuneCountInString(displayName) > 40 ||
-		utf8.RuneCountInString(deviceLabel) > 40 || !validExtension(extension) {
-		a.errorPage(w, http.StatusBadRequest, "Check those phone details", "Use a name up to 40 characters and an extension with 2 to 5 digits.", r.URL.Path, "Try again")
+	var invalidFields []string
+	if utf8.RuneCountInString(displayName) < 1 || utf8.RuneCountInString(displayName) > 40 {
+		invalidFields = append(invalidFields, "display-name")
+	}
+	if utf8.RuneCountInString(deviceLabel) > 40 {
+		invalidFields = append(invalidFields, "device-label")
+	}
+	if !extensionrules.Valid(extensionValue) {
+		invalidFields = append(invalidFields, "extension")
+		values.Extension = ""
+	}
+	if len(invalidFields) != 0 {
+		a.renderJoinForm(w, r, invitedParty, csrfCookie.Value, http.StatusBadRequest,
+			"Check the highlighted details. Extensions use 2–5 digits, and public emergency or crisis numbers stay unavailable.",
+			values, invalidFields)
 		return
 	}
 	memberID, err := secure.ID("mem")
@@ -1677,12 +1701,15 @@ func (a *App) claimInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	party, member, device, err := a.store.ClaimInvitation(r.Context(), store.NewClaim{
-		TokenHash: secure.Hash(token), MemberID: memberID, DisplayName: displayName, Extension: extension,
+		TokenHash: secure.Hash(token), MemberID: memberID, DisplayName: displayName, Extension: extensionValue,
 		DeviceID: deviceID, DeviceLabel: deviceLabel, SIPUsername: sipUsername,
 		SIPSecretCiphertext: ciphertext, Provisioning: provisionRecord, Now: now,
 	})
 	if errors.Is(err, store.ErrExtensionTaken) {
-		a.errorPage(w, http.StatusConflict, "That extension is already ringing", "Choose another short number and try again.", r.URL.Path, "Choose another")
+		values.Extension = ""
+		a.renderJoinForm(w, r, invitedParty, csrfCookie.Value, http.StatusConflict,
+			"That number was just claimed. RingRing picked another available one; keep it or choose a different number.",
+			values, []string{"extension"})
 		return
 	}
 	if err != nil {
@@ -1703,6 +1730,36 @@ func (a *App) claimInvitation(w http.ResponseWriter, r *http.Request) {
 		a.logger.Error("prepare claimed Linphone setup", "error_class", observability.ErrorClass(err))
 	}
 	a.render(w, "setup", data)
+}
+
+func (a *App) renderJoinForm(w http.ResponseWriter, r *http.Request, party model.Party, csrf string, status int, message string, values joinFormValues, invalidFields []string) {
+	suggestion, err := a.store.SuggestedExtension(r.Context(), party.ID)
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	if values.Extension == "" {
+		values.Extension = suggestion
+	}
+	data := a.pageData(nil)
+	data.Party = party
+	data.JoinCSRF = csrf
+	data.JoinDisplayName = values.DisplayName
+	data.JoinExtension = values.Extension
+	data.JoinDeviceLabel = values.DeviceLabel
+	data.FormError = message
+	data.FormInvalid = make(map[string]bool, len(invalidFields))
+	for _, field := range invalidFields {
+		data.FormInvalid[field] = true
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Robots-Tag", "noindex, nofollow, noarchive")
+	if status != http.StatusOK {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(status)
+	}
+	a.render(w, "join", data)
 }
 
 func (a *App) linphoneProvision(w http.ResponseWriter, r *http.Request) {
@@ -2137,18 +2194,6 @@ func slugify(value string) string {
 		slug = strings.TrimRight(slug[:40], "-")
 	}
 	return slug
-}
-
-func validExtension(extension string) bool {
-	if !extensionPattern.MatchString(extension) {
-		return false
-	}
-	switch extension {
-	case "911", "112", "999":
-		return false
-	default:
-		return true
-	}
 }
 
 type googleUserInfo struct {

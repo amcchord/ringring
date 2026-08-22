@@ -234,6 +234,19 @@ func TestVoiceExtensionSelectionRetriesInvalidTakenAndUnconfirmedNumbers(t *test
 	}
 }
 
+func TestVoiceExtensionSelectionRejectsReservedNumberBeforeConfirmation(t *testing.T) {
+	manager := &fakeExtensionManager{errors: map[string]error{}}
+	server := &Server{Extensions: manager, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	reader := scriptedAGI("911", "0", "-1")
+	var commands bytes.Buffer
+	server.handleChooseExtension(reader, bufio.NewWriter(&commands), map[string]string{
+		"agi_arg_1": "pty_voice", "agi_arg_2": "rrd_authenticated",
+	})
+	if len(manager.calls) != 0 || !strings.Contains(commands.String(), "EXEC Playback invalid\n") || strings.Contains(commands.String(), "SAY DIGITS 911") {
+		t.Fatalf("reserved extension reached confirmation or storage: %q %#v", commands.String(), manager.calls)
+	}
+}
+
 func TestVoiceExtensionSelectionRejectsUntrustedIdentityAndStoreFailure(t *testing.T) {
 	manager := &fakeExtensionManager{errors: map[string]error{"105": store.ErrNotFound}}
 	server := &Server{Extensions: manager, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}

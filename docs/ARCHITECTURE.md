@@ -40,6 +40,14 @@ Every registered endpoint has a globally unique, random SIP username and an Aste
 
 Extension `101` can therefore exist in many parties without collision. A device cannot choose its context or construct a cross-party endpoint name.
 
+The public invitation page queries only the occupied extension strings long
+enough to choose the first available safe suggestion, starting at `101`; it
+does not expose the occupied list or member names. The transactional uniqueness
+constraint resolves simultaneous claims. A shared extension-rules package is
+used by invitation claims, authenticated `*15` changes, storage, and Asterisk
+rendering so familiar public emergency/crisis numbers cannot become party
+destinations through another path.
+
 ## NAT and phone compatibility
 
 Most devices will register outbound from home networks. PJSIP endpoints use symmetric RTP, forced response ports, rewritten contacts, server-relayed media, keepalives, and conservative codecs (`ulaw`, `alaw`, and optional `g722`). The setup UI will give exact registrar, username, secret, transport, and extension values instead of exposing Asterisk terminology.

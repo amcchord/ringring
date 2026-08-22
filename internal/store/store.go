@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	extensionrules "github.com/amcchord/ringring/internal/extension"
 	"github.com/amcchord/ringring/internal/model"
 	"github.com/amcchord/ringring/internal/radio"
 	_ "modernc.org/sqlite"
@@ -19,7 +20,7 @@ var (
 	ErrNotFound         = errors.New("not found")
 	ErrInviteUsed       = errors.New("invitation has already been used")
 	ErrInviteExpired    = errors.New("invitation has expired")
-	ErrInvalidExtension = errors.New("extension must contain 2 to 5 digits")
+	ErrInvalidExtension = errors.New("extension must contain 2 to 5 digits and not be a reserved public safety number")
 	ErrExtensionTaken   = errors.New("extension is already in use")
 	ErrUsernameTaken    = errors.New("username is already in use")
 	ErrRecoveryCode     = errors.New("invalid recovery code")
@@ -158,7 +159,61 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate OpenAI spend limit state: %w", err)
 	}
+	if err := migrateReservedMemberExtensions(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate reserved member extensions: %w", err)
+	}
 	return &Store{db: db}, nil
+}
+
+// migrateReservedMemberExtensions repairs values accepted by preview builds
+// before the public-safety reservation was centralized. It changes no schema,
+// is idempotent, and assigns only an unoccupied ordinary number in that party.
+func migrateReservedMemberExtensions(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(`SELECT id, party_id, extension FROM members ORDER BY party_id, created_at, id`)
+	if err != nil {
+		return err
+	}
+	type memberExtension struct {
+		id, partyID, value string
+	}
+	var members []memberExtension
+	usedByParty := make(map[string][]string)
+	for rows.Next() {
+		var member memberExtension
+		if err := rows.Scan(&member.id, &member.partyID, &member.value); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		members = append(members, member)
+		usedByParty[member.partyID] = append(usedByParty[member.partyID], member.value)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, member := range members {
+		if !extensionrules.Reserved(member.value) {
+			continue
+		}
+		replacement := extensionrules.Suggest(usedByParty[member.partyID])
+		if replacement == "" {
+			return errors.New("no extension remains for reserved-number migration")
+		}
+		if _, err := tx.Exec(`UPDATE members SET extension = ? WHERE id = ? AND party_id = ?`, replacement, member.id, member.partyID); err != nil {
+			return err
+		}
+		usedByParty[member.partyID] = append(usedByParty[member.partyID], replacement)
+	}
+	return tx.Commit()
 }
 
 func ensurePartyOpenAISpendLimitColumns(db *sql.DB) error {
@@ -736,6 +791,9 @@ func (s *Store) PartyByInvitation(ctx context.Context, tokenHash []byte, now tim
 }
 
 func (s *Store) ClaimInvitation(ctx context.Context, input NewClaim) (model.Party, model.Member, model.Device, error) {
+	if !extensionrules.Valid(input.Extension) {
+		return model.Party{}, model.Member{}, model.Device{}, ErrInvalidExtension
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return model.Party{}, model.Member{}, model.Device{}, fmt.Errorf("begin invitation claim: %w", err)
@@ -801,6 +859,29 @@ func (s *Store) ClaimInvitation(ctx context.Context, input NewClaim) (model.Part
 	member := model.Member{ID: input.MemberID, PartyID: partyID, DisplayName: input.DisplayName, Extension: input.Extension, CreatedAt: input.Now.UTC()}
 	device := model.Device{ID: input.DeviceID, MemberID: input.MemberID, Label: input.DeviceLabel, SIPUsername: input.SIPUsername, SIPSecretCiphertext: input.SIPSecretCiphertext, CreatedAt: input.Now.UTC()}
 	return party, member, device, nil
+}
+
+// SuggestedExtension returns one unoccupied, non-emergency-like number for a
+// validated party invitation page. It is only a convenience; ClaimInvitation's
+// transaction and unique constraint resolve concurrent claims authoritatively.
+func (s *Store) SuggestedExtension(ctx context.Context, partyID string) (string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT extension FROM members WHERE party_id = ?`, partyID)
+	if err != nil {
+		return "", fmt.Errorf("list extensions for suggestion: %w", err)
+	}
+	defer rows.Close()
+	var used []string
+	for rows.Next() {
+		var value string
+		if err := rows.Scan(&value); err != nil {
+			return "", fmt.Errorf("scan extension for suggestion: %w", err)
+		}
+		used = append(used, value)
+	}
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("list extensions for suggestion: %w", err)
+	}
+	return extensionrules.Suggest(used), nil
 }
 
 func (s *Store) ListMembers(ctx context.Context, partyID string) ([]model.Member, error) {
@@ -902,7 +983,7 @@ func (s *Store) UpdateDeviceReadiness(ctx context.Context, partyID, hostUserID, 
 // change the extension of its own member inside the supplied party. The
 // endpoint identity comes from Asterisk's authenticated channel, not caller ID.
 func (s *Store) ChangeMemberExtensionByDevice(ctx context.Context, partyID, sipUsername, extension string) error {
-	if !validExtensionValue(extension) {
+	if !extensionrules.Valid(extension) {
 		return ErrInvalidExtension
 	}
 	result, err := s.db.ExecContext(ctx, `
@@ -921,18 +1002,6 @@ func (s *Store) ChangeMemberExtensionByDevice(ctx context.Context, partyID, sipU
 		return ErrNotFound
 	}
 	return nil
-}
-
-func validExtensionValue(extension string) bool {
-	if len(extension) < 2 || len(extension) > 5 {
-		return false
-	}
-	for _, character := range extension {
-		if character < '0' || character > '9' {
-			return false
-		}
-	}
-	return true
 }
 
 func (s *Store) MemberForHost(ctx context.Context, partyID, hostUserID, memberID string) (model.Party, model.Member, error) {
