@@ -45,7 +45,13 @@ if test "$1" = compose; then
       esac
       exit 0
       ;;
-    logs) exit 0 ;;
+    logs)
+      printf '%s\n' 'app-1 | {"level":"WARN","msg":"initial telephony reconcile","error":"reload Asterisk: connect to AMI: dial tcp: lookup asterisk on 127.0.0.11:53: no such host"}'
+      if test "${RINGRING_TEST_UNEXPECTED_APP_WARNING:-0}" = 1; then
+        printf '%s\n' 'app-1 | {"level":"WARN","msg":"unexpected fixture warning"}'
+      fi
+      exit 0
+      ;;
   esac
 fi
 case "$1" in
@@ -204,6 +210,9 @@ assert_successful_install() {
   grep -q '^curl .*https://phone.example.test/readyz' "$log" || fail 'install did not verify public readiness'
   test -z "$(git -C "$checkout" status --porcelain)" || fail 'install dirtied the checkout'
   doctor_output=$(run_ctl doctor 2>&1) || fail "doctor rejected the installed fixture: $doctor_output"
+  if RINGRING_TEST_UNEXPECTED_APP_WARNING=1 run_ctl doctor >/dev/null 2>&1; then
+    fail 'doctor accepted an unexpected application warning'
+  fi
   if run_ctl install --answers "$answers" --yes >/dev/null 2>&1; then
     fail 'a second fresh install overwrote existing configuration'
   fi

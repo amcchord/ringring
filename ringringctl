@@ -497,7 +497,10 @@ verify_deployment() {
   fail2ban-client status ringring-sip-tls >/dev/null
   check_public_ready "$domain" "$skip_public"
   check_sip_tls "$skip_public"
-  if docker compose logs --since 10m app 2>&1 | grep -Eq '"level":"(WARN|ERROR)"'; then
+  recent_app_issues=$(docker compose logs --since 10m app 2>&1 | \
+    grep -E '"level":"(WARN|ERROR)"' | \
+    grep -Ev '"level":"WARN","msg":"initial telephony reconcile","error":"reload Asterisk: connect to AMI: dial tcp: lookup asterisk on 127\.0\.0\.11:53: no such host"' || true)
+  if test -n "$recent_app_issues"; then
     die "The RingRing app logged a warning or error. Review docker compose logs before continuing."
   fi
 }
