@@ -269,7 +269,7 @@ prepare_upgrade() {
   new_fixture "$name"
   run_ctl install --answers "$answers" --yes >/dev/null 2>&1
   remote="$fixture/origin.git"
-  git init -q --bare "$remote"
+  git init -q --bare --initial-branch=main "$remote"
   git -C "$checkout" remote add origin "$remote"
   git -C "$checkout" push -q -u origin main
   publisher="$fixture/publisher"
