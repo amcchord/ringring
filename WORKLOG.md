@@ -2,6 +2,14 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Memorable family access phrase
+
+### Production
+
+- Rotated the live family access code to a short, chat-friendly two-word phrase and copied it directly to the operator's local clipboard instead of writing it into the repository or command output.
+- Retired the prior phrase after finding it named in the public worklog, removed that value from the current documentation, and retained a root-only copy of the previous environment for operational rollback.
+- Recreated only the app container, confirmed its configured value matches the root-only environment, and verified that the public signup page returns `200`. No account, party, member, device, invitation, or OpenAI project was created or changed.
+
 ## 2026-08-22 — Honest host-only phone presence
 
 ### Shipped
@@ -90,7 +98,7 @@ This is the durable, chronological project record. Add new entries at the top. C
 ### Production
 
 - GitHub Actions passed commit `5f23a35`. Created a verified root-only recovery archive immediately before deployment and another from the deployed commit; both sealed reports match the existing one-host/one-party state and confirm integrity, foreign keys, and party-key decryption.
-- Deployed from the clean `/opt/ringring` checkout without schema or secret changes. The live family access code remains configured as `fruit-loops`; no deletion form was submitted and no production OpenAI project was archived.
+- Deployed from the clean `/opt/ringring` checkout without schema or secret changes. The live family access code remained configured; no deletion form was submitted and no production OpenAI project was archived.
 - App, Asterisk, and Caddy are healthy; public readiness and signup security headers pass; unauthenticated deletion routes return to login; and the `ringring-sip` Fail2Ban jail is active. The first Compose start produced one transient app-to-Asterisk discovery warning while Asterisk was still being recreated; the verified post-deploy app restart reconciled cleanly and settled app logs contain no warnings or errors.
 
 ### Remaining
