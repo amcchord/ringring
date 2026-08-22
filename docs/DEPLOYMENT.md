@@ -123,7 +123,7 @@ cd /opt/ringring
 make sip-smoke
 ```
 
-The test renders two disposable devices through the production telephony code, authenticates both with SIPp, calls extension `102` from extension `101`, and requires bidirectional PCMU RTP through Asterisk. It uses a dedicated internal Docker network, fixed smoke-only credentials, no production environment or database, and no published host ports. Exact-name collision checks prevent it from disturbing an already-running smoke test; its containers, network, and generated state are removed on exit. Passing this software loop does not replace a call between remote physical devices across real NATs.
+The test renders two disposable devices through the production telephony code, authenticates both with SIPp, calls extension `102` from extension `101`, dials the single-phone `*10` echo route, and requires the expected bidirectional PCMU patterns through Asterisk. It uses a dedicated internal Docker network, fixed smoke-only credentials, no production environment or database, and no published host ports. Exact-name collision checks prevent it from disturbing an already-running smoke test; its containers, network, and generated state are removed on exit. Passing these software loops does not replace a call between remote physical devices across real NATs.
 
 ## Update
 

@@ -104,7 +104,8 @@ h1 em, h2 em { color: var(--coral); font-style: normal; }
 .kicker.light { color: var(--yellow); }.playground-section p { max-width: 520px; color: #ddd6ff; font-size: 1.1rem; }
 .number-pad { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .number-pad div { min-height: 140px; padding: 22px; display: flex; flex-direction: column; justify-content: space-between; border: 2px solid var(--ink); border-radius: 22px; box-shadow: 5px 5px 0 var(--ink); }
-.number-pad div:nth-child(1) { color: var(--ink); background: var(--yellow); }.number-pad div:nth-child(2) { color: var(--ink); background: var(--mint); }.number-pad div:nth-child(3) { color: var(--ink); background: var(--pink); }.number-pad div:nth-child(4) { color: var(--ink); background: var(--blue); }
+.number-pad div:nth-child(1) { color: var(--ink); background: var(--yellow); }.number-pad div:nth-child(2) { color: var(--ink); background: var(--mint); }.number-pad div:nth-child(3) { color: var(--ink); background: var(--pink); }.number-pad div:nth-child(4) { color: var(--ink); background: var(--blue); }.number-pad div:nth-child(5) { color: var(--ink); background: var(--coral); }
+.number-pad .number-pad-test { min-height: 112px; grid-column: 1 / -1; }
 .number-pad strong { font-size: 2.7rem; letter-spacing: -.07em; }.number-pad span { font-weight: 800; }
 
 .trust-grid { display: grid; grid-template-columns: .9fr 1.1fr; gap: 90px; }
@@ -165,6 +166,9 @@ input:focus { border-color: var(--purple); box-shadow: 0 0 0 4px rgba(108,76,255
 .service-toggle:has(input:focus-visible) { border-color: var(--purple); box-shadow: 0 0 0 4px rgba(108,76,255,.15); }
 .service-toggle:has(input:disabled) { cursor: not-allowed; opacity: .68; }
 .service-number { display: inline-grid; min-width: 42px; min-height: 28px; place-items: center; color: var(--white); background: var(--purple); border: 1.5px solid var(--ink); border-radius: 999px; font-family: ui-monospace, monospace; font-size: .82rem; }
+.always-line { min-height: 76px; margin-top: 22px; padding: 13px; display: grid; grid-template-columns: 54px 1fr; gap: 11px; align-items: center; background: var(--mint); border: 1.5px solid var(--ink); border-radius: 15px; }
+.always-line .service-number { min-width: 48px; min-height: 34px; }
+.always-line strong, .always-line small { display: block; }.always-line small { margin-top: 5px; color: var(--muted); line-height: 1.4; }
 .service-choice { padding-bottom: 3px; }
 .weather-field { display: block; margin: 10px 3px 6px; font-size: .78rem; font-weight: 850; }
 .resolved-place { display: block; margin: 6px 3px 0; color: var(--muted); }
@@ -199,6 +203,8 @@ input:focus { border-color: var(--purple); box-shadow: 0 0 0 4px rgba(108,76,255
 .join-shell { min-height: 720px; padding-block: 80px 100px; display: grid; grid-template-columns: 1fr 460px; gap: 80px; align-items: center; }.join-intro h1 { margin: 26px 0 22px; font-size: clamp(4rem, 8vw, 7rem); }.join-intro p { max-width: 500px; color: var(--muted); font-size: 1.15rem; }.join-panel { padding: 36px; }.fine-print { margin: 20px 0 0; text-align: center; font-size: .78rem; }
 .setup-shell, .error-shell { max-width: 780px; padding-block: 80px 110px; text-align: center; }.success-burst, .error-phone { width: 82px; height: 82px; margin: 0 auto 24px; display: grid; place-items: center; color: var(--white); background: #20b77a; border: 3px solid var(--ink); border-radius: 50%; box-shadow: 7px 7px 0 var(--ink); font-size: 2.5rem; font-weight: 950; }.setup-shell h1, .error-shell h1 { margin: 28px 0 22px; font-size: clamp(3rem, 7vw, 5.5rem); }.setup-shell > p, .error-shell > p { max-width: 620px; margin-inline: auto; color: var(--muted); font-size: 1.08rem; }
 .setup-card { margin: 40px 0 24px; overflow: hidden; text-align: left; background: var(--white); border: 2px solid var(--ink); border-radius: var(--radius); box-shadow: 8px 8px 0 var(--ink); }.setup-card div { min-height: 74px; padding: 16px 22px; display: flex; align-items: center; justify-content: space-between; gap: 30px; border-bottom: 1.5px solid var(--line); }.setup-card div:last-child { border-bottom: 0; }.setup-card span { color: var(--muted); font-size: .85rem; }.setup-card strong { font-family: ui-monospace, monospace; overflow-wrap: anywhere; text-align: right; }.setup-card .secret-value { background: var(--yellow); }.warning-card { padding: 18px; background: var(--pink); border: 2px solid var(--ink); border-radius: 16px; }.warning-card p { margin: 5px 0 0; }
+.phone-test-card { margin-top: 22px; padding: 18px; display: grid; grid-template-columns: 58px 1fr; gap: 16px; align-items: start; color: var(--ink); background: var(--mint); border: 2px solid var(--ink); border-radius: 16px; text-align: left; }
+.phone-test-card .service-number { min-width: 54px; min-height: 38px; font-size: 1rem; }.phone-test-card p { margin: 5px 0 0; color: var(--muted); line-height: 1.5; }
 .setup-guides { margin-top: 72px; text-align: left; }
 .setup-guide-heading { max-width: 640px; margin-bottom: 26px; }
 .setup-guide-heading h2 { margin: 10px 0 12px; font-size: clamp(2.5rem, 5vw, 4rem); }
@@ -224,7 +230,7 @@ input:focus { border-color: var(--purple); box-shadow: 0 0 0 4px rgba(108,76,255
 @media (max-width: 520px) {
   .wrap { width: min(100% - 26px, 1160px); }.site-header { width: calc(100% - 18px); padding-inline: 14px; }.site-header nav { gap: 12px; font-size: .82rem; }.site-header .github-link { display: none; }.brand { font-size: 1.1rem; }.brand-mark { width: 36px; height: 36px; }
   .hero { padding-block: 46px 60px; }.hero h1 { font-size: clamp(3.7rem, 18vw, 5.4rem); }.hero-lede { font-size: 1rem; }.hero-actions { align-items: stretch; flex-direction: column; }.button { width: 100%; }
-  .hero-art { min-height: 350px; }.hero-art::before { height: 315px; }.phone { width: 135px; height: 135px; border-radius: 26px; }.handset { width: 116px; height: 44px; }.dial { width: 64px; height: 64px; }.call-bubble { padding: 10px 13px; }.call-bubble strong { font-size: 1.3rem; }
+  .hero-art { min-height: 350px; overflow: hidden; }.hero-art::before { height: 315px; }.phone { width: 135px; height: 135px; border-radius: 26px; }.handset { width: 116px; height: 44px; }.dial { width: 64px; height: 64px; }.call-bubble { padding: 10px 13px; }.call-bubble strong { font-size: 1.3rem; }
   .steps-grid { gap: 16px; }.step-card { min-height: 300px; }.step-icon { margin-bottom: 40px; }.number-pad { gap: 9px; }.number-pad div { min-height: 120px; padding: 16px; }.number-pad strong { font-size: 2.2rem; }
   .page-hero { padding-top: 60px; }.panel, .party-list, .directory, .join-panel, .auth-panel { padding: 22px; }.dashboard-grid, .party-layout { gap: 18px; }.join-intro h1, .auth-intro h1 { font-size: 4rem; }.auth-links { align-items: flex-start; flex-direction: column; }.recovery-code-grid { grid-template-columns: 1fr; }.recovery-card { padding: 18px; }
   .danger-zone, .account-footer { align-items: stretch; flex-direction: column; }.danger-zone .button { width: 100%; }.account-footer { align-items: flex-start; }

@@ -82,7 +82,8 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	client.Jar = jar
 
 	home := get(t, client, server.URL+"/")
-	if home.StatusCode != http.StatusOK || !strings.Contains(readBody(t, home), "Pick up") {
+	homeBody := readBody(t, home)
+	if home.StatusCode != http.StatusOK || !strings.Contains(homeBody, "Pick up") || !strings.Contains(homeBody, "test my phone") {
 		t.Fatal("landing page did not render")
 	}
 	if got := home.Header.Get("Content-Security-Policy"); !strings.Contains(got, "frame-ancestors 'none'") {
@@ -155,7 +156,7 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 		"csrf": {joinCSRF}, "display_name": {"Blue phone"}, "extension": {"101"}, "device_label": {"ATA"},
 	})
 	setupBody := readBody(t, setup)
-	if setup.StatusCode != http.StatusOK || !strings.Contains(setupBody, "You are extension 101") || !strings.Contains(setupBody, "sip.example.test") {
+	if setup.StatusCode != http.StatusOK || !strings.Contains(setupBody, "You are extension 101") || !strings.Contains(setupBody, "sip.example.test") || !strings.Contains(setupBody, "Test both directions") || !strings.Contains(setupBody, "dial <strong>*10</strong>") {
 		t.Fatalf("setup response was not successful: status=%d", setup.StatusCode)
 	}
 	oldUsername := firstMatch(t, setupBody, `(rrd_[A-Za-z0-9_-]+)`)
@@ -176,7 +177,11 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	}
 
 	hostParty := get(t, client, server.URL+"/parties/"+partyID)
-	deviceID := firstMatch(t, readBody(t, hostParty), `/devices/([^/]+)/rotate`)
+	hostPartyBody := readBody(t, hostParty)
+	if !strings.Contains(hostPartyBody, "Phone echo test") || !strings.Contains(hostPartyBody, "Always ready") {
+		t.Fatal("party page omitted the always-available echo test")
+	}
+	deviceID := firstMatch(t, hostPartyBody, `/devices/([^/]+)/rotate`)
 	rotated := postForm(t, client, server.URL+"/parties/"+partyID+"/devices/"+deviceID+"/rotate", url.Values{"csrf": {csrf}})
 	rotatedBody := readBody(t, rotated)
 	if rotated.StatusCode != http.StatusOK || !strings.Contains(rotatedBody, "Fresh phone settings") || !strings.Contains(rotatedBody, "old username and password no longer work") {

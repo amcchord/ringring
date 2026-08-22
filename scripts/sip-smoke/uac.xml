@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="ISO-8859-1" ?>
 <!DOCTYPE scenario SYSTEM "sipp.dtd">
-<scenario name="RingRing phone A authenticated call with RTP check">
+<scenario name="RingRing authenticated call with RTP check">
   <send retrans="500">
     <![CDATA[
-      INVITE sip:102@[remote_ip]:[remote_port] SIP/2.0
+      INVITE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
       Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]-[branch_tag]
       From: <sip:rr_smoke_a@[remote_ip]>;tag=[call_number]
-      To: <sip:102@[remote_ip]>
+      To: <sip:[service]@[remote_ip]>
       Call-ID: [call_id]
       CSeq: 1 INVITE
       Contact: <sip:rr_smoke_a@[local_ip]:[local_port];transport=[transport]>
@@ -31,10 +31,10 @@
 
   <send>
     <![CDATA[
-      ACK sip:102@[remote_ip]:[remote_port] SIP/2.0
+      ACK sip:[service]@[remote_ip]:[remote_port] SIP/2.0
       Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch-2]-[branch_tag]
       From: <sip:rr_smoke_a@[remote_ip]>;tag=[call_number]
-      To: <sip:102@[remote_ip]>[peer_tag_param]
+      To: <sip:[service]@[remote_ip]>[peer_tag_param]
       Call-ID: [call_id]
       CSeq: 1 ACK
       Max-Forwards: 70
@@ -45,10 +45,10 @@
 
   <send retrans="500">
     <![CDATA[
-      INVITE sip:102@[remote_ip]:[remote_port] SIP/2.0
+      INVITE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
       Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]-[branch_tag]
       From: <sip:rr_smoke_a@[remote_ip]>;tag=[call_number]
-      To: <sip:102@[remote_ip]>
+      To: <sip:[service]@[remote_ip]>
       Call-ID: [call_id]
       CSeq: 2 INVITE
       Contact: <sip:rr_smoke_a@[local_ip]:[local_port];transport=[transport]>
@@ -75,10 +75,10 @@
 
   <send>
     <![CDATA[
-      ACK sip:102@[remote_ip]:[remote_port] SIP/2.0
+      ACK sip:[service]@[remote_ip]:[remote_port] SIP/2.0
       Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]-[branch_tag]
       From: <sip:rr_smoke_a@[remote_ip]>;tag=[call_number]
-      To: <sip:102@[remote_ip]>[peer_tag_param]
+      To: <sip:[service]@[remote_ip]>[peer_tag_param]
       Call-ID: [call_id]
       CSeq: 2 ACK
       Contact: <sip:rr_smoke_a@[local_ip]:[local_port];transport=[transport]>
@@ -87,6 +87,8 @@
 
     ]]>
   </send>
+
+  <pause milliseconds="1500"/>
 
   <nop>
     <action>
@@ -97,10 +99,10 @@
 
   <send retrans="500">
     <![CDATA[
-      BYE sip:102@[remote_ip]:[remote_port] SIP/2.0
+      BYE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
       Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]-[branch_tag]
       From: <sip:rr_smoke_a@[remote_ip]>;tag=[call_number]
-      To: <sip:102@[remote_ip]>[peer_tag_param]
+      To: <sip:[service]@[remote_ip]>[peer_tag_param]
       Call-ID: [call_id]
       CSeq: 3 BYE
       Contact: <sip:rr_smoke_a@[local_ip]:[local_port];transport=[transport]>

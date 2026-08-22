@@ -97,6 +97,8 @@ docker run --rm --network none \
   golang:1.26-bookworm go run ./scripts/render-sip-smoke-config.go /out/state
 grep -q '^direct_media=no$' "$work_directory/state/pjsip.conf"
 grep -q '^context=rr-party-pty-smoke$' "$work_directory/state/pjsip.conf"
+grep -Fq 'exten => *10,1,Answer()' "$work_directory/state/extensions.conf"
+grep -Fq ' same => n,Echo()' "$work_directory/state/extensions.conf"
 grep -q '^exten => 102,1,NoOp(RingRing party call)$' "$work_directory/state/extensions.conf"
 
 docker network create --internal --subnet 172.31.89.0/24 "$network" >/dev/null
@@ -197,4 +199,18 @@ fi
 
 channels=$(docker exec ringring-sip-smoke-asterisk asterisk -rx 'core show channels count')
 printf '%s\n' "$channels" | grep -q '^0 active channels'
-echo "SIP smoke test passed: 2 authenticated registrations, extension call, and bidirectional RTP."
+
+docker rm ringring-sip-smoke-phone-a >/dev/null
+find "$work_directory/logs/ringring-sip-smoke-phone-a" -type f -delete
+echo "Calling *10 and checking the single-phone RTP echo..."
+run_and_wait ringring-sip-smoke-phone-a 30 \
+  --network "$network" --ip 172.31.89.40 --volume "$scenario_mount" \
+  --volume "$work_directory/logs/ringring-sip-smoke-phone-a:/logs" --workdir /logs \
+  "$sipp_image" 172.31.89.20:5060 -sf /scenarios/uac.xml \
+  -i 172.31.89.40 -p 5061 -mi 172.31.89.40 -mp 4000 \
+  -s '*10' -au rr_smoke_a -ap smoke-only-a-7Qm4s9Vx -m 1 -aa -rtpcheck_debug \
+  -key branch_tag echoa -trace_msg -trace_err
+
+channels=$(docker exec ringring-sip-smoke-asterisk asterisk -rx 'core show channels count')
+printf '%s\n' "$channels" | grep -q '^0 active channels'
+echo "SIP smoke test passed: 2 authenticated registrations, extension call, *10 echo test, and bidirectional RTP."

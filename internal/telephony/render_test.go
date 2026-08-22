@@ -37,6 +37,11 @@ func TestRenderIsolatesPartyDialplans(t *testing.T) {
 	if strings.Contains(blue, "rrd_gold_c") || strings.Contains(gold, "rrd_blue") {
 		t.Fatalf("cross-party endpoint leaked into dialplan:\n%s", dialplan)
 	}
+	for name, party := range map[string]string{"blue": blue, "gold": gold} {
+		if !strings.Contains(party, "exten => *10,1,Answer()\n same => n,Wait(1)\n same => n,Playback(beep)\n same => n,Echo()\n same => n,Playback(demo-echodone)") {
+			t.Fatalf("%s party missing the always-available echo test:\n%s", name, party)
+		}
+	}
 	if !strings.Contains(blue, "exten => *11") {
 		t.Fatal("time service should be present in each party")
 	}
@@ -75,6 +80,9 @@ func TestRenderOmitsDisabledSpecialNumbers(t *testing.T) {
 		t.Fatal(err)
 	}
 	dialplan := string(config.Dialplan)
+	if !strings.Contains(dialplan, "exten => *10,1,Answer()") || !strings.Contains(dialplan, "same => n,Echo()") {
+		t.Fatalf("echo test must remain available when optional services are disabled:\n%s", dialplan)
+	}
 	for _, number := range []string{"*11", "*12", "*13", "*14"} {
 		if strings.Contains(dialplan, "exten => "+number) {
 			t.Fatalf("disabled service %s remained in dialplan:\n%s", number, dialplan)

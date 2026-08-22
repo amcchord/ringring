@@ -29,6 +29,10 @@
       <span class="panel-icon">✨</span>
       <h2>Fun numbers</h2>
       <p>Choose which special lines phones in this party can dial.</p>
+      <div class="always-line">
+        <span class="service-number">*10</span>
+        <span><strong>Phone echo test</strong><small>Always ready. Speak after the beep and hear your voice come back; press # or hang up to finish.</small></span>
+      </div>
       {{$voiceReady := eq .Party.OpenAIStatus "ready"}}
       <form class="service-form" method="post" action="/parties/{{.Party.ID}}/services">
         <input type="hidden" name="csrf" value="{{.CSRF}}">

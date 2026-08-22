@@ -14,6 +14,8 @@ RingRing is designed for family use and may handle children's voices and names. 
 
 RingRing stores a host name and username, member display labels, extensions, device labels, and operational timestamps. An email address is neither requested nor required by native accounts. It does not record calls. RingRing does not persist AI input audio, output audio, or transcript events. Provider-side API retention is controlled separately by the OpenAI organization's data controls. The default frontend includes no advertising, behavioral analytics, or third-party trackers.
 
+The `*10` phone test is an in-memory Asterisk media loop inside the caller's party context. It sends the caller's RTP straight back to that same authenticated channel and does not record, persist, transcribe, or send audio to another service.
+
 ## Deletion lifecycle
 
 - A host can delete a member only after retyping that member's extension. The member record and every attached encrypted SIP credential are removed together, then RingRing regenerates and reloads Asterisk configuration.

@@ -2,6 +2,30 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — One-phone two-way audio test
+
+### Shipped
+
+- Added `*10` to every generated party context. It answers, beeps, and uses Asterisk's local `Echo()` application so one authenticated phone can prove its microphone, speaker, codec, and both RTP directions without another member being online.
+- Added a prominent `*10` test card to one-time setup screens, an always-ready explanation in the host's fun-number panel, and a playful fifth number on the public splash page.
+- Generalized the authenticated SIPp caller scenario and extended `make sip-smoke` to dial `*10` after the two-phone extension call, requiring a matching PCMU pattern to return through Asterisk.
+
+### Decisions
+
+- Keep the diagnostic always available instead of making it a host toggle. It has no external provider, paid resource, storage, or cross-party destination and is most useful when a phone is first configured.
+- Use Asterisk's built-in beep and echo rather than an app media bridge. The call remains on the authenticated party channel, `#` exits the echo, and no audio is recorded or retained.
+- Keep the real-device gate. A deterministic internal echo proves the generated route and media loop, but it does not prove behavior across a family's actual NAT, ATA, handset, or Wi-Fi path.
+
+### Verification
+
+- Renderer tests require the exact answer, beep, echo, completion, and hangup sequence in isolated party contexts, including when every optional service is disabled.
+- Web tests require the setup and host pages to explain `*10`. A disposable real-browser flow verified the splash, host panel, and one-time setup card at desktop and phone widths with no horizontal overflow; it also exposed and fixed an existing mobile hero-decoration overflow.
+
+### Remaining
+
+- Run the extended isolated SIP/RTP harness on a Docker host, then deploy and exercise `*10` from real remote hardware.
+- Complete a two-way-audio call between two remote physical devices.
+
 ## 2026-08-22 — Guarded member, party, and account deletion
 
 ### Shipped

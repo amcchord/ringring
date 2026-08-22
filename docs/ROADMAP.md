@@ -17,7 +17,8 @@
 - [x] Device-specific setup guides for ATAs, VoIP phones, and softphones.
 - [ ] QR-assisted softphone setup.
 - [x] Host member directory and device controls.
-- [ ] Presence hints and a test-call flow.
+- [x] Self-service two-way echo test.
+- [ ] Presence hints.
 - [ ] Voice-guided extension selection.
 - [x] Host-controlled time and weather service lines.
 - [x] Internet radio line with a safe fixed station.
