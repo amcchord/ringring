@@ -2,6 +2,32 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Linphone provisioning interoperability
+
+### Shipped
+
+- Added an opt-in `make linphone-smoke` harness that packages the current official Linux Linphone Python wheel in a separate test-only image with both the Ubuntu base digest and wheel SHA-256 pinned.
+- Added a dedicated disposable configuration helper so the existing RingRing telephony renderer and production Linphone XML generator create matching Asterisk and client state from one fixed smoke account without adding network dependencies to the lighter SIPp harness.
+- Added a small headless client that serves the generated XML over local HTTP, asks Liblinphone to provision it, iterates the real client engine through registration, and exposes only a success marker for the outer test to verify.
+
+### Decisions
+
+- Keep the large GPLv3 Linphone SDK outside the MIT-licensed RingRing application and production images. It is downloaded only when the explicit interoperability target is built.
+- Require two independent assertions: Liblinphone must report exactly one fetch, one account, and successful registration, while Asterisk must separately report that the contact is registered and reachable.
+- Keep the runtime path isolated from the live service. It uses a dedicated internal Docker network, fixed checked-in smoke credentials, no production environment or database, and no published host ports; exact-name collision checks and the exit trap remove generated client/server state, containers, and the network.
+
+### Verification
+
+- The official `linphone-5.5.3.post5+git.55b84bc556` wheel passed its pinned checksum and loaded in the pinned Ubuntu runtime with only the declared system libraries.
+- An isolated server candidate passed the full target: Linphone fetched RingRing's generated XML exactly once, created exactly one SIP account, authenticated it to disposable Asterisk, and Asterisk marked that contact reachable. The harness then shut Linphone down cleanly and removed its runtime resources.
+- The existing `make sip-smoke` harness still passes two authenticated SIPp registrations, an extension call, the `*10` echo route, and bidirectional PCMU after the new helper was kept separate from its network-disabled renderer.
+- `make check`, Python bytecode compilation, POSIX shell syntax checks, and `git diff --check` pass locally.
+
+### Remaining
+
+- Scan a production setup QR in the current Linphone mobile app and verify its user-visible import flow, foreground ringing, push/background behavior, and Wi-Fi/cellular transitions.
+- Complete a two-way-audio call between two remote physical devices across real family networks.
+
 ## 2026-08-22 — One-time Linphone QR setup
 
 ### Shipped

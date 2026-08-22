@@ -78,4 +78,4 @@ Do not open a public issue for a vulnerability that could expose credentials or 
 
 ## Known preview gaps
 
-HTTPS/TLS, narrow published ports, cross-party configuration isolation, native account recovery, one-time Linphone provisioning, SIP credential rotation/revocation, guarded member/party/account deletion, live authentication blocking, and isolated backup/restore are verified in code and disposable environments. A real Linphone import and two remote physical devices still need to pass account setup and two-way audio before the service leaves preview status.
+HTTPS/TLS, narrow published ports, cross-party configuration isolation, native account recovery, one-time Linphone provisioning, official Linphone-engine XML import and SIP registration, SIP credential rotation/revocation, guarded member/party/account deletion, live authentication blocking, and isolated backup/restore are verified in code and disposable environments. The Linphone mobile UI, push/background ringing, real NAT paths, and a two-way call between two remote physical devices still need to pass on family hardware before the service leaves preview status.

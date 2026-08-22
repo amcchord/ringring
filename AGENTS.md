@@ -75,6 +75,8 @@ make setup
 make dev
 make test
 make check
+make sip-smoke
+make linphone-smoke
 make compose-up
 ```
 
@@ -84,7 +86,8 @@ Before handing off a change:
 2. Run `make check` before committing.
 3. Render or open changed pages at mobile and desktop widths when UI changed.
 4. Validate generated Asterisk configuration when telephony changed.
-5. Update `WORKLOG.md` with what changed, decisions, verification, and remaining work.
+5. Run `make linphone-smoke` when the Linphone provisioning format changes.
+6. Update `WORKLOG.md` with what changed, decisions, verification, and remaining work.
 
 ## Git and change hygiene
 

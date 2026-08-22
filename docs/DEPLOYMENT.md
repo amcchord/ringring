@@ -130,6 +130,19 @@ make sip-smoke
 
 The test renders two disposable devices through the production telephony code, authenticates both with SIPp, calls extension `102` from extension `101`, dials the single-phone `*10` echo route, and requires the expected bidirectional PCMU patterns through Asterisk. It uses a dedicated internal Docker network, fixed smoke-only credentials, no production environment or database, and no published host ports. Exact-name collision checks prevent it from disturbing an already-running smoke test; its containers, network, and generated state are removed on exit. Passing these software loops does not replace a call between remote physical devices across real NATs.
 
+## Isolated Linphone provisioning smoke test
+
+Run the heavier client interoperability check after changing Linphone XML or setup behavior:
+
+```sh
+cd /opt/ringring
+make linphone-smoke
+```
+
+The target builds a test-only image from the checksum-pinned official Linphone Python wheel, renders one disposable account through RingRing's production telephony and provisioning functions, and starts Linphone with a local HTTP provisioning URI. It requires exactly one XML fetch, exactly one imported account, successful authenticated SIP registration, and an independently reachable Asterisk contact. Image/dependency acquisition happens before the runtime check; the actual client and Asterisk run on a dedicated internal network with fixed smoke-only credentials, no production environment or database, and no published host ports. Exact-name collision checks and an exit trap remove the containers, network, generated XML, Linphone state, and Asterisk state.
+
+The official wheel is GPLv3 and intentionally remains outside the MIT-licensed RingRing binary and production images. This headless check does not replace scanning a real QR in the mobile app or testing push, background ringing, Wi-Fi/cellular changes, and remote NAT behavior on family hardware.
+
 ## Update
 
 ```sh

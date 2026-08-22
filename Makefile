@@ -1,4 +1,4 @@
-.PHONY: setup dev test check backup restore-drill sip-smoke compose-up compose-down
+.PHONY: setup dev test check backup restore-drill sip-smoke linphone-smoke compose-up compose-down
 
 setup:
 	go mod download
@@ -23,6 +23,9 @@ restore-drill:
 
 sip-smoke:
 	./scripts/sip-smoke.sh
+
+linphone-smoke:
+	./scripts/linphone-smoke.sh
 
 compose-up:
 	docker compose up --build
