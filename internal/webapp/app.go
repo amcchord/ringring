@@ -53,22 +53,24 @@ var (
 )
 
 type App struct {
-	cfg       config.Config
-	store     *store.Store
-	cipher    *secure.Cipher
-	openAI    openAIProjectManager
-	telephony *telephony.Reconciler
-	presence  contactPresenceSource
-	weather   weatherGeocoder
-	oauth     *oauth2.Config
-	logger    *slog.Logger
-	metrics   *observability.Registry
-	handler   http.Handler
-	static    http.Handler
-	now       func() time.Time
-	authUsers *rateLimiter
-	authSlots chan struct{}
-	dummyHash string
+	cfg        config.Config
+	store      *store.Store
+	cipher     *secure.Cipher
+	openAI     openAIProjectManager
+	telephony  *telephony.Reconciler
+	presence   contactPresenceSource
+	ringer     deviceRingSource
+	weather    weatherGeocoder
+	oauth      *oauth2.Config
+	logger     *slog.Logger
+	metrics    *observability.Registry
+	handler    http.Handler
+	static     http.Handler
+	now        func() time.Time
+	authUsers  *rateLimiter
+	phoneRings *rateLimiter
+	authSlots  chan struct{}
+	dummyHash  string
 }
 
 type openAIProjectManager interface {
@@ -86,6 +88,11 @@ type weatherGeocoder interface {
 
 type contactPresenceSource interface {
 	ContactStatuses(context.Context) (map[string]telephony.ContactState, error)
+}
+
+type deviceRingSource interface {
+	contactPresenceSource
+	RingDevice(context.Context, string, string) error
 }
 
 type PresenceView struct {
@@ -211,6 +218,7 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 		dummyHash: dummyHash,
 	}
 	app.authUsers = newRateLimiter(func() time.Time { return app.now() })
+	app.phoneRings = newRateLimiter(func() time.Time { return app.now() })
 	if cfg.OpenAIProvisioningConfigured() {
 		app.openAI = openaiadmin.New(cfg.OpenAIAdminKey, cfg.OpenAIPartySpendLimitCents, &http.Client{Timeout: 30 * time.Second})
 	}
@@ -224,6 +232,7 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 	ami := telephony.AMI{Address: cfg.AsteriskAMIAddr, Username: cfg.AsteriskAMIUser, Secret: cfg.AsteriskAMISecret}
 	if cfg.AsteriskAMIAddr != "" && cfg.AsteriskAMISecret != "" {
 		app.presence = ami
+		app.ringer = ami
 	}
 	if cfg.AsteriskConfigDir != "" {
 		app.telephony = &telephony.Reconciler{
@@ -256,6 +265,7 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 	mux.HandleFunc("POST /parties/{partyID}/openai-key/rotate", app.requireUser(app.rotatePartyOpenAIKey))
 	mux.HandleFunc("GET /parties/{partyID}/setup", app.requireUser(app.rotatedSetup))
 	mux.HandleFunc("POST /parties/{partyID}/devices/{deviceID}/readiness", app.requireUser(app.updateDeviceReadiness))
+	mux.HandleFunc("POST /parties/{partyID}/devices/{deviceID}/ring-test", app.requireUser(app.ringDeviceTest))
 	mux.HandleFunc("POST /parties/{partyID}/devices/{deviceID}/rotate", app.requireUser(app.rotateDevice))
 	mux.HandleFunc("POST /parties/{partyID}/devices/{deviceID}/revoke", app.requireUser(app.revokeDevice))
 	mux.HandleFunc("GET /parties/{partyID}/members/{memberID}/delete", app.requireUser(app.deleteMemberForm))
@@ -916,6 +926,9 @@ func (a *App) party(w http.ResponseWriter, r *http.Request, session authSession)
 	if r.URL.Query().Get("phone-checks") == "saved" {
 		data.Notice = "The host-confirmed real-phone checks were saved."
 	}
+	if r.URL.Query().Get("ring-test") == "sent" {
+		data.Notice = "Ring test sent. The selected phone should ring and say its extension after it is answered."
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	a.render(w, "party", data)
 }
@@ -1370,6 +1383,53 @@ func (a *App) updateDeviceReadiness(w http.ResponseWriter, r *http.Request, sess
 	}
 	backURL := "/parties/" + url.PathEscape(partyID) + "?phone-checks=saved#phone-checks-" + url.PathEscape(deviceID)
 	http.Redirect(w, r, backURL, http.StatusSeeOther)
+}
+
+func (a *App) ringDeviceTest(w http.ResponseWriter, r *http.Request, session authSession) {
+	if !a.validCSRF(r, session) {
+		http.Error(w, "invalid request", http.StatusForbidden)
+		return
+	}
+	partyID := r.PathValue("partyID")
+	deviceID := r.PathValue("deviceID")
+	member, device, err := a.store.ActiveDeviceForHost(r.Context(), partyID, session.User.ID, deviceID)
+	if errors.Is(err, store.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	backURL := "/parties/" + url.PathEscape(partyID) + "#phone-checks-" + url.PathEscape(deviceID)
+	if a.ringer == nil {
+		a.errorPage(w, http.StatusServiceUnavailable, "Phone ringing is temporarily unavailable", "The private Asterisk control connection is not ready. Your saved phone settings were not changed.", backURL, "Back to the party")
+		return
+	}
+	if !a.phoneRings.allow("host:"+session.User.ID, 10, 5*time.Minute) || !a.phoneRings.allow("device:"+device.ID, 2, time.Minute) {
+		w.Header().Set("Retry-After", "60")
+		a.errorPage(w, http.StatusTooManyRequests, "Give that phone a moment", "RingRing limits repeated setup rings. Wait a minute, then try again.", backURL, "Back to the party")
+		return
+	}
+	controlContext, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	statuses, err := a.ringer.ContactStatuses(controlContext)
+	if err != nil {
+		a.logger.Warn("check phone before setup ring", "error_class", observability.ErrorClass(err))
+		a.errorPage(w, http.StatusServiceUnavailable, "Phone status is temporarily unavailable", "RingRing could not safely confirm that phone is online. Its settings were not changed.", backURL, "Back to the party")
+		return
+	}
+	state, registered := statuses[device.SIPUsername]
+	if !registered || (state != telephony.ContactReachable && state != telephony.ContactNonQualified) {
+		a.errorPage(w, http.StatusConflict, "That phone is not online yet", "Wait until its status says online, then send the ring test again.", backURL, "Back to the party")
+		return
+	}
+	if err := a.ringer.RingDevice(controlContext, device.SIPUsername, member.Extension); err != nil {
+		a.logger.Warn("send phone setup ring", "error_class", observability.ErrorClass(err))
+		a.errorPage(w, http.StatusBadGateway, "The phone did not start ringing", "Asterisk could not start the private setup call. Wait a moment and try again; no phone settings were changed.", backURL, "Back to the party")
+		return
+	}
+	http.Redirect(w, r, "/parties/"+url.PathEscape(partyID)+"?ring-test=sent#phone-checks-"+url.PathEscape(deviceID), http.StatusSeeOther)
 }
 
 func (a *App) rotateDevice(w http.ResponseWriter, r *http.Request, session authSession) {

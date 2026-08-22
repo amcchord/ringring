@@ -157,6 +157,11 @@
           <span class="device-line" id="phone-checks-{{.ID}}">
             <span><small>{{.Label}} · <span class="device-presence {{$phone.CSSClass}}">{{$phone.Label}}</span></small></span>
             {{if not .RevokedAt}}
+            <form class="device-ring-test" method="post" action="/parties/{{$party.ID}}/devices/{{.ID}}/ring-test">
+              <input type="hidden" name="csrf" value="{{$csrf}}">
+              <button class="text-button" type="submit" aria-describedby="ring-test-help-{{.ID}}" {{if ne $phone.CSSClass "presence-online"}}disabled{{end}}>📳 Ring this phone</button>
+              <small id="ring-test-help-{{.ID}}">{{if eq $phone.CSSClass "presence-online"}}It will say extension {{$member.Extension}} after someone answers.{{else}}Available when live status says online.{{end}}</small>
+            </form>
             <details class="device-readiness">
               <summary>Real phone check · {{.Readiness.CompletedCount}} of 3</summary>
               <form class="device-readiness-card" method="post" action="/parties/{{$party.ID}}/devices/{{.ID}}/readiness">
@@ -172,7 +177,7 @@
                 </label>
                 <label class="readiness-check">
                   <input type="checkbox" name="incoming_call_tested" value="1" {{if .Readiness.IncomingCallTestedAt}}checked{{end}}>
-                  <span>That remote phone called extension <strong>{{$member.Extension}}</strong>; this phone rang, connected, and both people heard each other.</span>
+                  <span>I used <strong>Ring this phone</strong> (or called extension <strong>{{$member.Extension}}</strong> from another party phone); this phone rang and played or connected correctly.</span>
                 </label>
                 <p class="readiness-privacy">RingRing saves only when each item was confirmed. It does not save who called, network details, call audio, or a call log.</p>
                 <button class="button button-primary" type="submit">Save phone checks</button>

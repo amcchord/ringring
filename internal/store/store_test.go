@@ -259,6 +259,13 @@ func TestHostCanRevokeAndReconnectDevice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	memberForRing, deviceForRing, err := s.ActiveDeviceForHost(ctx, party.ID, host.ID, device.ID)
+	if err != nil || memberForRing.Extension != "101" || deviceForRing.SIPUsername != "rrd_old" || deviceForRing.SIPSecretCiphertext != "" {
+		t.Fatalf("unexpected active ring target: member=%#v device=%#v error=%v", memberForRing, deviceForRing, err)
+	}
+	if _, _, err := s.ActiveDeviceForHost(ctx, party.ID, other.ID, device.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("non-host active ring target error = %v", err)
+	}
 
 	if err := s.RevokeDevice(ctx, party.ID, other.ID, device.ID, now); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("non-host revocation error = %v", err)
@@ -272,6 +279,9 @@ func TestHostCanRevokeAndReconnectDevice(t *testing.T) {
 	}
 	if len(routing) != 0 {
 		t.Fatalf("revoked device remained routable: %#v", routing)
+	}
+	if _, _, err := s.ActiveDeviceForHost(ctx, party.ID, host.ID, device.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoked device remained ringable: %v", err)
 	}
 
 	rotated, err := s.RotateDevice(ctx, party.ID, host.ID, device.ID, "rrd_fresh", "fresh-cipher", testProvisioning("fresh-provision", now.Add(time.Minute)))
@@ -287,6 +297,9 @@ func TestHostCanRevokeAndReconnectDevice(t *testing.T) {
 	}
 	if len(routing) != 1 || routing[0].SIPUsername != "rrd_fresh" || routing[0].SIPSecretCiphertext != "fresh-cipher" {
 		t.Fatalf("unexpected routing after reconnect: %#v", routing)
+	}
+	if _, reconnected, err := s.ActiveDeviceForHost(ctx, party.ID, host.ID, device.ID); err != nil || reconnected.SIPUsername != "rrd_fresh" {
+		t.Fatalf("reconnected device was not ringable: %#v error=%v", reconnected, err)
 	}
 }
 

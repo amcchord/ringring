@@ -176,6 +176,8 @@ openssl s_client -connect ringring.live:5061 -servername ringring.live -verify_h
 
 `verify-ami` exercises the private manager login and complete PJSIP contact-list action, then prints only an `ok` status and aggregate contact count. It never prints endpoint names, contact URIs, addresses, user agents, or credentials. The private metrics scrape repeats that aggregate AMI/database health boundary and must remain unreachable through public HTTPS. `ringringctl install`, `upgrade`, and `doctor` check both invariants. Review identifier-free application logs with `docker compose logs --tail=100 app`; treat the separate Asterisk authentication security log as restricted, short-retention abuse data. Asterisk is compiled from the pinned official source release and its published SHA-256 file is checked during the image build.
 
+The host-triggered incoming ring uses the same private AMI listener. Its source-controlled account has `call` write permission in addition to the existing reload permissions, but not `all` or configuration access; the ACL still permits only the fixed app-container address. The application exposes no arbitrary Originate fields and the internal prompt context has no public-network route. After an upgrade, use the disposable `make sip-smoke` gate—not a real family device—to verify the complete host request, contact recheck, AMI Originate, answered SIP call, bundled prompt, clean hangup, and absent CDR.
+
 To verify the Linphone path without touching a family phone, use a disposable party/invitation in an isolated development database. Confirm that the QR decodes to the setup page's provisioning URL, the first `GET` returns `application/xml` with `Cache-Control: no-store`, and the second returns `410`. Never print the URL, XML, or setup-screen credentials into deployment logs.
 
 ## Backup and recovery
@@ -331,3 +333,7 @@ The curated selector adds `party_services.radio_station` with a forward-only sta
 ### Host-set AI spend-limit upgrade and rollback
 
 The spend-limit control uses the additive `parties` columns described in environment setup above and adds no secret, public port, container, or provider resource. Take and drill the normal app-state backup before upgrading. Existing projects are not contacted during migration or startup. After upgrade, verify the page and schema without submitting the control against a real party. If a host update is pending, finish it on this release before any rollback; the mirrored legacy status keeps older releases fail-closed but only this release knows how to reconcile the pending amount.
+
+### Host-triggered phone ring upgrade and rollback
+
+The incoming setup ring adds no schema, stored call state, secret, public port, provider request, or generated party route. It adds a fixed internal Asterisk prompt context and the narrow AMI `call` write permission described above. Upgrading or rolling back recreates Asterisk from the matching source-controlled configuration; older application builds never invoke the permission. A ring already queued at rollback may finish within its 20-second absolute timeout. Use the isolated SIP smoke before promotion and do not ring a real family device as a deployment probe.

@@ -27,7 +27,7 @@ func main() {
 	}
 	now := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
 	host, err := database.UpsertGoogleUser(ctx, store.GoogleProfile{
-		Subject: "sip-smoke-host", Email: "smoke@example.test", Name: "Smoke host",
+		Subject: "dev:smoke@example.test", Email: "smoke@example.test", Name: "Smoke host",
 	}, now, "usr_smoke")
 	if err != nil {
 		fail(err)

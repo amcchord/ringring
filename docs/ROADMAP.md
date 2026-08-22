@@ -20,6 +20,7 @@
 - [x] Host member directory and device controls.
 - [x] Self-service two-way echo test.
 - [x] Host-only live registration and reachability hints.
+- [x] Host-triggered incoming setup ring with a spoken extension and no second phone required.
 - [x] Host-confirmed real-phone echo, remote outgoing-call, and remote incoming-call checklist with reset-on-reconfiguration semantics.
 - [x] Authenticated voice-guided extension selection with DTMF confirmation.
 - [x] Host-controlled time and weather service lines.

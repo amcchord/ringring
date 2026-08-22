@@ -2,6 +2,33 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Host-triggered incoming phone setup ring
+
+### Shipped
+
+- Added a host-only **Ring this phone** action for each active online device. It places one private internal setup call and speaks the phone's extension after answer, so a family can prove incoming ringing before configuring a second phone.
+- Scoped every request through the authenticated host, party, active device, generated SIP username, and current private AMI contact state. Cross-party, revoked, missing, offline, and unknown devices cannot be rung; per-host and per-device limits constrain repeated calls.
+- Added a fixed Asterisk prompt context with bundled sounds, a 20-second absolute limit, and CDR disabled. The application validates the generated endpoint and ordinary extension, then supplies only fixed AMI Originate fields; the context has no trunk, `Dial`, transfer, URL, AGI, AudioSocket, or shell path.
+- Updated the real-phone checklist and setup handoff so hosts can use the incoming ring alongside `*10`, while still requiring a real cross-network two-way call for the physical-hardware milestone.
+
+### Decisions
+
+- Use the existing private app-to-Asterisk control connection rather than expose a SIP or web callback. Its source-controlled account gains only AMI `call` write permission, remains restricted to the fixed app-container address, and receives no configuration or broad `all` permission.
+- Treat the ring as a live diagnostic rather than proof saved by the server. The host still confirms the readiness checklist; RingRing adds no call record, caller history, audio, transcript, or device identifier to application logs.
+- Keep the action unavailable until live contact status says online. This avoids presenting a successful queued request as evidence that an unplugged or unreachable family phone rang.
+
+### Verification
+
+- Tests cover the host/party/device query, absence of decrypted credentials, revoked and cross-party rejection, contact-state enforcement, exact fixed AMI frame, input validation before connection, two-rings-per-minute limiting, accessible disabled controls, and executable dialplan/permission boundaries.
+- The disposable SIP smoke now signs in as its isolated host, sends the web request to a registered endpoint, answers the resulting SIP call, verifies the caller label and spoken prompt, checks the loaded context has no `Dial`, confirms no CDR file was created, and waits for a clean zero-channel hangup.
+- `make check`, `make security`, and `make admin-test` pass locally, including formatting, shell validation, vet, the complete race-enabled suite, control-plane fixtures, and the reachable-vulnerability scan.
+
+### Remaining
+
+- Validate the exact committed candidate through the isolated SIP, NAT, and Linphone gates, promote it through the guarded production upgrade, and record the runtime evidence below.
+- Complete the physical ATA, desk-phone, and mobile softphone matrix across two real networks, including background transitions.
+- Obtain the external child-safety review and OpenAI Zero Data Retention eligibility before opening the AI conversation gate.
+
 ## 2026-08-22 — Fail-closed child-safety gate for AI conversation
 
 ### Shipped

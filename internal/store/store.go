@@ -1069,6 +1069,35 @@ func (s *Store) MemberForHost(ctx context.Context, partyID, hostUserID, memberID
 	return party, member, nil
 }
 
+// ActiveDeviceForHost returns only the non-secret fields needed for a host to
+// send one setup ring to an active phone inside their own party.
+func (s *Store) ActiveDeviceForHost(ctx context.Context, partyID, hostUserID, deviceID string) (model.Member, model.Device, error) {
+	var member model.Member
+	var device model.Device
+	var memberCreated, deviceCreated int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT m.id, m.party_id, m.display_name, m.extension, m.created_at,
+			d.id, d.member_id, d.label, d.sip_username, d.created_at
+		FROM parties p
+		JOIN members m ON m.party_id = p.id
+		JOIN devices d ON d.member_id = m.id
+		WHERE p.id = ? AND p.host_user_id = ? AND d.id = ? AND d.revoked_at IS NULL`,
+		partyID, hostUserID, deviceID,
+	).Scan(
+		&member.ID, &member.PartyID, &member.DisplayName, &member.Extension, &memberCreated,
+		&device.ID, &device.MemberID, &device.Label, &device.SIPUsername, &deviceCreated,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Member{}, model.Device{}, ErrNotFound
+	}
+	if err != nil {
+		return model.Member{}, model.Device{}, fmt.Errorf("load active hosted device: %w", err)
+	}
+	member.CreatedAt = fromUnix(memberCreated)
+	device.CreatedAt = fromUnix(deviceCreated)
+	return member, device, nil
+}
+
 func (s *Store) DeleteMember(ctx context.Context, partyID, hostUserID, memberID string) error {
 	result, err := s.db.ExecContext(ctx, `
 		DELETE FROM members

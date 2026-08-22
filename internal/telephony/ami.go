@@ -10,11 +10,14 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	extensionrules "github.com/amcchord/ringring/internal/extension"
 )
 
 const (
 	defaultAMITimeout = 5 * time.Second
 	contactsActionID  = "ringring-contacts"
+	ringActionID      = "ringring-phone-check"
 	maxAMIFrames      = 10_000
 	maxAMIFrameBytes  = 64 * 1024
 )
@@ -35,6 +38,45 @@ type AMI struct {
 	Username string
 	Secret   string
 	Timeout  time.Duration
+}
+
+// RingDevice asks Asterisk to call one validated RingRing endpoint and enter a
+// fixed internal-only dialplan context after answer. The caller supplies no
+// channel technology, context, application, or arbitrary AMI field.
+func (a AMI) RingDevice(ctx context.Context, sipUsername, extension string) error {
+	if a.Address == "" || a.Secret == "" {
+		return errors.New("AMI is not configured")
+	}
+	if !amiObjectPattern.MatchString(sipUsername) {
+		return errors.New("phone ring target is invalid")
+	}
+	if !extensionrules.Valid(extension) {
+		return errors.New("phone ring extension is invalid")
+	}
+	connection, reader, err := a.connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer connection.Close()
+
+	if err := writeAMIAction(connection, "Originate",
+		"ActionID", ringActionID,
+		"Channel", "PJSIP/"+sipUsername,
+		"Context", "rr-phone-check",
+		"Exten", "s",
+		"Priority", "1",
+		"Timeout", "15000",
+		"CallerID", "RingRing setup <"+extension+">",
+		"Variable", "RINGRING_EXTENSION="+extension,
+		"Async", "true",
+	); err != nil {
+		return fmt.Errorf("write AMI phone ring: %w", err)
+	}
+	if err := expectResponse(reader, "Success"); err != nil {
+		return fmt.Errorf("AMI phone ring: %w", err)
+	}
+	_ = writeAMIAction(connection, "Logoff")
+	return nil
 }
 
 func (a AMI) Reload(ctx context.Context) error {

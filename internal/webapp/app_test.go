@@ -59,6 +59,26 @@ type countingContactPresence struct {
 	statuses map[string]telephony.ContactState
 }
 
+type fakeDeviceRinger struct {
+	statuses  map[string]telephony.ContactState
+	statusErr error
+	ringErr   error
+	calls     int
+	username  string
+	extension string
+}
+
+func (f *fakeDeviceRinger) ContactStatuses(context.Context) (map[string]telephony.ContactState, error) {
+	return f.statuses, f.statusErr
+}
+
+func (f *fakeDeviceRinger) RingDevice(_ context.Context, username, extension string) error {
+	f.calls++
+	f.username = username
+	f.extension = extension
+	return f.ringErr
+}
+
 func (f *countingContactPresence) ContactStatuses(context.Context) (map[string]telephony.ContactState, error) {
 	f.calls++
 	return f.statuses, nil
@@ -539,6 +559,35 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 		t.Fatalf("party live presence calls=%d online=%t member_label=%t unavailable=%t", presenceCounter.calls, onlineRendered, memberLabelRendered, unavailableRendered)
 	}
 	deviceID := firstMatch(t, hostPartyBody, `/devices/([^/]+)/rotate`)
+	ringer := &fakeDeviceRinger{statuses: map[string]telephony.ContactState{oldUsername: telephony.ContactReachable}}
+	app.ringer = ringer
+	ringPath := server.URL + "/parties/" + partyID + "/devices/" + deviceID + "/ring-test"
+	if !strings.Contains(hostPartyBody, `action="/parties/`+partyID+`/devices/`+deviceID+`/ring-test"`) || !strings.Contains(hostPartyBody, "📳 Ring this phone") || !strings.Contains(hostPartyBody, "It will say extension 101") {
+		t.Fatal("online phone did not show the incoming ring test")
+	}
+	outsiderRing := postForm(t, outsiderClient, ringPath, url.Values{"csrf": {outsiderCSRF}})
+	if outsiderRing.StatusCode != http.StatusNotFound || ringer.calls != 0 {
+		t.Fatalf("another host reached the phone ring test: status=%d calls=%d", outsiderRing.StatusCode, ringer.calls)
+	}
+	_ = readBody(t, outsiderRing)
+	ringer.statuses = map[string]telephony.ContactState{}
+	offlineRing := postForm(t, client, ringPath, url.Values{"csrf": {csrf}})
+	if offlineRing.StatusCode != http.StatusConflict || !strings.Contains(readBody(t, offlineRing), "not online yet") || ringer.calls != 0 {
+		t.Fatalf("offline phone ring status=%d calls=%d", offlineRing.StatusCode, ringer.calls)
+	}
+	fixedNow = fixedNow.Add(time.Minute)
+	ringer.statuses = map[string]telephony.ContactState{oldUsername: telephony.ContactReachable}
+	for attempt := 1; attempt <= 2; attempt++ {
+		ringSent := postForm(t, client, ringPath, url.Values{"csrf": {csrf}})
+		ringSentBody := readBody(t, ringSent)
+		if ringSent.StatusCode != http.StatusOK || !strings.Contains(ringSentBody, "Ring test sent") || ringer.calls != attempt || ringer.username != oldUsername || ringer.extension != "101" {
+			t.Fatalf("ring attempt %d status=%d calls=%d target=%q extension=%q", attempt, ringSent.StatusCode, ringer.calls, ringer.username, ringer.extension)
+		}
+	}
+	limitedRing := postForm(t, client, ringPath, url.Values{"csrf": {csrf}})
+	if limitedRing.StatusCode != http.StatusTooManyRequests || limitedRing.Header.Get("Retry-After") != "60" || !strings.Contains(readBody(t, limitedRing), "Give that phone a moment") || ringer.calls != 2 {
+		t.Fatalf("repeated ring was not limited: status=%d calls=%d", limitedRing.StatusCode, ringer.calls)
+	}
 	readinessPath := server.URL + "/parties/" + partyID + "/devices/" + deviceID + "/readiness"
 	outsiderReadiness := postForm(t, outsiderClient, readinessPath, url.Values{
 		"csrf": {outsiderCSRF}, "echo_tested": {"1"}, "outgoing_call_tested": {"1"}, "incoming_call_tested": {"1"},

@@ -45,4 +45,4 @@ If an operator adds Prometheus or another scraper, keep the loopback boundary an
 - A sustained increase in `ringring_http_requests_total{status_class="5xx"}`.
 - `ringring_ai_calls_active` above the configured concurrency limit or unchanged beyond the configured call duration plus a small shutdown margin.
 
-These alerts identify subsystem failure without identifying which family, phone, or caller was active. Physical call quality and background ringing still require the host-confirmed checklist and real-device testing; aggregate metrics do not prove them.
+These alerts identify subsystem failure without identifying which family, phone, or caller was active. A host-triggered setup ring appears only as the fixed host HTTP route/status surface; RingRing adds no device, SIP username, extension, or call label. Physical call quality and background ringing still require the host-confirmed checklist and real-device testing; aggregate metrics do not prove them.

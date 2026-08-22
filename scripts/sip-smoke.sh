@@ -142,6 +142,7 @@ docker run -d --name ringring-sip-smoke-app \
   --env ASTERISK_CONFIG_DIR=/asterisk --env ASTERISK_AMI_ADDR=172.31.89.20:5038 \
   --env ASTERISK_AMI_USER=ringring --env ASTERISK_AMI_SECRET=isolatedsmoketest \
   --env FASTAGI_ADDR=:4573 --env AI_AUDIO_ADDR=:4574 \
+  --env DEV_AUTH=true \
   --volume "$work_directory/app:/data" --volume "$work_directory/state:/asterisk" \
   ringring-app-sip-smoke:local >/dev/null
 
@@ -268,7 +269,45 @@ docker exec ringring-sip-smoke-asterisk grep -Eq \
   /var/log/asterisk/security
 printf '%s\n' "$contacts" | grep -q 'rr_smoke_b/'
 printf '%s\n' "$contacts" | grep -Eq 'rr_smoke_b/.*Avail'
+dialplan=$(docker exec ringring-sip-smoke-asterisk asterisk -rx 'dialplan show s@rr-phone-check')
+printf '%s\n' "$dialplan" | grep -q 'auth-thankyou'
+if printf '%s\n' "$dialplan" | grep -q 'Dial('; then
+  echo "Phone-check context unexpectedly contains a Dial application" >&2
+  exit 1
+fi
 docker rm -f ringring-sip-smoke-register-a >/dev/null
+
+echo "Sending a host-scoped incoming ring test to phone B..."
+docker rm -f ringring-sip-smoke-phone-b >/dev/null
+find "$work_directory/logs/ringring-sip-smoke-phone-b" -type f -delete
+docker run -d --name ringring-sip-smoke-phone-b \
+  --network "$network" --ip 172.31.89.30 --volume "$scenario_mount" \
+  --volume "$work_directory/logs/ringring-sip-smoke-phone-b:/logs" --workdir /logs \
+  "$sipp_image" -sf /scenarios/uas.xml -i 172.31.89.30 -p 5062 \
+  -mi 172.31.89.30 -mp 6000 -m 1 -aa -trace_msg -trace_err >/dev/null
+sleep 1
+docker exec ringring-sip-smoke-app sh -c \
+  'rm -f /tmp/ringring-smoke-cookies && curl --fail --silent --show-error \
+    --cookie-jar /tmp/ringring-smoke-cookies --data-urlencode email=smoke@example.test \
+    --output /dev/null http://127.0.0.1:8080/auth/dev'
+party_page=$(docker exec ringring-sip-smoke-app curl --fail --silent --show-error \
+  --cookie /tmp/ringring-smoke-cookies http://127.0.0.1:8080/parties/pty_smoke)
+csrf=$(printf '%s\n' "$party_page" | sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' | head -n 1)
+test -n "$csrf"
+docker exec ringring-sip-smoke-app sh -c \
+  "curl --fail --silent --show-error --location --cookie /tmp/ringring-smoke-cookies \
+    --data-urlencode csrf=$csrf http://127.0.0.1:8080/parties/pty_smoke/devices/dev_smoke_b/ring-test" | \
+  grep -q 'Ring test sent'
+set +e
+wait_for_container ringring-sip-smoke-phone-b 25
+ring_result=$?
+set -e
+test "$ring_result" -eq 0
+grep -R -q 'RingRing setup' "$work_directory/logs/ringring-sip-smoke-phone-b"
+docker logs ringring-sip-smoke-asterisk 2>&1 | grep -q "Playing 'hello\."
+docker exec ringring-sip-smoke-asterisk test ! -e /var/log/asterisk/cdr-csv/Master.csv
+channels=$(docker exec ringring-sip-smoke-asterisk asterisk -rx 'core show channels count')
+printf '%s\n' "$channels" | grep -q '^0 active channels'
 
 docker rm -f ringring-sip-smoke-phone-b >/dev/null
 find "$work_directory/logs/ringring-sip-smoke-phone-b" -type f -delete

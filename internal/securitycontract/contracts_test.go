@@ -121,6 +121,8 @@ func TestWebProxyCannotReachPrivateMetricsOrControlServices(t *testing.T) {
 		"webenabled=no",
 		"deny=0.0.0.0/0.0.0.0",
 		"permit=172.31.88.10/255.255.255.255",
+		"read=system,command",
+		"write=system,command,call",
 	} {
 		if !strings.Contains(manager, required) {
 			t.Fatalf("AMI boundary lost required rule %q", required)
@@ -128,6 +130,11 @@ func TestWebProxyCannotReachPrivateMetricsOrControlServices(t *testing.T) {
 	}
 	if strings.Contains(manager, "permit=0.0.0.0") {
 		t.Fatal("AMI permits every source")
+	}
+	for _, forbidden := range []string{"read=all", "write=all", "originate", "config"} {
+		if strings.Contains(strings.ToLower(manager), forbidden) {
+			t.Fatalf("AMI grants an unnecessary broad permission %q", forbidden)
+		}
 	}
 }
 
@@ -201,6 +208,46 @@ func TestAIConversationRequiresOperatorChildSafetyApprovalAtEveryBoundary(t *tes
 		for _, marker := range markers {
 			if !strings.Contains(contents, marker) {
 				t.Errorf("%s is missing child-safety gate marker %q", filename, marker)
+			}
+		}
+	}
+}
+
+func TestHostPhoneRingHasFixedScopedBoundaries(t *testing.T) {
+	dialplan := readRepositoryFile(t, "deploy/asterisk/config/extensions.conf")
+	for _, marker := range []string{
+		"[rr-phone-check]", "Set(CDR_PROP(disable)=1)", "Set(TIMEOUT(absolute)=20)",
+		"Playback(hello)", "Playback(your)", "Playback(extension)", "Playback(is)",
+		"SayDigits(${RINGRING_EXTENSION})", "Playback(auth-thankyou)",
+	} {
+		if !strings.Contains(dialplan, marker) {
+			t.Errorf("internal phone-check context is missing %q", marker)
+		}
+	}
+	for _, forbidden := range []string{"Dial(", "Goto(", "AGI(", "AudioSocket", "System("} {
+		if strings.Contains(dialplan, forbidden) {
+			t.Errorf("base phone-check dialplan contains unsafe primitive %q", forbidden)
+		}
+	}
+	required := map[string][]string{
+		"internal/telephony/ami.go": {
+			`amiObjectPattern.MatchString(sipUsername)`, `extensionrules.Valid(extension)`,
+			`"Channel", "PJSIP/"+sipUsername`, `"Context", "rr-phone-check"`, `"Async", "true"`,
+		},
+		"internal/store/store.go": {
+			"ActiveDeviceForHost", "p.host_user_id = ?", "d.revoked_at IS NULL",
+		},
+		"internal/webapp/app.go": {
+			"ActiveDeviceForHost", `a.phoneRings.allow("device:"+device.ID`,
+			"state != telephony.ContactReachable", "a.ringer.RingDevice",
+		},
+		"web/templates/party.html": {"📳 Ring this phone", "/ring-test"},
+	}
+	for filename, markers := range required {
+		contents := readRepositoryFile(t, filename)
+		for _, marker := range markers {
+			if !strings.Contains(contents, marker) {
+				t.Errorf("%s is missing scoped phone-ring marker %q", filename, marker)
 			}
 		}
 	}

@@ -130,6 +130,58 @@ func TestAMIReload(t *testing.T) {
 	}
 }
 
+func TestAMIRingDeviceUsesOnlyValidatedInternalOriginate(t *testing.T) {
+	address, finished := serveAMI(t, func(connection net.Conn, reader *bufio.Reader) error {
+		if err := acceptTestLogin(connection, reader); err != nil {
+			return err
+		}
+		action, err := readAMIFrame(reader)
+		if err != nil {
+			return err
+		}
+		want := map[string]string{
+			"action": "Originate", "actionid": ringActionID,
+			"channel": "PJSIP/rrd_alpha", "context": "rr-phone-check",
+			"exten": "s", "priority": "1", "timeout": "15000",
+			"callerid": "RingRing setup <101>", "variable": "RINGRING_EXTENSION=101", "async": "true",
+		}
+		for key, expected := range want {
+			if action[key] != expected {
+				return fmt.Errorf("AMI phone ring %s = %q, want %q", key, action[key], expected)
+			}
+		}
+		if len(action) != len(want) {
+			return fmt.Errorf("AMI phone ring included unexpected fields: %#v", action)
+		}
+		_, err = io.WriteString(connection, "Response: Success\r\nActionID: ringring-phone-check\r\nMessage: Originate successfully queued\r\n\r\n")
+		return err
+	})
+
+	if err := (AMI{Address: address, Username: "ringring", Secret: "test-only-secret", Timeout: time.Second}).RingDevice(t.Context(), "rrd_alpha", "101"); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-finished; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAMIRingDeviceRejectsUntrustedTargetsBeforeConnecting(t *testing.T) {
+	ami := AMI{Address: "127.0.0.1:1", Username: "ringring", Secret: "test-only-secret"}
+	for _, test := range []struct {
+		username  string
+		extension string
+	}{
+		{username: "rrd_safe\r\nChannel: Local/911", extension: "101"},
+		{username: "PJSIP/rrd_safe", extension: "101"},
+		{username: "rrd_safe", extension: "911"},
+		{username: "rrd_safe", extension: "10a"},
+	} {
+		if err := ami.RingDevice(t.Context(), test.username, test.extension); err == nil || strings.Contains(err.Error(), "connect to AMI") {
+			t.Errorf("RingDevice(%q, %q) reached AMI or succeeded: %v", test.username, test.extension, err)
+		}
+	}
+}
+
 func TestAMIContactStatusesRejectsIncompleteList(t *testing.T) {
 	address, finished := serveAMI(t, func(connection net.Conn, reader *bufio.Reader) error {
 		if err := acceptTestLogin(connection, reader); err != nil {
