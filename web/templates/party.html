@@ -1,0 +1,41 @@
+{{define "title"}}{{.Party.Name}}{{end}}
+{{define "content"}}
+<section class="page-hero wrap compact party-title">
+  <a class="back-link" href="/app">← All parties</a>
+  <span class="eyebrow">Private party</span>
+  <h1>{{.Party.Name}}</h1>
+  <div class="party-meta"><span>☎ {{len .Members}} members</span><span>AI line: {{.Party.OpenAIStatus}}</span></div>
+</section>
+<section class="party-layout wrap">
+  <div class="panel invite-panel">
+    <span class="panel-icon">💌</span>
+    <h2>Invite one phone</h2>
+    <p>The link works once and expires after 48 hours. Send it privately to the person setting up the phone.</p>
+    <form method="post" action="/parties/{{.Party.ID}}/invites">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <button class="button button-primary" type="submit">Make an invite link</button>
+    </form>
+    {{if .InviteURL}}
+    <div class="reveal-card" role="status">
+      <strong>Your one-time link</strong>
+      <input value="{{.InviteURL}}" readonly aria-label="Invitation URL">
+      <p>Copy it now—RingRing will not show this token again.</p>
+    </div>
+    {{end}}
+  </div>
+  <div class="directory">
+    <div class="list-heading"><h2>Phone book</h2><span>Dial inside this party</span></div>
+    {{if .Members}}
+      {{range .Members}}
+      <article class="member-row">
+        <span class="extension">{{.Extension}}</span>
+        <span><strong>{{.DisplayName}}</strong><small>{{len .Devices}} phone{{if ne (len .Devices) 1}}s{{end}}</small></span>
+        <span class="status-dot" title="Provisioned"></span>
+      </article>
+      {{end}}
+    {{else}}
+      <div class="empty-state"><span>📞</span><p>No phones yet. Make the first invite link!</p></div>
+    {{end}}
+  </div>
+</section>
+{{end}}

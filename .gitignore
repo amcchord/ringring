@@ -9,6 +9,8 @@
 data/
 generated/
 backups/
+deploy/state/*
+!deploy/state/.gitkeep
 *.db
 *.db-shm
 *.db-wal

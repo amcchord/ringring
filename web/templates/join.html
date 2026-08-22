@@ -1,0 +1,23 @@
+{{define "title"}}Join {{.Party.Name}}{{end}}
+{{define "content"}}
+<section class="join-shell wrap">
+  <div class="join-intro">
+    <span class="eyebrow">You have been invited</span>
+    <h1>Join <em>{{.Party.Name}}</em></h1>
+    <p>Choose the name and short number that people in this party will dial.</p>
+  </div>
+  <div class="panel join-panel">
+    <form method="post" class="stack-form">
+      <input type="hidden" name="csrf" value="{{.JoinCSRF}}">
+      <label for="display-name">Phone book name</label>
+      <input id="display-name" name="display_name" maxlength="40" placeholder="Kitchen phone" required autocomplete="off">
+      <label for="extension">Extension</label>
+      <input id="extension" name="extension" inputmode="numeric" pattern="[0-9]{2,5}" minlength="2" maxlength="5" placeholder="101" required autocomplete="off">
+      <label for="device-label">What kind of phone? <small>optional</small></label>
+      <input id="device-label" name="device_label" maxlength="40" placeholder="Grandstream adapter" autocomplete="off">
+      <button class="button button-primary" type="submit">Claim this number <span aria-hidden="true">→</span></button>
+    </form>
+    <p class="fine-print">This one-time invitation is used when you claim the number.</p>
+  </div>
+</section>
+{{end}}

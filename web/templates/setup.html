@@ -1,0 +1,17 @@
+{{define "title"}}Your phone setup{{end}}
+{{define "content"}}
+<section class="setup-shell wrap">
+  <div class="success-burst">✓</div>
+  <span class="eyebrow">Number claimed</span>
+  <h1>Hello, {{.Claim.Member.DisplayName}}!<br><em>You are extension {{.Claim.Member.Extension}}.</em></h1>
+  <p>Keep this screen private and finish your phone setup now. The password is only shown once.</p>
+  <div class="setup-card">
+    <div><span>SIP server / registrar</span><strong>{{.SIPPublicHost}}</strong></div>
+    <div><span>Username / auth ID</span><strong>{{.Claim.Device.SIPUsername}}</strong></div>
+    <div class="secret-value"><span>Password</span><strong>{{.Claim.SIPSecret}}</strong></div>
+    <div><span>Your extension</span><strong>{{.Claim.Member.Extension}}</strong></div>
+    <div><span>Transport</span><strong>UDP · port 5060</strong></div>
+  </div>
+  <div class="warning-card"><strong>Save it before you leave.</strong><p>For safety, RingRing cannot display this password again. If it is lost, the party host can make a fresh one.</p></div>
+</section>
+{{end}}

@@ -1,0 +1,10 @@
+.git
+.env
+.env.*
+!.env.example
+data
+generated
+backups
+coverage.out
+bin
+deploy/state

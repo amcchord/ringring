@@ -1,0 +1,10 @@
+{{define "title"}}Something did not ring{{end}}
+{{define "content"}}
+<section class="error-shell wrap">
+  <div class="error-phone">☎</div>
+  <span class="eyebrow">A quiet line</span>
+  <h1>{{.ErrorTitle}}</h1>
+  <p>{{.ErrorMessage}}</p>
+  <a class="button button-primary" href="{{.ErrorBackURL}}">{{.ErrorBackLabel}}</a>
+</section>
+{{end}}

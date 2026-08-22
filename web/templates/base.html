@@ -1,0 +1,43 @@
+{{define "base"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#6c4cff">
+  <meta name="description" content="RingRing makes private phone parties for families.">
+  <title>{{template "title" .}} · RingRing</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/site.css">
+</head>
+<body class="{{.BodyClass}}">
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="RingRing home">
+      <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
+        <path d="M19 16c7-8 19-8 26 0"/>
+        <path d="M13 11c11-12 27-12 38 0"/>
+        <rect x="12" y="22" width="40" height="31" rx="12"/>
+        <circle cx="32" cy="37" r="9"/>
+        <path d="M32 31v6l5 3"/>
+      </svg>
+      <span>RingRing</span>
+    </a>
+    <nav aria-label="Main navigation">
+      {{if .User}}
+        <a href="/app">My parties</a>
+        <form method="post" action="/auth/logout" class="inline-form">
+          <input type="hidden" name="csrf" value="{{.CSRF}}">
+          <button class="nav-button" type="submit">Sign out</button>
+        </form>
+      {{else}}
+        <a href="/#how-it-works">How it works</a>
+        <a href="https://github.com/amcchord/ringring">GitHub</a>
+      {{end}}
+    </nav>
+  </header>
+  <main>{{template "content" .}}</main>
+  <footer class="site-footer">
+    <p><strong>RingRing never calls the regular phone network.</strong> It cannot make emergency calls.</p>
+    <p>Open source with care in 2026.</p>
+  </footer>
+</body>
+</html>{{end}}

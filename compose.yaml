@@ -1,0 +1,78 @@
+name: ringring
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - ${RINGRING_APP_ENV_FILE:-/etc/ringring/app.env}
+    volumes:
+      - ./deploy/state/app:/data
+      - ./deploy/state/asterisk:/asterisk
+    networks:
+      ringring:
+        ipv4_address: 172.31.88.10
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+  asterisk:
+    build:
+      context: deploy/asterisk
+      dockerfile: Dockerfile
+    env_file:
+      - ${RINGRING_ASTERISK_ENV_FILE:-/etc/ringring/asterisk.env}
+    depends_on:
+      app:
+        condition: service_healthy
+    volumes:
+      - ./deploy/state/asterisk:/var/lib/ringring/asterisk:ro
+    ports:
+      - "5060:5060/udp"
+      - "10000-10199:10000-10199/udp"
+    networks:
+      ringring:
+        ipv4_address: 172.31.88.20
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "asterisk", "-rx", "core show uptime"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  caddy:
+    image: caddy:2.11.4-alpine
+    environment:
+      RINGRING_DOMAIN: ${RINGRING_DOMAIN:-ringring.live}
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      ringring:
+        ipv4_address: 172.31.88.30
+    restart: unless-stopped
+
+networks:
+  ringring:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.31.88.0/24
+
+volumes:
+  caddy_data:
+  caddy_config:

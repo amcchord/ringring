@@ -1,0 +1,18 @@
+[global]
+type=global
+user_agent=RingRing
+endpoint_identifier_order=auth_username,username,ip,anonymous
+unidentified_request_count=5
+unidentified_request_period=5
+unidentified_request_prune_interval=30
+
+[transport-udp]
+type=transport
+protocol=udp
+bind=0.0.0.0:5060
+local_net=172.31.88.0/24
+external_signaling_address=__SIP_PUBLIC_HOST__
+external_media_address=__SIP_PUBLIC_HOST__
+allow_reload=yes
+
+#include /var/lib/ringring/asterisk/pjsip.conf

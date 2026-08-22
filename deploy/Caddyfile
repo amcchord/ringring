@@ -1,0 +1,12 @@
+{$RINGRING_DOMAIN:ringring.live} {
+  encode zstd gzip
+
+  reverse_proxy app:8080 {
+    health_uri /readyz
+    health_interval 15s
+  }
+
+  header {
+    -Server
+  }
+}

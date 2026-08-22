@@ -1,0 +1,34 @@
+{{define "title"}}My parties{{end}}
+{{define "content"}}
+<section class="page-hero wrap compact">
+  <span class="eyebrow">Host control room</span>
+  <h1>Hi, {{.User.Name}}! <em>Who should ring?</em></h1>
+  <p>Create a private party, then invite one phone at a time.</p>
+</section>
+<section class="dashboard-grid wrap">
+  <div class="panel create-panel">
+    <span class="panel-icon">🎈</span>
+    <h2>Start a new party</h2>
+    <form method="post" action="/parties" class="stack-form">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <label for="party-name">Party name</label>
+      <input id="party-name" name="name" minlength="2" maxlength="48" placeholder="Cousins on the coast" required>
+      <button class="button button-primary" type="submit">Create my party <span aria-hidden="true">→</span></button>
+    </form>
+  </div>
+  <div class="party-list">
+    <div class="list-heading"><h2>Your parties</h2><span>{{len .Parties}} total</span></div>
+    {{if .Parties}}
+      {{range .Parties}}
+      <a class="party-row" href="/parties/{{.ID}}">
+        <span class="party-avatar">☎</span>
+        <span><strong>{{.Name}}</strong><small>OpenAI: {{.OpenAIStatus}}</small></span>
+        <span class="row-arrow">→</span>
+      </a>
+      {{end}}
+    {{else}}
+      <div class="empty-state"><span>✨</span><p>Your first party will appear here.</p></div>
+    {{end}}
+  </div>
+</section>
+{{end}}

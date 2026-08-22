@@ -1,0 +1,101 @@
+{{define "title"}}Private phone parties{{end}}
+{{define "content"}}
+<section class="hero wrap">
+  <div class="hero-copy">
+    <span class="eyebrow"><span class="live-dot"></span> A tiny phone network for your favorite people</span>
+    <h1>Pick up.<br><em>Ring someone.</em><br>Smile.</h1>
+    <p class="hero-lede">Give old phones, new VoIP phones, and softphones a private place to call home. Short numbers, trusted people, zero public phone network.</p>
+    <div class="hero-actions">
+      {{if .User}}
+        <a class="button button-primary" href="/app">Open my parties <span aria-hidden="true">→</span></a>
+      {{else if .AuthConfigured}}
+        <a class="button button-primary" href="/auth/google">Create a party <span aria-hidden="true">→</span></a>
+      {{else}}
+        <span class="button button-primary button-disabled" aria-disabled="true">Opening soon</span>
+      {{end}}
+      <a class="button button-quiet" href="#how-it-works">See how it works</a>
+    </div>
+    {{if not .AuthConfigured}}
+      <p class="launch-note">The phones are being plugged in now. Host sign-up will open as soon as Google login is connected.</p>
+    {{end}}
+    {{if .DevAuth}}
+      <form method="post" action="/auth/dev" class="dev-login">
+        <input type="hidden" name="email" value="host@ringring.test">
+        <button type="submit">Local development sign-in</button>
+      </form>
+    {{end}}
+  </div>
+  <div class="hero-art" aria-label="Two colorful telephones calling each other">
+    <div class="signal signal-one"></div>
+    <div class="signal signal-two"></div>
+    <div class="phone phone-purple">
+      <div class="handset"></div><div class="phone-face"><span>101</span><div class="dial"></div></div>
+    </div>
+    <div class="call-bubble"><span>ring</span><strong>ring!</strong></div>
+    <div class="phone phone-coral">
+      <div class="handset"></div><div class="phone-face"><span>202</span><div class="dial"></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="ticker" aria-label="RingRing highlights">
+  <div>PRIVATE PARTIES <span>✦</span> SHORT EXTENSIONS <span>✦</span> REAL PHONES <span>✦</span> NO PHONE COMPANY <span>✦</span> JUST RINGRING</div>
+</section>
+
+<section id="how-it-works" class="section wrap">
+  <div class="section-heading">
+    <span class="kicker">Three little steps</span>
+    <h2>From box to “hello!”</h2>
+    <p>No telecom degree required. RingRing turns the fiddly parts into one friendly setup card.</p>
+  </div>
+  <div class="steps-grid">
+    <article class="step-card yellow">
+      <span class="step-number">1</span>
+      <div class="step-icon">🎉</div>
+      <h3>Start a party</h3>
+      <p>Sign in with Google, name your private group, and choose the extensions you like.</p>
+    </article>
+    <article class="step-card mint">
+      <span class="step-number">2</span>
+      <div class="step-icon">💌</div>
+      <h3>Send one link</h3>
+      <p>Your person picks a name and extension. RingRing gives their exact phone settings.</p>
+    </article>
+    <article class="step-card pink">
+      <span class="step-number">3</span>
+      <div class="step-icon">☎️</div>
+      <h3>Make it ring</h3>
+      <p>Dial a short number. Every call stays inside the party you created.</p>
+    </article>
+  </div>
+</section>
+
+<section class="playground-section">
+  <div class="wrap playground-grid">
+    <div>
+      <span class="kicker light">More than hello</span>
+      <h2>Useful numbers.<br>Delightful numbers.</h2>
+      <p>A host can choose special lines for the time, local weather, internet radio, and a clearly identified OpenAI voice companion.</p>
+    </div>
+    <div class="number-pad" aria-label="Example special extensions">
+      <div><strong>*11</strong><span>the time</span></div>
+      <div><strong>*12</strong><span>weather</span></div>
+      <div><strong>*13</strong><span>radio</span></div>
+      <div><strong>*14</strong><span>AI chat</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="section wrap trust-grid">
+  <div class="trust-statement">
+    <span class="kicker">Made for family</span>
+    <h2>Private is the default setting.</h2>
+  </div>
+  <div class="trust-list">
+    <p><span>01</span><strong>No public phone network.</strong> No phone numbers, phone bills, or surprise outbound calls.</p>
+    <p><span>02</span><strong>No call recording.</strong> RingRing does not store family conversations or transcripts by default.</p>
+    <p><span>03</span><strong>Every party is separate.</strong> Phones only see the people and optional lines their host added.</p>
+    <p><span>04</span><strong>Open source.</strong> Read it, run it yourself, improve it, and help us keep it honest.</p>
+  </div>
+</section>
+{{end}}
