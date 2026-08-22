@@ -413,7 +413,18 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if invite.StatusCode != http.StatusOK {
 		t.Fatalf("create invite status = %d", invite.StatusCode)
 	}
-	inviteURL := firstMatch(t, readBody(t, invite), `value="(http://[^"]+/join/[^"]+)"`)
+	inviteBody := readBody(t, invite)
+	if invite.Header.Get("Cache-Control") != "no-store" || !strings.Contains(inviteBody, `class="invite-qr"`) ||
+		!strings.Contains(inviteBody, `src="data:image/png;base64,`) || !strings.Contains(inviteBody, "Or scan it.") ||
+		!strings.Contains(inviteBody, "Anyone with the link or code can claim this invitation") {
+		t.Fatal("one-time invitation did not include its private local QR handoff")
+	}
+	inviteURL := firstMatch(t, inviteBody, `value="(http://[^"]+/join/[^"]+)"`)
+	inviteHiddenAgain := get(t, client, server.URL+"/parties/"+partyID)
+	inviteHiddenBody := readBody(t, inviteHiddenAgain)
+	if strings.Contains(inviteHiddenBody, inviteURL) || strings.Contains(inviteHiddenBody, `class="invite-qr"`) || strings.Contains(inviteHiddenBody, `data:image/png;base64,`) {
+		t.Fatal("one-time invitation link or QR was revealed on a second party view")
+	}
 
 	join := get(t, client, inviteURL)
 	if join.StatusCode != http.StatusOK {

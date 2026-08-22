@@ -116,6 +116,7 @@ type PageData struct {
 	Services                 model.PartyServices
 	RadioStations            []radio.Station
 	InviteURL                string
+	InviteQR                 template.URL
 	JoinCSRF                 string
 	JoinDisplayName          string
 	JoinExtension            string
@@ -914,6 +915,14 @@ func (a *App) party(w http.ResponseWriter, r *http.Request, session authSession)
 		data.OpenAISpendPending = formatDollars(party.OpenAISpendPendingCents)
 	}
 	data.InviteURL = a.readInviteFlash(w, r, party.ID)
+	if data.InviteURL != "" {
+		inviteQR, err := provisioning.QRCodeDataURI(data.InviteURL)
+		if err != nil {
+			a.logger.Error("render invitation QR", "error_class", observability.ErrorClass(err))
+		} else {
+			data.InviteQR = template.URL(inviteQR)
+		}
+	}
 	if r.URL.Query().Get("deleted") == "member" {
 		data.Notice = "The member and every phone credential attached to that extension were deleted."
 		if r.URL.Query().Get("phones") == "delayed" {

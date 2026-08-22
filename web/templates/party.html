@@ -20,7 +20,14 @@
       <div class="reveal-card" role="status">
         <label for="invite-url"><strong>Your one-time link</strong></label>
         <input id="invite-url" value="{{.InviteURL}}" readonly aria-describedby="invite-url-help" autocomplete="off" autocapitalize="none" spellcheck="false">
-        <p id="invite-url-help">Copy the whole link now—RingRing will not show this token again.</p>
+        <p id="invite-url-help">Copy the whole link now—RingRing will not show this invitation again.</p>
+        {{if .InviteQR}}
+        <figure class="invite-qr" aria-describedby="invite-qr-help">
+          <img src="{{.InviteQR}}" alt="One-time RingRing invitation QR code">
+          <figcaption id="invite-qr-help"><strong>Or scan it.</strong> Point the invited phone’s Camera at this code to open the same link.</figcaption>
+        </figure>
+        {{end}}
+        <p class="invite-secret-note"><strong>Keep it private.</strong> Anyone with the link or code can claim this invitation until it is used or expires.</p>
       </div>
       {{end}}
     </div>

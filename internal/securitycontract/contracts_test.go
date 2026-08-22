@@ -291,3 +291,35 @@ func TestHostAddedPhonesStayBoundedToOnePartyMember(t *testing.T) {
 		}
 	}
 }
+
+func TestInvitationQRCodeStaysInsideTheOneTimeHostReveal(t *testing.T) {
+	required := map[string][]string{
+		"internal/webapp/app.go": {
+			"data.InviteURL = a.readInviteFlash(w, r, party.ID)",
+			"provisioning.QRCodeDataURI(data.InviteURL)",
+			"data.InviteQR = template.URL(inviteQR)",
+		},
+		"web/templates/party.html": {
+			`class="invite-qr"`, `src="{{.InviteQR}}"`, "Or scan it.",
+			"Anyone with the link or code can claim this invitation",
+		},
+		"internal/provisioning/qr.go": {
+			"deliberately has no network writer or external rendering service",
+			`return "data:image/png;base64,"`,
+		},
+	}
+	for filename, markers := range required {
+		contents := readRepositoryFile(t, filename)
+		for _, marker := range markers {
+			if !strings.Contains(contents, marker) {
+				t.Errorf("%s is missing local invitation QR boundary %q", filename, marker)
+			}
+		}
+	}
+	qr := readRepositoryFile(t, "internal/provisioning/qr.go")
+	for _, forbidden := range []string{"net/http", "http.Get", "http.Post", "qrserver", "quickchart", "googleapis"} {
+		if strings.Contains(qr, forbidden) {
+			t.Errorf("local QR renderer contains network/provider primitive %q", forbidden)
+		}
+	}
+}

@@ -2,6 +2,31 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Private scan-to-join invitations
+
+### Shipped
+
+- Added a scannable QR beside the host's one-time invitation link. A family member can point the invited phone's normal Camera app at it and open the existing join page without typing a long token.
+- Reused RingRing's in-process PNG renderer, data-URI CSP allowance, encrypted one-view host flash, hashed durable token, 48-hour expiry, and atomic invitation claim. The bearer link never goes to an external QR or analytics service, and a refreshed party page reconstructs neither link nor image.
+- Added explicit host guidance that the link and QR are equivalent secrets and must be sent privately. This remains distinct from the Linphone provisioning QR: the invitation QR is for a normal Camera app and opens the member join page.
+
+### Decisions
+
+- Keep scanning as a second representation of the existing invitation, not a new token or claim path. Expiry, CSRF, safe extension selection, and single-use consumption therefore stay centralized.
+- Render the QR only during the authenticated no-store reveal. Do not persist an image, add an image endpoint, embed a remote tracking request, or expose the code after refresh.
+
+### Verification
+
+- Focused web, accessibility, QR, and executable security-contract tests cover the local data URI, no-store first reveal, disappearance on the next party view, privacy warning, associated accessible description, and absence of network QR-provider primitives.
+- A disposable browser host created an invitation and opened its card at 1280×900 and 390×844. The PNG loaded at a crisp 270×270 intrinsic size and a 202px rendered square, the link field remained 52px tall, the mobile card had no horizontal overflow, and the code plus privacy warning stayed legible. Refresh removed both link and image while the saved disposable link still opened the join form. The viewport/tab/listeners were removed and the database was moved to Trash.
+- `make check`, `make security`, and `make admin-test` pass locally, including formatting, shell/operator fixtures, vet, the complete race-enabled suite, and the reachable-vulnerability scan. The accepted module advisory remains unreachable from RingRing.
+
+### Remaining
+
+- Complete the exact-candidate SIP/NAT/Linphone tests, guarded production upgrade, and zero-mutation production audit without opening the real outstanding family invitation.
+- Complete the physical ATA, desk-phone, and mobile softphone matrix across two real networks.
+- Obtain the external child-safety review and OpenAI Zero Data Retention eligibility before opening the AI conversation gate.
+
 ## 2026-08-22 — One extension, several independent phones
 
 ### Shipped
