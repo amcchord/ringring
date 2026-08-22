@@ -1,0 +1,24 @@
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Runtime state
+data/
+generated/
+backups/
+*.db
+*.db-shm
+*.db-wal
+
+# Go
+/bin/
+/coverage.out
+
+# Editor and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
