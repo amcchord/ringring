@@ -21,9 +21,15 @@ This is the durable, chronological project record. Add new entries at the top. C
 ### Verification
 
 - Added embedded-template regression tests for the skip/main relationship, language, visible focus/touch contract, decorative-icon treatment, associated field guidance, semantic setup credentials, the static highlights strip, and calculated WCAG contrast ratios for the core palette.
-- `make check` passes formatting, vet, and the complete race-enabled suite. The full local browser flow created disposable host/party state, issued an invite, claimed a neutral test member, and audited the one-time setup without printing or screenshotting its token or credentials.
+- `make check` passes formatting, vet, and the complete race-enabled suite. GitHub Actions passed exact feature commit `1995bdb` in run `32566732328`. The full local browser flow created disposable host/party state, issued an invite, claimed a neutral test member, and audited the one-time setup without printing or screenshotting its token or credentials.
 - Browser QA passed at 320×568, 390×844, and 1280×900 with no horizontal overflow. Standalone controls measure at least 44px high; form fields are 52px with 16px text; checkbox card targets measure 81–99px; the skip link measures 48px and shows a solid 3px focus outline with 3px offset; the corrected purple-section text measures 5.1:1. The setup card exposes five definition pairs and the invite/provisioning fields each have a visible associated label and description.
 - The final browser run had no console errors. Its tab and viewport override were closed/reset, and the disposable local server/database were stopped and moved to Trash. No production state, real family record, external provider, or physical phone was used.
+
+### Production
+
+- Created `/root/ringring-backups/ringring-20260822T100726Z-ab30ae8.tar.gz` before deployment and passed its checksummed isolated restore drill. An exact `1995bdb` image then ran network-disabled against the extracted sealed copy with provider credentials disabled; readiness, the new accessibility assets, clean logs/shutdown, unchanged verified state, and byte-identical telephony regeneration all passed. The candidate image, checkout, container, and extracted state were removed.
+- Deployed exact commit `1995bdb` by rebuilding and recreating only the app container. Asterisk and Caddy identities, both root-readable environment hashes, both generated routing hashes, the sealed one-host/one-party aggregate, zero contacts/channels, and the SIP Fail2Ban jail remained exact. Public readiness, signup, skip/main landmarks, static highlights, focus CSS, palette tokens, security headers, and settled logs pass.
+- Created `/root/ringring-backups/ringring-20260822T101017Z-1995bdb.tar.gz` after deployment and passed its full isolated restore drill. Its sealed verification report and both environment hashes match the pre-deploy archive exactly; the live app and Asterisk are healthy, and no candidate or restore runtime remains.
 
 ### Remaining
 
