@@ -2,6 +2,39 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Voice-guided extension selection
+
+### Shipped
+
+- Added an always-available `*15` party route. An authenticated phone can enter a new 2–5 digit extension, hear it read back, and press `1` to save without changing its SIP username or encrypted password.
+- Bound the request to Asterisk's authenticated PJSIP endpoint and the exact server-selected party. The store performs one scoped update, rejects unknown or revoked devices and cross-party access, and lets the party uniqueness constraint resolve occupied or concurrent choices safely.
+- Serialized telephony reconciliation and reload after a selection. The database remains authoritative if reload fails, startup reconciliation repairs generated state, and the caller receives only generic retry guidance for invalid or unavailable choices.
+- Added colorful `*15` guidance to the splash, setup screen, and host party page. Upgraded `make sip-smoke` to seed a disposable RingRing database and prove the complete DTMF selection and live Asterisk reload path.
+
+### Decisions
+
+- Trust `CHANNEL(endpoint)` from the authenticated PJSIP channel, never caller ID or a caller-supplied member identifier. Pass the exact party ID into the private FastAGI route so a phone cannot escape its party context.
+- Use Asterisk's bundled prompts and RFC4733 DTMF instead of speech recognition. The small confirm-and-save flow is predictable on ATAs and desk phones, adds no provider dependency, and never records or transcribes a child's voice.
+- Keep the SIP credential stable when the extension changes. This makes voice selection useful after a phone is already registered and avoids forcing another provisioning or password-sharing step.
+
+### Verification
+
+- Store, renderer, FastAGI, and web tests cover validation, occupied and concurrent choices, successful changes, revoked/unknown/cross-party devices, exact endpoint identity, confirmation retries, reload failure, credential preservation, and the new guidance. `make check` and ten race-enabled repetitions of the changed packages pass.
+- Two isolated runs of exact commit `84c3b83` passed authenticated registration, a member call, exact PCMU media, `*10`, the `*15` DTMF exchange, extension `101` to `103` state change, unchanged credentials and peer extension, generated-config regeneration, live dialplan reload, removal of the old route, clean logs, and zero remaining channels. Test containers, networks, candidate images, and state were removed.
+- GitHub Actions passed commit `84c3b83`. Real-browser checks at 390×844 and 1280×900 found no horizontal overflow, readable chooser cards, and appropriately sized controls; the disposable app, fixture, database, browser tabs, and viewport override were removed or reset.
+
+### Production
+
+- Created `/root/ringring-backups/ringring-20260822T084240Z-e60c358.tar.gz` before deployment and passed its checksummed isolated restore drill. Fast-forwarded to exact commit `84c3b83`, rebuilt, and recreated only the app container; Asterisk and Caddy identities and both root-readable environment-file hashes remained exact.
+- Public readiness and chooser copy, private aggregate-only AMI verification, the SIP Fail2Ban jail, container health, and settled logs pass. With no production members or devices, both generated telephony files remained exact and no family extension or SIP credential changed.
+- Created `/root/ringring-backups/ringring-20260822T084344Z-84c3b83.tar.gz` after deployment and passed its full isolated restore drill. Its sealed report matches the pre-deploy family counts and confirms integrity, foreign keys, and credential decryption; the live app returned healthy after the snapshot.
+
+### Remaining
+
+- Scan and call with real family phones across two remote networks; verify mobile background ringing and Wi-Fi/cellular transitions.
+- Choose and vet an internet-radio source, complete the accessibility/device pass, and add a guided install flow for common ATAs and phones.
+- Let hosts choose a bounded project spend limit, then complete the external child-safety review and confirm OpenAI Zero Data Retention before enabling AI for any caller under 13.
+
 ## 2026-08-22 — Immediate party OpenAI key replacement
 
 ### Shipped
