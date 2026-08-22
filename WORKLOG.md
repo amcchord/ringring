@@ -2,6 +2,43 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Executable threat model and tenant-boundary hardening
+
+### Shipped
+
+- Added a source-controlled threat model covering assets, actors, data flows, trust boundaries, eighteen concrete abuse cases, controls, residual risks, reproducible evidence, and a review rule for future authentication, telephony, provider, observability, secret, and deployment changes.
+- Fixed a real party-isolation flaw in generated Asterisk context names. The former mapping changed underscores to hyphens and truncated IDs, so distinct valid parties could collapse into one dialplan context. RingRing now validates identifiers at 48 bytes and preserves every byte of the party ID, making the context mapping injective; reconciliation also rejects duplicate global device IDs and SIP usernames.
+- Added regression cases for underscore/hyphen collisions, long common prefixes, overlong identifiers, duplicate global routing identities, Asterisk config injection, cross-party endpoints, arbitrary radio destinations, and any generated dial primitive outside party PJSIP endpoints or the private AI AudioSocket.
+- Added executable deployment contracts that permit only the intended public web, SIP, and RTP ports; reject host networking, privileged mode, and Docker socket mounts; keep Caddy away from metrics/AMI/voice-control ports; preserve the exact AMI deny/permit boundary; and structurally reject PSTN registration, trunk, and global outbound routes.
+- Added proxy-trust tests proving that direct clients cannot spoof a rate-limit identity and only the fixed Caddy peer may provide a syntactically valid `X-Forwarded-For` client address. Documented the intentional low assurance of the memorable family signup phrase: it is an anti-drive-by gate, not identity proof or an account password.
+- Added `make security` with pinned `govulncheck v1.7.0` and a read-only GitHub Security workflow on every push and pull request, weekly, and on demand. The fast, offline boundary contracts also run inside every `make check`.
+
+### Decisions
+
+- Treat tenant-context naming as a security function, not presentation formatting. Asterisk-safe party IDs remain opaque and must never be normalized or truncated after uniqueness is established.
+- Make the absence of PSTN and private-control exposure executable release contracts. A future trunk, extra proxy, CDN, public port, or non-party dial primitive requires an explicit scope/security redesign instead of silently changing configuration.
+- Keep the family access phrase easy to communicate as requested. Compensate with source-address limits, independent host passwords, provider spend ceilings, and operator rotation/removal; do not claim the phrase proves who a new host is.
+- Accept `GO-2026-5932` only as a non-reachable module finding: RingRing does not import the affected unmaintained `golang.org/x/crypto/openpgp` package and uses `x/crypto` for Argon2. Revisit the decision if imports or upstream guidance change.
+
+### Verification
+
+- `make check` passes formatting, POSIX/operator fixtures, certificate-sync fixtures, vet, the boundary contracts, and the full race-enabled suite. `make security` reports no vulnerable symbol reachable by RingRing and no vulnerability in an imported package; its verbose inventory reports only the accepted non-reachable module finding above.
+- The focused web tests cover trusted-proxy, spoofed-forwarding, malformed-forwarding, IPv6, and rate-window behavior. Telephony tests exercise both historical collision classes and inspect every emitted `Dial` destination. Deployment tests parse Compose service publications and inspect Caddy, AMI, base PJSIP, and base dialplan boundaries.
+- From an isolated checkout of exact candidate `ef5093e023d3dc951f5000eb76fa10961d840819` on the reference host, `make sip-smoke`, `make nat-smoke`, and `make linphone-smoke` all passed. Evidence includes TLS 1.2 plus UDP registration, mixed-transport party calling, `*10` echo, authenticated `*15` selection, bidirectional RTP through two simulated household NATs, one-time Linphone provisioning, and official-engine two-way audio.
+- GitHub CI run `32579944248` and Security run `32579944242` both passed the exact release. The disposable candidate checkout, containers, networks, generated identities, and state were removed; no smoke resource or family record remained.
+
+### Production
+
+- The guarded fast-forward used verified pre-upgrade backup `/root/ringring-backups/ringring-20260822T150410Z-5e2e60a.tar.gz` and post-upgrade backup `/root/ringring-backups/ringring-20260822T150551Z-ef5093e.tar.gz`. Both passed checksums, safe extraction, SQLite integrity/foreign keys, credential decryption, isolated readiness, and telephony-regeneration drills before the recovery marker was cleared.
+- Production is clean at exact runtime commit `ef5093e023d3dc951f5000eb76fa10961d840819`. Doctor passes with SQLite and AMI up, both SIP jails active, the trusted SIP certificate current, public readiness `200`, and public `/metrics` `404`. The app, Asterisk, and Caddy container identities are `4404a447cc74c6f0bd384ba7654021210d235a64ebfed4d8b3be553fbec301b0`, `20c194c28b1b5f7a589e4645a50394352c549f097a811dcdff3b69516251d498`, and `40e6a7174b1efa9905ece737982fca2f18ee140dcaac84bccca0208b495fcd20`.
+- The sealed aggregate remains one user, one party, one invitation, one session, eight recovery codes, one decryptable party key, and zero members, devices, provisioning tokens, readiness records, or contacts. Both root environment hashes and both empty generated-routing hashes are unchanged. The memorable family access phrase remains configured outside Git without its value being printed; no family, OpenAI, session, SIP credential, or route record was submitted or changed.
+
+### Remaining
+
+- Complete the physical ATA, desk-phone, and mobile softphone matrix across two real networks, including incoming/outgoing audio, certificate behavior, background ringing, and Wi-Fi/cellular transitions.
+- Complete the external child-safety review and confirm OpenAI Zero Data Retention before enabling AI for callers under 13.
+- Copy verified backups to encrypted off-host storage with a retention schedule, and design the optional PostgreSQL/multi-node migration path.
+
 ## 2026-08-22 — Privacy-preserving internal observability
 
 ### Shipped
