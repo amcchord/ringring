@@ -2,6 +2,29 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Accept secure invitation claims from opaque browser previews
+
+### Shipped
+
+- Fixed member claims from embedded/preview browsers that serialize a production form submission with an opaque `Origin: null`. The live failure had a present path-scoped strict-same-site cookie and hidden token but stopped at the origin check before validating any member fields.
+- Kept the exception limited to invitation claims and conditioned it on an exact constant-time double-submit-token match. Arbitrary cross-site origins, missing or mismatched tokens, and every host/admin request still fail closed.
+- Added value-free diagnostic booleans for token matching and opaque-origin classification; no origin value, invitation token, member field, cookie, or credential enters logs.
+
+### Decisions
+
+- Treat the path-scoped HttpOnly/Secure/SameSite=Strict cookie plus its random hidden value as the authorization for this narrow compatibility case. An opaque attacker page cannot read the invitation document's form value, while anyone who already possesses the bearer invitation can claim it directly.
+- Do not weaken the shared `sameOrigin` policy. Native account, session, party, device, key, and deletion actions continue to reject opaque production origins.
+
+### Verification
+
+- A focused regression proves a matching opaque invitation form is accepted, while the same request with a missing/mismatched token and an arbitrary cross-site origin is rejected. The existing production test continues to prove the host/admin origin policy rejects `null`.
+- `make check`, `make security`, and `make admin-test` pass, including formatting, shell/operator fixtures, vet, the complete race-enabled suite, executable boundary contracts, and the reachable-vulnerability scan.
+
+### Remaining
+
+- Complete the physical ATA, desk-phone, and mobile softphone matrix across two real networks.
+- Obtain the external child-safety review and OpenAI Zero Data Retention eligibility before opening the AI conversation gate.
+
 ## 2026-08-22 — A private first-call card for new members
 
 ### Shipped

@@ -1022,6 +1022,25 @@ func TestProductionRejectsNullOrigin(t *testing.T) {
 	}
 }
 
+func TestInvitationAllowsOpaqueOriginOnlyWithMatchingCSRF(t *testing.T) {
+	app := &App{cfg: config.Config{Environment: "production", BaseURL: "https://ringring.live"}}
+	req := httptest.NewRequest(http.MethodPost, "https://ringring.live/join/example", nil)
+	req.Header.Set("Origin", "null")
+	if !app.invitationOriginOK(req, true) {
+		t.Fatal("an opaque invitation form with its exact double-submit token must be accepted")
+	}
+	if app.invitationOriginOK(req, false) {
+		t.Fatal("an opaque invitation form without its exact double-submit token must be rejected")
+	}
+	req.Header.Set("Origin", "https://attacker.example")
+	if app.invitationOriginOK(req, true) {
+		t.Fatal("a non-opaque cross-site invitation form must be rejected")
+	}
+	if app.sameOrigin(req) {
+		t.Fatal("the host/admin same-origin policy must remain unchanged")
+	}
+}
+
 func TestSecretPathsAreMaskedAndProvisioningIsRateLimited(t *testing.T) {
 	invitation := httptest.NewRequest(http.MethodGet, "/join/invitation-secret", nil)
 	invitation.Pattern = "GET /join/{token}"

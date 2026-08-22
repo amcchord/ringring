@@ -1835,9 +1835,10 @@ func (a *App) claimInvitation(w http.ResponseWriter, r *http.Request) {
 	}
 	csrfCookie, err := r.Cookie(joinCSRFCookie)
 	csrfValue := r.FormValue("csrf")
-	originOK := a.sameOrigin(r)
-	if err != nil || !secure.Equal(csrfCookie.Value, csrfValue) || !originOK {
-		a.logger.Warn("rejected invitation claim", "csrf_cookie_present", err == nil, "csrf_form_present", csrfValue != "", "origin_ok", originOK, "origin_present", r.Header.Get("Origin") != "")
+	csrfMatches := err == nil && secure.Equal(csrfCookie.Value, csrfValue)
+	originOK := a.invitationOriginOK(r, csrfMatches)
+	if !csrfMatches || !originOK {
+		a.logger.Warn("rejected invitation claim", "csrf_cookie_present", err == nil, "csrf_form_present", csrfValue != "", "csrf_match", csrfMatches, "origin_ok", originOK, "origin_present", r.Header.Get("Origin") != "", "origin_opaque", r.Header.Get("Origin") == "null")
 		http.Error(w, "invalid request", http.StatusForbidden)
 		return
 	}
@@ -2147,6 +2148,10 @@ func (a *App) sameOrigin(r *http.Request) bool {
 	}
 	got, err := url.Parse(origin)
 	return err == nil && strings.EqualFold(got.Scheme, want.Scheme) && strings.EqualFold(got.Host, want.Host)
+}
+
+func (a *App) invitationOriginOK(r *http.Request, csrfMatches bool) bool {
+	return a.sameOrigin(r) || (csrfMatches && r.Header.Get("Origin") == "null")
 }
 
 func (a *App) pageData(session *authSession) PageData {
