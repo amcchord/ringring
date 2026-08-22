@@ -107,7 +107,7 @@ func TestWeatherAudioUsesDecryptedPartyKeyAndDisclosesAI(t *testing.T) {
 	}
 }
 
-func TestDisabledWeatherDoesNotUseCachedAudio(t *testing.T) {
+func TestSpendLimitReconciliationDoesNotUseCachedWeatherAudio(t *testing.T) {
 	cipher, err := secure.NewCipher(make([]byte, 32))
 	if err != nil {
 		t.Fatal(err)
@@ -118,14 +118,17 @@ func TestDisabledWeatherDoesNotUseCachedAudio(t *testing.T) {
 	}
 	server := &Server{
 		Source: fakePartySource{
-			party:    model.Party{ID: "pty_voice", OpenAIStatus: "ready", OpenAIKeyCiphertext: "unused"},
-			services: model.PartyServices{PartyID: "pty_voice", WeatherEnabled: false},
+			party: model.Party{
+				ID: "pty_voice", OpenAIStatus: "ready", OpenAIKeyCiphertext: "unused",
+				OpenAISpendLimitStatus: "updating", OpenAISpendPendingCents: 725,
+			},
+			services: model.PartyServices{PartyID: "pty_voice", WeatherEnabled: true, WeatherLabel: "Portland, Maine"},
 		},
 		Cipher: cipher, Weather: fakeWeather{}, Speech: &fakeSpeech{},
 		AudioDir: temporary, PlaybackDir: "/voice",
 	}
 	if _, err := server.weatherAudio(t.Context(), "pty_voice"); err == nil {
-		t.Fatal("disabled weather line served cached audio")
+		t.Fatal("spend-limit reconciliation served cached weather audio")
 	}
 }
 

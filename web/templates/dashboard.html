@@ -22,7 +22,7 @@
       {{range .Parties}}
       <a class="party-row" href="/parties/{{.ID}}">
         <span class="party-avatar">☎</span>
-        <span><strong>{{.Name}}</strong><small>AI voice: {{if eq .OpenAIStatus "ready"}}ready{{else if or (eq .OpenAIStatus "rotating") (eq .OpenAIStatus "rotation-error")}}paused for key safety{{else if eq .OpenAIStatus "pending"}}getting ready{{else}}unavailable{{end}}</small></span>
+        <span><strong>{{.Name}}</strong><small>AI voice: {{if or (eq .OpenAIStatus "rotating") (eq .OpenAIStatus "rotation-error")}}paused for key safety{{else if or (eq .OpenAISpendLimitStatus "updating") (eq .OpenAISpendLimitStatus "update-error")}}paused for limit safety{{else if eq .OpenAIStatus "ready"}}ready{{else if eq .OpenAIStatus "pending"}}getting ready{{else}}unavailable{{end}}</small></span>
         <span class="row-arrow">→</span>
       </a>
       {{end}}

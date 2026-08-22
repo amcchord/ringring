@@ -27,6 +27,7 @@ var (
 	ErrProvisionUsed    = errors.New("provisioning link has already been used")
 	ErrProvisionExpired = errors.New("provisioning link has expired")
 	ErrOpenAIRotation   = errors.New("OpenAI key rotation state changed")
+	ErrOpenAISpendLimit = errors.New("OpenAI spend limit state changed")
 	ErrInvalidRadio     = errors.New("radio station is not in the catalog")
 )
 
@@ -146,7 +147,34 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate OpenAI key identifier: %w", err)
 	}
+	if err := ensurePartyOpenAISpendLimitColumns(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate OpenAI spend limit state: %w", err)
+	}
 	return &Store{db: db}, nil
+}
+
+func ensurePartyOpenAISpendLimitColumns(db *sql.DB) error {
+	columns := []struct {
+		name       string
+		definition string
+	}{
+		{"openai_spend_limit_cents", "INTEGER NOT NULL DEFAULT 0 CHECK(openai_spend_limit_cents >= 0)"},
+		{"openai_spend_pending_cents", "INTEGER CHECK(openai_spend_pending_cents IS NULL OR openai_spend_pending_cents > 0)"},
+		{"openai_spend_limit_status", "TEXT NOT NULL DEFAULT 'unknown'"},
+	}
+	for _, column := range columns {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('parties') WHERE name = ?`, column.name).Scan(&count); err != nil {
+			return err
+		}
+		if count == 0 {
+			if _, err := db.Exec(`ALTER TABLE parties ADD COLUMN ` + column.name + ` ` + column.definition); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func ensurePartyServicesRadioStationColumn(db *sql.DB) error {
@@ -421,17 +449,80 @@ func (s *Store) CreateParty(ctx context.Context, input NewParty) (model.Party, e
 	}, nil
 }
 
-func (s *Store) UpdatePartyOpenAI(ctx context.Context, partyID, projectID, serviceAccountID, apiKeyID, keyCiphertext, status string) error {
+func (s *Store) UpdatePartyOpenAI(ctx context.Context, partyID, projectID, serviceAccountID, apiKeyID, keyCiphertext, status string, spendLimitCents int) error {
+	spendStatus := "unknown"
+	if status == "ready" && spendLimitCents > 0 {
+		spendStatus = "ready"
+	}
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE parties SET openai_project_id = ?, openai_service_account_id = ?,
-			openai_api_key_id = ?, openai_key_ciphertext = ?, openai_status = ? WHERE id = ?`,
-		projectID, serviceAccountID, apiKeyID, keyCiphertext, status, partyID,
+			openai_api_key_id = ?, openai_key_ciphertext = ?, openai_status = ?,
+			openai_spend_limit_cents = ?, openai_spend_pending_cents = NULL,
+			openai_spend_limit_status = ? WHERE id = ?`,
+		projectID, serviceAccountID, apiKeyID, keyCiphertext, status, spendLimitCents, spendStatus, partyID,
 	)
 	if err != nil {
 		return fmt.Errorf("update party OpenAI configuration: %w", err)
 	}
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return ErrNotFound
+	}
+	return nil
+}
+
+// StartPartyOpenAISpendLimitUpdate records one immutable pending amount and
+// pauses AI-powered routing before any provider mutation is attempted.
+func (s *Store) StartPartyOpenAISpendLimitUpdate(ctx context.Context, partyID, hostUserID, projectID string, cents int) error {
+	if cents < 1 {
+		return errors.New("OpenAI spend limit must be positive")
+	}
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE parties SET openai_spend_pending_cents = ?, openai_spend_limit_status = 'updating',
+			openai_status = 'spend-updating'
+		WHERE id = ? AND host_user_id = ? AND openai_project_id = ? AND openai_status = 'ready'
+			AND openai_spend_pending_cents IS NULL AND openai_spend_limit_status IN ('ready', 'unknown')`,
+		cents, partyID, hostUserID, projectID,
+	)
+	if err != nil {
+		return fmt.Errorf("start party OpenAI spend limit update: %w", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return ErrOpenAISpendLimit
+	}
+	return nil
+}
+
+func (s *Store) SetPartyOpenAISpendLimitError(ctx context.Context, partyID, hostUserID, projectID string, cents int) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE parties SET openai_spend_limit_status = 'update-error', openai_status = 'spend-update-error'
+		WHERE id = ? AND host_user_id = ? AND openai_project_id = ?
+			AND openai_spend_pending_cents = ? AND openai_spend_limit_status IN ('updating', 'update-error')
+			AND openai_status IN ('spend-updating', 'spend-update-error')`,
+		partyID, hostUserID, projectID, cents,
+	)
+	if err != nil {
+		return fmt.Errorf("record party OpenAI spend limit error: %w", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return ErrOpenAISpendLimit
+	}
+	return nil
+}
+
+func (s *Store) FinishPartyOpenAISpendLimitUpdate(ctx context.Context, partyID, hostUserID, projectID string, cents int) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE parties SET openai_spend_limit_cents = ?, openai_spend_pending_cents = NULL,
+			openai_spend_limit_status = 'ready', openai_status = 'ready'
+		WHERE id = ? AND host_user_id = ? AND openai_project_id = ?
+			AND openai_spend_pending_cents = ? AND openai_spend_limit_status IN ('updating', 'update-error')
+			AND openai_status IN ('spend-updating', 'spend-update-error')`,
+		cents, partyID, hostUserID, projectID, cents,
+	)
+	if err != nil {
+		return fmt.Errorf("finish party OpenAI spend limit update: %w", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return ErrOpenAISpendLimit
 	}
 	return nil
 }
@@ -553,7 +644,8 @@ func (s *Store) PartyVoiceSettings(ctx context.Context, partyID string) (model.P
 func (s *Store) ListPartiesByHost(ctx context.Context, hostUserID string) ([]model.Party, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, slug, host_user_id, openai_project_id, openai_service_account_id,
-			openai_api_key_id, openai_key_ciphertext, openai_status, created_at
+			openai_api_key_id, openai_key_ciphertext, openai_status,
+			openai_spend_limit_cents, openai_spend_pending_cents, openai_spend_limit_status, created_at
 		FROM parties WHERE host_user_id = ? ORDER BY created_at DESC`, hostUserID)
 	if err != nil {
 		return nil, fmt.Errorf("list parties: %w", err)
@@ -574,7 +666,8 @@ func (s *Store) ListPartiesByHost(ctx context.Context, hostUserID string) ([]mod
 func (s *Store) PartyForHost(ctx context.Context, partyID, hostUserID string) (model.Party, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, name, slug, host_user_id, openai_project_id, openai_service_account_id,
-			openai_api_key_id, openai_key_ciphertext, openai_status, created_at
+			openai_api_key_id, openai_key_ciphertext, openai_status,
+			openai_spend_limit_cents, openai_spend_pending_cents, openai_spend_limit_status, created_at
 		FROM parties WHERE id = ? AND host_user_id = ?`, partyID, hostUserID)
 	party, err := scanParty(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -598,16 +691,19 @@ func (s *Store) CreateInvitation(ctx context.Context, input NewInvitation) error
 func (s *Store) PartyByInvitation(ctx context.Context, tokenHash []byte, now time.Time) (model.Party, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT p.id, p.name, p.slug, p.host_user_id, p.openai_project_id,
-			p.openai_service_account_id, p.openai_api_key_id, p.openai_key_ciphertext, p.openai_status, p.created_at,
+			p.openai_service_account_id, p.openai_api_key_id, p.openai_key_ciphertext, p.openai_status,
+			p.openai_spend_limit_cents, p.openai_spend_pending_cents, p.openai_spend_limit_status, p.created_at,
 			i.expires_at, i.used_at
 		FROM invitations i JOIN parties p ON p.id = i.party_id
 		WHERE i.token_hash = ?`, tokenHash)
 	var party model.Party
-	var projectID, serviceID, apiKeyID, keyCipher, status sql.NullString
+	var projectID, serviceID, apiKeyID, keyCipher, status, spendStatus sql.NullString
+	var spendLimit int
+	var spendPending sql.NullInt64
 	var created, expires int64
 	var used sql.NullInt64
 	err := row.Scan(&party.ID, &party.Name, &party.Slug, &party.HostUserID, &projectID, &serviceID,
-		&apiKeyID, &keyCipher, &status, &created, &expires, &used)
+		&apiKeyID, &keyCipher, &status, &spendLimit, &spendPending, &spendStatus, &created, &expires, &used)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.Party{}, ErrNotFound
 	}
@@ -625,6 +721,9 @@ func (s *Store) PartyByInvitation(ctx context.Context, tokenHash []byte, now tim
 	party.OpenAIAPIKeyID = apiKeyID.String
 	party.OpenAIKeyCiphertext = keyCipher.String
 	party.OpenAIStatus = status.String
+	party.OpenAISpendLimitCents = spendLimit
+	party.OpenAISpendPendingCents = int(spendPending.Int64)
+	party.OpenAISpendLimitStatus = spendStatus.String
 	party.CreatedAt = fromUnix(created)
 	return party, nil
 }
@@ -1025,10 +1124,12 @@ func (s *Store) RoutingServices(ctx context.Context) ([]model.RoutingServices, e
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT p.id,
 			COALESCE(s.time_enabled, 1),
-			CASE WHEN COALESCE(s.weather_enabled, 0) = 1 AND p.openai_status = 'ready' THEN 1 ELSE 0 END,
+			CASE WHEN COALESCE(s.weather_enabled, 0) = 1 AND p.openai_status = 'ready'
+				AND p.openai_spend_limit_status NOT IN ('updating', 'update-error') THEN 1 ELSE 0 END,
 			COALESCE(s.radio_enabled, 0),
 			COALESCE(s.radio_station, 'groove-salad'),
-			CASE WHEN COALESCE(s.ai_enabled, 0) = 1 AND p.openai_status = 'ready' THEN 1 ELSE 0 END
+			CASE WHEN COALESCE(s.ai_enabled, 0) = 1 AND p.openai_status = 'ready'
+				AND p.openai_spend_limit_status NOT IN ('updating', 'update-error') THEN 1 ELSE 0 END
 		FROM parties p LEFT JOIN party_services s ON s.party_id = p.id
 		ORDER BY p.id`)
 	if err != nil {
@@ -1060,10 +1161,12 @@ type scanner interface {
 
 func scanParty(row scanner) (model.Party, error) {
 	var party model.Party
-	var projectID, serviceID, apiKeyID, keyCipher, status sql.NullString
+	var projectID, serviceID, apiKeyID, keyCipher, status, spendStatus sql.NullString
+	var spendLimit int
+	var spendPending sql.NullInt64
 	var created int64
 	if err := row.Scan(&party.ID, &party.Name, &party.Slug, &party.HostUserID, &projectID,
-		&serviceID, &apiKeyID, &keyCipher, &status, &created); err != nil {
+		&serviceID, &apiKeyID, &keyCipher, &status, &spendLimit, &spendPending, &spendStatus, &created); err != nil {
 		return model.Party{}, err
 	}
 	party.OpenAIProjectID = projectID.String
@@ -1071,6 +1174,9 @@ func scanParty(row scanner) (model.Party, error) {
 	party.OpenAIAPIKeyID = apiKeyID.String
 	party.OpenAIKeyCiphertext = keyCipher.String
 	party.OpenAIStatus = status.String
+	party.OpenAISpendLimitCents = spendLimit
+	party.OpenAISpendPendingCents = int(spendPending.Int64)
+	party.OpenAISpendLimitStatus = spendStatus.String
 	party.CreatedAt = fromUnix(created)
 	return party, nil
 }
@@ -1078,13 +1184,17 @@ func scanParty(row scanner) (model.Party, error) {
 func partyByIDTx(ctx context.Context, tx *sql.Tx, partyID string) (model.Party, error) {
 	return scanParty(tx.QueryRowContext(ctx, `
 		SELECT id, name, slug, host_user_id, openai_project_id, openai_service_account_id,
-			openai_api_key_id, openai_key_ciphertext, openai_status, created_at FROM parties WHERE id = ?`, partyID))
+			openai_api_key_id, openai_key_ciphertext, openai_status,
+			openai_spend_limit_cents, openai_spend_pending_cents, openai_spend_limit_status, created_at
+		FROM parties WHERE id = ?`, partyID))
 }
 
 func (s *Store) partyByID(ctx context.Context, partyID string) (model.Party, error) {
 	party, err := scanParty(s.db.QueryRowContext(ctx, `
 		SELECT id, name, slug, host_user_id, openai_project_id, openai_service_account_id,
-			openai_api_key_id, openai_key_ciphertext, openai_status, created_at FROM parties WHERE id = ?`, partyID))
+			openai_api_key_id, openai_key_ciphertext, openai_status,
+			openai_spend_limit_cents, openai_spend_pending_cents, openai_spend_limit_status, created_at
+		FROM parties WHERE id = ?`, partyID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.Party{}, ErrNotFound
 	}
@@ -1094,7 +1204,8 @@ func (s *Store) partyByID(ctx context.Context, partyID string) (model.Party, err
 func deviceForHostTx(ctx context.Context, tx *sql.Tx, partyID, hostUserID, deviceID string) (model.Party, model.Member, model.Device, error) {
 	party, err := scanParty(tx.QueryRowContext(ctx, `
 		SELECT id, name, slug, host_user_id, openai_project_id,
-			openai_service_account_id, openai_api_key_id, openai_key_ciphertext, openai_status, created_at
+			openai_service_account_id, openai_api_key_id, openai_key_ciphertext, openai_status,
+			openai_spend_limit_cents, openai_spend_pending_cents, openai_spend_limit_status, created_at
 		FROM parties WHERE id = ? AND host_user_id = ?`, partyID, hostUserID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.Party{}, model.Member{}, model.Device{}, ErrNotFound
@@ -1182,6 +1293,9 @@ CREATE TABLE IF NOT EXISTS parties (
     openai_api_key_id TEXT,
     openai_key_ciphertext TEXT,
     openai_status TEXT NOT NULL DEFAULT 'pending',
+	openai_spend_limit_cents INTEGER NOT NULL DEFAULT 0 CHECK(openai_spend_limit_cents >= 0),
+	openai_spend_pending_cents INTEGER CHECK(openai_spend_pending_cents IS NULL OR openai_spend_pending_cents > 0),
+	openai_spend_limit_status TEXT NOT NULL DEFAULT 'unknown',
     created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS parties_host ON parties(host_user_id);

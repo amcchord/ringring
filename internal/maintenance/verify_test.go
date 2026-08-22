@@ -104,7 +104,7 @@ func verificationFixture(t *testing.T) (string, []byte, string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := database.UpdatePartyOpenAI(context.Background(), "pty_backup", "project", "service", "key", partyCiphertext, "ready"); err != nil {
+	if err := database.UpdatePartyOpenAI(context.Background(), "pty_backup", "project", "service", "key", partyCiphertext, "ready", 1000); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.UpdatePartyServices(context.Background(), "pty_backup", "usr_backup", store.ServiceSettingsInput{TimeEnabled: true, RadioStation: "groove-salad", UpdatedAt: now}); err != nil {

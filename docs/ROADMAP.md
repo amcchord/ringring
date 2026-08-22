@@ -31,7 +31,7 @@
 - [x] Automated per-party OpenAI project/service-account provisioning.
 - [x] Per-party encrypted runtime key use.
 - [x] Immediate party-key revocation and replacement.
-- [ ] Host-set project spend limit; service toggles are implemented.
+- [x] Host-set project hard spend limit with an operator ceiling and fail-closed provider reconciliation.
 - [x] Realtime voice line with child-appropriate instructions, disclosure, bounded calls, and no tools.
 - [x] AI disclosure for generated weather speech and no default transcript retention.
 - [ ] External child-safety review and confirmation of OpenAI Zero Data Retention before use by callers under 13.

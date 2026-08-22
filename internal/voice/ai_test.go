@@ -66,20 +66,23 @@ func TestPrepareAICallDisclosesAIAndIssuesOneUseTicket(t *testing.T) {
 	server.releaseAICall()
 }
 
-func TestDisabledAIDoesNotUseCachedDisclosure(t *testing.T) {
+func TestSpendLimitReconciliationDoesNotUseCachedAIDisclosure(t *testing.T) {
 	temporary := t.TempDir()
 	if err := os.WriteFile(filepath.Join(temporary, "ai-disclosure-pty_ai.wav"), []byte("cached"), 0o640); err != nil {
 		t.Fatal(err)
 	}
 	server := &Server{
 		Source: fakePartySource{
-			party:    model.Party{ID: "pty_ai", OpenAIStatus: "ready", OpenAIKeyCiphertext: "unused"},
-			services: model.PartyServices{PartyID: "pty_ai", AIEnabled: false},
+			party: model.Party{
+				ID: "pty_ai", OpenAIStatus: "ready", OpenAIKeyCiphertext: "unused",
+				OpenAISpendLimitStatus: "update-error", OpenAISpendPendingCents: 725,
+			},
+			services: model.PartyServices{PartyID: "pty_ai", AIEnabled: true},
 		},
 		Cipher: &fakeDecryptor{}, Speech: &fakeSpeech{}, AudioDir: temporary, PlaybackDir: "/voice",
 	}
 	if _, _, err := server.prepareAICall(t.Context(), "pty_ai", uuid.NewString(), "101"); err == nil {
-		t.Fatal("disabled AI line served a cached disclosure")
+		t.Fatal("spend-limit reconciliation served a cached AI disclosure")
 	}
 }
 

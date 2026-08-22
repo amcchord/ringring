@@ -64,8 +64,8 @@ The database, AMI, metrics, debug endpoints, and container APIs are never public
 - Native login and recovery are limited both per source address and per normalized username; Argon2 work also has a small concurrency ceiling.
 - Production host signup is closed unless a deployment-chosen `HOST_SIGNUP_CODE` is configured. This prevents anonymous visitors from provisioning party OpenAI resources.
 - Repeated SIP failures trigger temporary address blocking.
-- Hosts can revoke devices, disable integrations, and replace a party's OpenAI runtime key immediately.
-- OpenAI projects should use model restrictions and hard spend limits where available.
+- Hosts can revoke devices, disable integrations, replace a party's OpenAI runtime key, and choose its hard monthly spend limit within the operator's ceiling.
+- New parties and host updates accept an OpenAI project limit only after the provider echoes the exact requested USD cents, monthly interval, and active enforcement. An ambiguous update pauses new AI-powered calls until the same pending amount is retried.
 
 The reference deployment writes Asterisk PJSIP security events to a dedicated file. Fail2Ban uses its maintained Asterisk filter and inserts bans into Docker's `DOCKER-USER` chain, before published-port forwarding. A legitimate first SIP challenge is not a failure; repeated bad authentication responses are banned with increasing durations.
 

@@ -65,7 +65,7 @@ ASTERISK_AMI_SECRET=<same AMI secret>
 TZ=America/New_York
 ```
 
-Generate application keys with `openssl rand -base64 32` and the AMI secret with `openssl rand -hex 32`. Choose a family access code that is easy to share with trusted hosts; a multi-word phrase is safer than one common word. Do not place any of these values inside the repository.
+Generate application keys with `openssl rand -base64 32` and the AMI secret with `openssl rand -hex 32`. Choose a family access code that is easy to share with trusted hosts; a multi-word phrase is safer than one common word. Do not place any of these values inside the repository. `OPENAI_PARTY_SPEND_LIMIT_CENTS` is both the default hard monthly limit for a new party and the maximum amount its host may select; `1000` means `$10.00`. Lowering the deployment value narrows future host choices but does not silently mutate existing OpenAI projects.
 
 Native username/password login is always available. In production, new-account signup is open only while `HOST_SIGNUP_CODE` is nonempty; trusted hosts enter that shared code once during account creation. No email address or confirmation is required. A host must save the one-time recovery codes because the server cannot email a reset link.
 
@@ -74,6 +74,8 @@ Google OAuth is optional. If desired, create a web application and register `htt
 Linphone QR setup requires no additional environment variable or public port. The QR points back to the deployment's `APP_BASE_URL`, so production must keep that origin on trusted HTTPS. The first startup of this release adds an additive `device_provisioning_tokens` table; a rollback to the prior app binary safely ignores it, and rotating a device after returning to this release creates a fresh link. Do not place a provisioning URL into monitoring probes because a real `GET` intentionally consumes it.
 
 Party OpenAI key replacement adds a nullable `parties.openai_api_key_id` column on startup. Existing party keys remain usable with an empty identifier; their first host-requested replacement records the fresh key ID before retiring all older keys owned by the dedicated service account. Older app builds ignore the additive column. If rollback occurs while a party says its key is rotating or needs retry, its AI-powered routes remain paused; return to this release and use the host's **Finish key replacement** action before re-enabling them. Never test this control against production merely as a deployment probe because a successful submission deliberately revokes the current party key.
+
+Host-set spend limits add three forward-only `parties` columns for the last confirmed amount, one pending amount, and its reconciliation state. Existing parties migrate to an honest `unknown` local state without changing their provider project or interrupting current routing; the host's first save verifies or replaces the chosen amount. A new update also mirrors its pause into the older `openai_status` column, so rollback keeps AI routes unavailable rather than ignoring an uncertain provider result. Do not roll back or edit the pending amount mid-update. Return to this release and choose **Finish spend limit update**, which safely repeats that exact amount until OpenAI confirms active enforcement. Do not submit the production form as a deployment probe because it deliberately changes the party's provider limit.
 
 `AI_AUDIO_ADDR` is private container traffic and must not be published on the host. The reference limits `*14` calls to three minutes and two concurrent sessions in addition to each party project's hard monthly spend limit. Before a party enables the line for anyone under 13, confirm that the OpenAI organization has Zero Data Retention as required by the official [Under 18 API Guidance](https://developers.openai.com/api/docs/guides/safety-checks/under-18-api-guidance).
 
@@ -193,3 +195,7 @@ The voice extension chooser adds no schema, secret, environment variable, public
 ### Radio-selection upgrade and rollback
 
 The curated selector adds `party_services.radio_station` with a forward-only startup migration and defaults every existing row to Groove Salad, preserving the prior route. Take and drill the normal app-state backup before upgrading. Older app builds ignore the additive column; rolling back regenerates any enabled `*13` route with their fixed Groove Salad setting, while the chosen catalog ID remains stored for a later return to this release. No secret, environment variable, public port, or new container is added.
+
+### Host-set AI spend-limit upgrade and rollback
+
+The spend-limit control uses the additive `parties` columns described in environment setup above and adds no secret, public port, container, or provider resource. Take and drill the normal app-state backup before upgrading. Existing projects are not contacted during migration or startup. After upgrade, verify the page and schema without submitting the control against a real party. If a host update is pending, finish it on this release before any rollback; the mirrored legacy status keeps older releases fail-closed but only this release knows how to reconcile the pending amount.

@@ -26,6 +26,14 @@ type ProvisionedProject struct {
 	ServiceAccountID string
 	APIKeyID         string
 	APIKey           string
+	SpendLimitCents  int
+}
+
+type SpendLimit struct {
+	ThresholdAmount   int
+	Currency          string
+	Interval          string
+	EnforcementStatus string
 }
 
 type ServiceAccountAPIKey struct {
@@ -68,11 +76,8 @@ func (c *Client) Provision(ctx context.Context, partyID, partyName string) (Prov
 		return ProvisionedProject{}, errors.New("create OpenAI project: response had no project ID")
 	}
 
-	if err := c.post(ctx, "/organization/projects/"+url.PathEscape(project.ID)+"/spend_limit", map[string]any{
-		"threshold_amount": c.spendLimit,
-		"currency":         "USD",
-		"interval":         "month",
-	}, nil); err != nil {
+	limit, err := c.UpdateProjectSpendLimit(ctx, project.ID, c.spendLimit)
+	if err != nil {
 		return ProvisionedProject{}, fmt.Errorf("set OpenAI project spend limit: %w", err)
 	}
 
@@ -96,6 +101,48 @@ func (c *Client) Provision(ctx context.Context, partyID, partyName string) (Prov
 		ServiceAccountID: serviceAccount.ID,
 		APIKeyID:         serviceAccount.APIKey.ID,
 		APIKey:           serviceAccount.APIKey.Value,
+		SpendLimitCents:  limit.ThresholdAmount,
+	}, nil
+}
+
+// UpdateProjectSpendLimit creates or replaces a project's hard monthly limit.
+// It succeeds only when OpenAI echoes the exact requested USD amount and says
+// enforcement is active; callers may safely retry the same amount after an
+// ambiguous response or transport failure.
+func (c *Client) UpdateProjectSpendLimit(ctx context.Context, projectID string, thresholdAmount int) (SpendLimit, error) {
+	if c.adminKey == "" {
+		return SpendLimit{}, errors.New("OpenAI admin key is not configured")
+	}
+	if projectID == "" {
+		return SpendLimit{}, errors.New("OpenAI project ID is required")
+	}
+	if thresholdAmount < 1 {
+		return SpendLimit{}, errors.New("OpenAI spend limit must be at least one cent")
+	}
+	var response struct {
+		Object          string `json:"object"`
+		ThresholdAmount int    `json:"threshold_amount"`
+		Currency        string `json:"currency"`
+		Interval        string `json:"interval"`
+		Enforcement     struct {
+			Status string `json:"status"`
+		} `json:"enforcement"`
+	}
+	path := "/organization/projects/" + url.PathEscape(projectID) + "/spend_limit"
+	if err := c.post(ctx, path, map[string]any{
+		"threshold_amount": thresholdAmount,
+		"currency":         "USD",
+		"interval":         "month",
+	}, &response); err != nil {
+		return SpendLimit{}, fmt.Errorf("update OpenAI project spend limit: %w", err)
+	}
+	if response.Object != "project.spend_limit" || response.ThresholdAmount != thresholdAmount ||
+		response.Currency != "USD" || response.Interval != "month" || response.Enforcement.Status != "enforcing" {
+		return SpendLimit{}, errors.New("update OpenAI project spend limit: response did not confirm the requested enforced monthly USD limit")
+	}
+	return SpendLimit{
+		ThresholdAmount: response.ThresholdAmount, Currency: response.Currency,
+		Interval: response.Interval, EnforcementStatus: response.Enforcement.Status,
 	}, nil
 }
 

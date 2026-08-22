@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -73,6 +74,7 @@ type openAIProjectManager interface {
 	CreateServiceAccountAPIKey(context.Context, string, string) (openaiadmin.ServiceAccountAPIKey, error)
 	ServiceAccountAPIKeyIDs(context.Context, string, string) ([]string, error)
 	DeleteProjectAPIKey(context.Context, string, string) error
+	UpdateProjectSpendLimit(context.Context, string, int) (openaiadmin.SpendLimit, error)
 }
 
 type weatherGeocoder interface {
@@ -89,45 +91,51 @@ type PresenceView struct {
 }
 
 type PageData struct {
-	BodyClass            string
-	User                 *model.User
-	CSRF                 string
-	AuthConfigured       bool
-	DevAuth              bool
-	Parties              []model.Party
-	Party                model.Party
-	Member               model.Member
-	Members              []model.Member
-	DevicePresence       map[string]PresenceView
-	MemberPresence       map[string]PresenceView
-	PresenceNotice       string
-	Services             model.PartyServices
-	RadioStations        []radio.Station
-	InviteURL            string
-	JoinCSRF             string
-	Claim                model.ClaimedDevice
-	SIPPublicHost        string
-	LinphoneProvisionURL string
-	LinphoneOpenURL      template.URL
-	LinphoneQR           template.URL
-	SetupForHost         bool
-	PartyURL             string
-	ErrorTitle           string
-	ErrorMessage         string
-	ErrorBackURL         string
-	ErrorBackLabel       string
-	AuthCSRF             string
-	FormError            string
-	FormUsername         string
-	FormName             string
-	SignupEnabled        bool
-	SignupCode           bool
-	RecoveryCodes        []string
-	RecoveryTitle        string
-	RecoveryText         string
-	RecoveryNext         string
-	RecoveryButton       string
-	Notice               string
+	BodyClass                string
+	User                     *model.User
+	CSRF                     string
+	AuthConfigured           bool
+	DevAuth                  bool
+	Parties                  []model.Party
+	Party                    model.Party
+	Member                   model.Member
+	Members                  []model.Member
+	DevicePresence           map[string]PresenceView
+	MemberPresence           map[string]PresenceView
+	PresenceNotice           string
+	Services                 model.PartyServices
+	RadioStations            []radio.Station
+	InviteURL                string
+	JoinCSRF                 string
+	Claim                    model.ClaimedDevice
+	SIPPublicHost            string
+	LinphoneProvisionURL     string
+	LinphoneOpenURL          template.URL
+	LinphoneQR               template.URL
+	SetupForHost             bool
+	PartyURL                 string
+	ErrorTitle               string
+	ErrorMessage             string
+	ErrorBackURL             string
+	ErrorBackLabel           string
+	AuthCSRF                 string
+	FormError                string
+	FormUsername             string
+	FormName                 string
+	SignupEnabled            bool
+	SignupCode               bool
+	RecoveryCodes            []string
+	RecoveryTitle            string
+	RecoveryText             string
+	RecoveryNext             string
+	RecoveryButton           string
+	Notice                   string
+	OpenAIAdminConfigured    bool
+	OpenAISpendLimit         string
+	OpenAISpendLimitInput    string
+	OpenAISpendPending       string
+	OpenAISpendLimitMax      string
+	OpenAISpendLimitMaxInput string
 }
 
 type authSession struct {
@@ -229,6 +237,7 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 	mux.HandleFunc("GET /parties/{partyID}", app.requireUser(app.party))
 	mux.HandleFunc("POST /parties/{partyID}/invites", app.requireUser(app.createInvitation))
 	mux.HandleFunc("POST /parties/{partyID}/services", app.requireUser(app.updateServices))
+	mux.HandleFunc("POST /parties/{partyID}/openai-spend-limit", app.requireUser(app.updatePartyOpenAISpendLimit))
 	mux.HandleFunc("POST /parties/{partyID}/openai-key/rotate", app.requireUser(app.rotatePartyOpenAIKey))
 	mux.HandleFunc("GET /parties/{partyID}/setup", app.requireUser(app.rotatedSetup))
 	mux.HandleFunc("POST /parties/{partyID}/devices/{deviceID}/rotate", app.requireUser(app.rotateDevice))
@@ -781,14 +790,14 @@ func (a *App) createParty(w http.ResponseWriter, r *http.Request, session authSe
 	}
 	if err := a.provisionOpenAI(r.Context(), party); err != nil {
 		a.logger.Warn("party OpenAI provisioning failed", "party_id", party.ID, "error", err)
-		_ = a.store.UpdatePartyOpenAI(r.Context(), party.ID, "", "", "", "", "error")
+		_ = a.store.UpdatePartyOpenAI(r.Context(), party.ID, "", "", "", "", "error", 0)
 	}
 	http.Redirect(w, r, "/parties/"+url.PathEscape(party.ID), http.StatusSeeOther)
 }
 
 func (a *App) provisionOpenAI(ctx context.Context, party model.Party) error {
 	if a.openAI == nil {
-		return a.store.UpdatePartyOpenAI(ctx, party.ID, "", "", "", "", "not-configured")
+		return a.store.UpdatePartyOpenAI(ctx, party.ID, "", "", "", "", "not-configured", 0)
 	}
 	provisioned, err := a.openAI.Provision(ctx, party.ID, party.Name)
 	if err != nil {
@@ -798,7 +807,7 @@ func (a *App) provisionOpenAI(ctx context.Context, party model.Party) error {
 	if err != nil {
 		return err
 	}
-	return a.store.UpdatePartyOpenAI(ctx, party.ID, provisioned.ProjectID, provisioned.ServiceAccountID, provisioned.APIKeyID, ciphertext, "ready")
+	return a.store.UpdatePartyOpenAI(ctx, party.ID, provisioned.ProjectID, provisioned.ServiceAccountID, provisioned.APIKeyID, ciphertext, "ready", provisioned.SpendLimitCents)
 }
 
 func (a *App) party(w http.ResponseWriter, r *http.Request, session authSession) {
@@ -828,6 +837,16 @@ func (a *App) party(w http.ResponseWriter, r *http.Request, session authSession)
 	data.DevicePresence, data.MemberPresence, data.PresenceNotice = a.phonePresence(r.Context(), members)
 	data.Services = services
 	data.RadioStations = radio.All()
+	data.OpenAIAdminConfigured = a.openAI != nil
+	data.OpenAISpendLimitMax = formatDollars(a.maxOpenAISpendLimitCents())
+	data.OpenAISpendLimitMaxInput = formatDollarInput(a.maxOpenAISpendLimitCents())
+	if party.OpenAISpendLimitCents > 0 {
+		data.OpenAISpendLimit = formatDollars(party.OpenAISpendLimitCents)
+		data.OpenAISpendLimitInput = formatDollarInput(party.OpenAISpendLimitCents)
+	}
+	if party.OpenAISpendPendingCents > 0 {
+		data.OpenAISpendPending = formatDollars(party.OpenAISpendPendingCents)
+	}
 	data.InviteURL = a.readInviteFlash(w, r, party.ID)
 	if r.URL.Query().Get("deleted") == "member" {
 		data.Notice = "The member and every phone credential attached to that extension were deleted."
@@ -838,8 +857,130 @@ func (a *App) party(w http.ResponseWriter, r *http.Request, session authSession)
 	if r.URL.Query().Get("ai-key") == "fresh" {
 		data.Notice = "This party has a fresh OpenAI key. Every older key for its private service account was revoked."
 	}
+	if r.URL.Query().Get("ai-spend") == "updated" {
+		data.Notice = "OpenAI confirmed this party’s hard monthly spend limit is enforcing."
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	a.render(w, "party", data)
+}
+
+func (a *App) updatePartyOpenAISpendLimit(w http.ResponseWriter, r *http.Request, session authSession) {
+	if !a.validCSRF(r, session) {
+		http.Error(w, "invalid request", http.StatusForbidden)
+		return
+	}
+	partyID := r.PathValue("partyID")
+	party, err := a.store.PartyForHost(r.Context(), partyID, session.User.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	backURL := "/parties/" + url.PathEscape(partyID)
+	cents := party.OpenAISpendPendingCents
+	resuming := (party.OpenAISpendLimitStatus == "updating" || party.OpenAISpendLimitStatus == "update-error") && cents > 0 &&
+		(party.OpenAIStatus == "spend-updating" || party.OpenAIStatus == "spend-update-error")
+	if a.openAI == nil || party.OpenAIProjectID == "" || (!resuming && party.OpenAIStatus != "ready") {
+		a.errorPage(w, http.StatusConflict, "The spend limit is unavailable", "This party needs a ready OpenAI administrator connection and project before its limit can change.", backURL, "Back to the party")
+		return
+	}
+
+	if !resuming {
+		cents, err = parseDollars(r.FormValue("spend_limit_dollars"))
+		if err != nil || cents < 1 || cents > a.maxOpenAISpendLimitCents() {
+			a.errorPage(w, http.StatusBadRequest, "Choose a safe monthly limit", "Use an amount from $0.01 through "+formatDollars(a.maxOpenAISpendLimitCents())+".", backURL, "Back to the party")
+			return
+		}
+		if err := a.store.StartPartyOpenAISpendLimitUpdate(r.Context(), party.ID, session.User.ID, party.OpenAIProjectID, cents); err != nil {
+			if errors.Is(err, store.ErrOpenAISpendLimit) {
+				a.errorPage(w, http.StatusConflict, "The spend limit state changed", "Another update started first. Reload the party and finish that amount before choosing a new one.", backURL, "Back to the party")
+				return
+			}
+			a.internalError(w, r, err)
+			return
+		}
+	}
+
+	// The database state and runtime authorization now fail closed. Regenerating
+	// the dialplan is defense in depth and may be retried by normal reconciliation.
+	if err := a.ReconcileTelephony(r.Context()); err != nil {
+		a.logger.Error("telephony reconcile before OpenAI spend limit update", "party_id", partyID, "error", err)
+	}
+	apiContext, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+	if _, err := a.openAI.UpdateProjectSpendLimit(apiContext, party.OpenAIProjectID, cents); err != nil {
+		if statusErr := a.store.SetPartyOpenAISpendLimitError(r.Context(), party.ID, session.User.ID, party.OpenAIProjectID, cents); statusErr != nil {
+			a.logger.Error("record OpenAI spend limit failure", "party_id", partyID, "error", statusErr)
+		}
+		a.logger.Warn("update party OpenAI spend limit failed", "party_id", partyID, "error", err)
+		a.errorPage(w, http.StatusBadGateway, "The limit needs one more try", "AI-powered lines are paused because OpenAI did not confirm the exact enforcing amount. Return to the party and choose Finish spend limit update.", backURL, "Back to the party")
+		return
+	}
+	if err := a.store.FinishPartyOpenAISpendLimitUpdate(r.Context(), party.ID, session.User.ID, party.OpenAIProjectID, cents); err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	if err := a.ReconcileTelephony(r.Context()); err != nil {
+		a.logger.Error("telephony reconcile after OpenAI spend limit update", "party_id", partyID, "error", err)
+	}
+	http.Redirect(w, r, backURL+"?ai-spend=updated", http.StatusSeeOther)
+}
+
+func (a *App) maxOpenAISpendLimitCents() int {
+	if a.cfg.OpenAIPartySpendLimitCents > 0 {
+		return a.cfg.OpenAIPartySpendLimitCents
+	}
+	return 1000
+}
+
+func parseDollars(value string) (int, error) {
+	value = strings.TrimSpace(value)
+	parts := strings.Split(value, ".")
+	if len(parts) > 2 || len(parts[0]) == 0 || len(parts[0]) > 9 {
+		return 0, errors.New("invalid dollar amount")
+	}
+	for _, character := range parts[0] {
+		if character < '0' || character > '9' {
+			return 0, errors.New("invalid dollar amount")
+		}
+	}
+	fraction := ""
+	if len(parts) == 2 {
+		fraction = parts[1]
+		if len(fraction) < 1 || len(fraction) > 2 {
+			return 0, errors.New("invalid dollar amount")
+		}
+		for _, character := range fraction {
+			if character < '0' || character > '9' {
+				return 0, errors.New("invalid dollar amount")
+			}
+		}
+	}
+	if len(fraction) == 0 {
+		fraction = "00"
+	} else if len(fraction) == 1 {
+		fraction += "0"
+	}
+	dollars, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, errors.New("invalid dollar amount")
+	}
+	cents, err := strconv.Atoi(fraction)
+	if err != nil || dollars > (int(^uint(0)>>1)-cents)/100 {
+		return 0, errors.New("invalid dollar amount")
+	}
+	return dollars*100 + cents, nil
+}
+
+func formatDollars(cents int) string {
+	return fmt.Sprintf("$%d.%02d", cents/100, cents%100)
+}
+
+func formatDollarInput(cents int) string {
+	return fmt.Sprintf("%d.%02d", cents/100, cents%100)
 }
 
 func (a *App) rotatePartyOpenAIKey(w http.ResponseWriter, r *http.Request, session authSession) {
@@ -860,6 +1001,10 @@ func (a *App) rotatePartyOpenAIKey(w http.ResponseWriter, r *http.Request, sessi
 	backURL := "/parties/" + url.PathEscape(partyID)
 	if a.openAI == nil || party.OpenAIProjectID == "" || party.OpenAIServiceAccountID == "" {
 		a.errorPage(w, http.StatusConflict, "Key replacement is unavailable", "This party does not have an OpenAI administrator connection and private service account to rotate.", backURL, "Back to the party")
+		return
+	}
+	if party.OpenAIUsagePausedForSpendLimit() {
+		a.errorPage(w, http.StatusConflict, "Finish the spend limit first", "The party has one exact monthly amount waiting for OpenAI confirmation. Finish that update before replacing its runtime key.", backURL, "Back to the party")
 		return
 	}
 

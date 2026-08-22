@@ -39,6 +39,9 @@ type fakeOpenAIProjects struct {
 	deleteAttempts  int
 	deletedKeys     []string
 	deleteFailures  int
+	spendAttempts   int
+	spendAmounts    []int
+	spendFailures   int
 }
 
 type fakeContactPresence struct {
@@ -105,9 +108,39 @@ func (f *fakeOpenAIProjects) DeleteProjectAPIKey(_ context.Context, _ string, ke
 	return nil
 }
 
+func (f *fakeOpenAIProjects) UpdateProjectSpendLimit(_ context.Context, _ string, cents int) (openaiadmin.SpendLimit, error) {
+	f.spendAttempts++
+	f.spendAmounts = append(f.spendAmounts, cents)
+	if f.spendFailures > 0 {
+		f.spendFailures--
+		return openaiadmin.SpendLimit{}, errors.New("temporary spend limit failure")
+	}
+	return openaiadmin.SpendLimit{ThresholdAmount: cents, Currency: "USD", Interval: "month", EnforcementStatus: "enforcing"}, nil
+}
+
 func (f *fakeWeatherGeocoder) Geocode(_ context.Context, query string) (weather.Location, error) {
 	f.query = query
 	return weather.Location{Query: query, Label: "Portland, Maine", Latitude: 43.66, Longitude: -70.25}, nil
+}
+
+func TestParseDollarsUsesExactCents(t *testing.T) {
+	tests := []struct {
+		input string
+		want  int
+		ok    bool
+	}{
+		{"0.01", 1, true}, {"7.2", 720, true}, {"10", 1000, true}, {" 10.00 ", 1000, true},
+		{"", 0, false}, {".50", 0, false}, {"1.001", 0, false}, {"-1", 0, false}, {"1e1", 0, false}, {"$10", 0, false},
+	}
+	for _, test := range tests {
+		got, err := parseDollars(test.input)
+		if test.ok && (err != nil || got != test.want) {
+			t.Errorf("parseDollars(%q) = %d, %v; want %d", test.input, got, err, test.want)
+		}
+		if !test.ok && err == nil {
+			t.Errorf("parseDollars(%q) unexpectedly accepted %d", test.input, got)
+		}
+	}
 }
 
 func TestPartyInvitationAndClaimFlow(t *testing.T) {
@@ -176,7 +209,7 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := database.UpdatePartyOpenAI(t.Context(), partyID, "proj_test", "svc_test", "key_old", initialPartyKey, "ready"); err != nil {
+	if err := database.UpdatePartyOpenAI(t.Context(), partyID, "proj_test", "svc_test", "key_old", initialPartyKey, "ready", 1000); err != nil {
 		t.Fatal(err)
 	}
 	unconfirmedAI := postForm(t, client, server.URL+"/parties/"+partyID+"/services", url.Values{
@@ -227,9 +260,64 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 
 	keyManager := &fakeOpenAIProjects{
 		createdKey: openaiadmin.ServiceAccountAPIKey{ID: "key_fresh", Value: "sk-fresh-party"},
-		keyIDs:     []string{"key_old", "key_fresh"}, deleteFailures: 1,
+		keyIDs:     []string{"key_old", "key_fresh"}, deleteFailures: 1, spendFailures: 1,
 	}
 	app.openAI = keyManager
+	spendPage := get(t, client, server.URL+"/parties/"+partyID)
+	spendPageBody := readBody(t, spendPage)
+	if spendPage.StatusCode != http.StatusOK || !strings.Contains(spendPageBody, "Monthly AI guardrail") || !strings.Contains(spendPageBody, "$10.00 each month") || !strings.Contains(spendPageBody, `max="10.00"`) {
+		t.Fatal("party page did not show the bounded existing spend limit")
+	}
+	missingSpendCSRF := postForm(t, client, server.URL+"/parties/"+partyID+"/openai-spend-limit", url.Values{"spend_limit_dollars": {"7.25"}})
+	if missingSpendCSRF.StatusCode != http.StatusForbidden || keyManager.spendAttempts != 0 {
+		t.Fatalf("spend limit accepted a missing CSRF token: status=%d attempts=%d", missingSpendCSRF.StatusCode, keyManager.spendAttempts)
+	}
+	_ = readBody(t, missingSpendCSRF)
+	overCapSpend := postForm(t, client, server.URL+"/parties/"+partyID+"/openai-spend-limit", url.Values{"csrf": {csrf}, "spend_limit_dollars": {"10.01"}})
+	if overCapSpend.StatusCode != http.StatusBadRequest || keyManager.spendAttempts != 0 || !strings.Contains(readBody(t, overCapSpend), "$10.00") {
+		t.Fatal("spend limit accepted an amount above the deployment ceiling")
+	}
+	failedSpend := postForm(t, client, server.URL+"/parties/"+partyID+"/openai-spend-limit", url.Values{"csrf": {csrf}, "spend_limit_dollars": {"7.25"}})
+	failedSpendBody := readBody(t, failedSpend)
+	if failedSpend.StatusCode != http.StatusBadGateway || !strings.Contains(failedSpendBody, "needs one more try") || strings.Contains(failedSpendBody, "update-error") || strings.Contains(failedSpendBody, "proj_test") {
+		t.Fatalf("ambiguous spend update did not fail privately and safely: status=%d", failedSpend.StatusCode)
+	}
+	pendingParty, _, err := database.PartyVoiceSettings(t.Context(), partyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pendingParty.OpenAIStatus != "spend-update-error" || pendingParty.OpenAISpendLimitCents != 1000 || pendingParty.OpenAISpendPendingCents != 725 || pendingParty.OpenAISpendLimitStatus != "update-error" {
+		t.Fatalf("unexpected pending spend state: %#v", pendingParty)
+	}
+	routingServices, err = database.RoutingServices(t.Context())
+	if err != nil || len(routingServices) != 1 || routingServices[0].WeatherEnabled || routingServices[0].AIEnabled {
+		t.Fatalf("AI-powered routes were not paused for uncertain spend state: %#v error=%v", routingServices, err)
+	}
+	blockedRotation := postForm(t, client, server.URL+"/parties/"+partyID+"/openai-key/rotate", url.Values{"csrf": {csrf}})
+	if blockedRotation.StatusCode != http.StatusConflict || keyManager.createAttempts != 0 || !strings.Contains(readBody(t, blockedRotation), "Finish the spend limit") {
+		t.Fatal("key rotation was not held behind pending spend reconciliation")
+	}
+	spendRetryPage := get(t, client, server.URL+"/parties/"+partyID)
+	spendRetryBody := readBody(t, spendRetryPage)
+	if spendRetryPage.StatusCode != http.StatusOK || !strings.Contains(spendRetryBody, "Finish spend limit update") || !strings.Contains(spendRetryBody, "paused for limit safety") || strings.Contains(spendRetryBody, "update-error") || strings.Contains(spendRetryBody, "proj_test") {
+		t.Fatal("party page did not offer a private retry for the immutable pending amount")
+	}
+	finishedSpend := postForm(t, client, server.URL+"/parties/"+partyID+"/openai-spend-limit", url.Values{"csrf": {csrf}, "spend_limit_dollars": {"1.00"}})
+	finishedSpendBody := readBody(t, finishedSpend)
+	if finishedSpend.StatusCode != http.StatusOK || !strings.Contains(finishedSpendBody, "confirmed this party’s hard monthly spend limit") || !strings.Contains(finishedSpendBody, "$7.25 each month") {
+		t.Fatalf("spend retry did not complete: status=%d", finishedSpend.StatusCode)
+	}
+	if keyManager.spendAttempts != 2 || len(keyManager.spendAmounts) != 2 || keyManager.spendAmounts[0] != 725 || keyManager.spendAmounts[1] != 725 {
+		t.Fatalf("spend retry changed or duplicated the pending amount unsafely: %#v", keyManager.spendAmounts)
+	}
+	confirmedParty, _, err := database.PartyVoiceSettings(t.Context(), partyID)
+	if err != nil || confirmedParty.OpenAISpendLimitCents != 725 || confirmedParty.OpenAISpendPendingCents != 0 || confirmedParty.OpenAISpendLimitStatus != "ready" {
+		t.Fatalf("unexpected confirmed spend state: %#v error=%v", confirmedParty, err)
+	}
+	routingServices, err = database.RoutingServices(t.Context())
+	if err != nil || len(routingServices) != 1 || !routingServices[0].WeatherEnabled || !routingServices[0].AIEnabled {
+		t.Fatalf("AI-powered routes did not resume after spend confirmation: %#v error=%v", routingServices, err)
+	}
 	missingRotationCSRF := postForm(t, client, server.URL+"/parties/"+partyID+"/openai-key/rotate", url.Values{})
 	if missingRotationCSRF.StatusCode != http.StatusForbidden || keyManager.createAttempts != 0 {
 		t.Fatalf("key rotation accepted a missing CSRF token: status=%d creates=%d", missingRotationCSRF.StatusCode, keyManager.createAttempts)

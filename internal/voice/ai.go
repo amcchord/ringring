@@ -103,7 +103,7 @@ func (s *Server) partyAIKey(ctx context.Context, partyID string) (model.Party, m
 	if err != nil {
 		return model.Party{}, model.PartyServices{}, "", err
 	}
-	if !services.AIEnabled || party.OpenAIStatus != "ready" || party.OpenAIKeyCiphertext == "" {
+	if !services.AIEnabled || party.OpenAIStatus != "ready" || party.OpenAIUsagePausedForSpendLimit() || party.OpenAIKeyCiphertext == "" {
 		return model.Party{}, model.PartyServices{}, "", errors.New("party AI line is unavailable")
 	}
 	apiKey, err := s.Cipher.Decrypt(party.OpenAIKeyCiphertext, []byte(party.ID))

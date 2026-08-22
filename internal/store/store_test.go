@@ -330,7 +330,7 @@ func TestPartyServiceSettingsAreHostScopedAndDefaultToTime(t *testing.T) {
 	if _, err := s.UpdatePartyServices(ctx, party.ID, host.ID, ServiceSettingsInput{RadioEnabled: true, RadioStation: "http://example.test/live", UpdatedAt: now}); !errors.Is(err, ErrInvalidRadio) {
 		t.Fatalf("arbitrary radio station error = %v", err)
 	}
-	if err := s.UpdatePartyOpenAI(ctx, party.ID, "project", "service-account", "key-old", "encrypted-key", "ready"); err != nil {
+	if err := s.UpdatePartyOpenAI(ctx, party.ID, "project", "service-account", "key-old", "encrypted-key", "ready", 1000); err != nil {
 		t.Fatal(err)
 	}
 	routing, err := s.RoutingServices(ctx)
@@ -359,7 +359,7 @@ func TestPartyOpenAIKeyRotationIsHostScopedAndCompareAndSwap(t *testing.T) {
 	host, _ := s.UpsertGoogleUser(ctx, GoogleProfile{Subject: "rotation-host", Email: "host@example.test", Name: "Host"}, now, "usr_rotation_host")
 	other, _ := s.UpsertGoogleUser(ctx, GoogleProfile{Subject: "rotation-other", Email: "other@example.test", Name: "Other"}, now, "usr_rotation_other")
 	party, _ := s.CreateParty(ctx, NewParty{ID: "pty_rotation", Name: "Party", Slug: "rotation", HostUserID: host.ID, CreatedAt: now})
-	if err := s.UpdatePartyOpenAI(ctx, party.ID, "proj_rotation", "svc_rotation", "key_old", "cipher_old", "ready"); err != nil {
+	if err := s.UpdatePartyOpenAI(ctx, party.ID, "proj_rotation", "svc_rotation", "key_old", "cipher_old", "ready", 1000); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.UpdatePartyServices(ctx, party.ID, host.ID, ServiceSettingsInput{TimeEnabled: true, WeatherEnabled: true, WeatherQuery: "Portland", WeatherLabel: "Portland", AIEnabled: true, UpdatedAt: now}); err != nil {
@@ -402,6 +402,70 @@ func TestPartyOpenAIKeyRotationIsHostScopedAndCompareAndSwap(t *testing.T) {
 	}
 	if err := s.SetPartyOpenAIKeyRotationStatus(ctx, party.ID, host.ID, "key_fresh", "unknown"); err == nil {
 		t.Fatal("accepted an invalid rotation status")
+	}
+}
+
+func TestPartyOpenAISpendLimitUpdateIsHostScopedRetryableAndPausesRoutes(t *testing.T) {
+	ctx := t.Context()
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Date(2026, 8, 22, 19, 0, 0, 0, time.UTC)
+	host, _ := s.UpsertGoogleUser(ctx, GoogleProfile{Subject: "spend-host", Email: "host@example.test", Name: "Host"}, now, "usr_spend_host")
+	other, _ := s.UpsertGoogleUser(ctx, GoogleProfile{Subject: "spend-other", Email: "other@example.test", Name: "Other"}, now, "usr_spend_other")
+	party, _ := s.CreateParty(ctx, NewParty{ID: "pty_spend", Name: "Party", Slug: "spend", HostUserID: host.ID, CreatedAt: now})
+	if err := s.UpdatePartyOpenAI(ctx, party.ID, "proj_spend", "svc_spend", "key_spend", "cipher_spend", "ready", 1000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpdatePartyServices(ctx, party.ID, host.ID, ServiceSettingsInput{TimeEnabled: true, WeatherEnabled: true, WeatherQuery: "Portland", WeatherLabel: "Portland", AIEnabled: true, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.StartPartyOpenAISpendLimitUpdate(ctx, party.ID, other.ID, "proj_spend", 725); !errors.Is(err, ErrOpenAISpendLimit) {
+		t.Fatalf("non-host spend update error = %v", err)
+	}
+	if err := s.StartPartyOpenAISpendLimitUpdate(ctx, party.ID, host.ID, "wrong_project", 725); !errors.Is(err, ErrOpenAISpendLimit) {
+		t.Fatalf("wrong-project spend update error = %v", err)
+	}
+	if err := s.StartPartyOpenAISpendLimitUpdate(ctx, party.ID, host.ID, "proj_spend", 725); err != nil {
+		t.Fatal(err)
+	}
+	updating, err := s.PartyForHost(ctx, party.ID, host.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updating.OpenAIStatus != "spend-updating" || updating.OpenAISpendLimitCents != 1000 || updating.OpenAISpendPendingCents != 725 || updating.OpenAISpendLimitStatus != "updating" {
+		t.Fatalf("unexpected pending spend state: %#v", updating)
+	}
+	if routing, err := s.RoutingServices(ctx); err != nil || len(routing) != 1 || routing[0].AIEnabled || routing[0].WeatherEnabled {
+		t.Fatalf("AI routes were not paused during spend update: %#v, %v", routing, err)
+	}
+	if err := s.StartPartyOpenAISpendLimitUpdate(ctx, party.ID, host.ID, "proj_spend", 500); !errors.Is(err, ErrOpenAISpendLimit) {
+		t.Fatalf("concurrent amount error = %v", err)
+	}
+	if err := s.SetPartyOpenAISpendLimitError(ctx, party.ID, host.ID, "proj_spend", 725); err != nil {
+		t.Fatal(err)
+	}
+	failed, err := s.PartyForHost(ctx, party.ID, host.ID)
+	if err != nil || failed.OpenAIStatus != "spend-update-error" {
+		t.Fatalf("legacy-safe error state was not recorded: %#v error=%v", failed, err)
+	}
+	if err := s.FinishPartyOpenAISpendLimitUpdate(ctx, party.ID, host.ID, "proj_spend", 500); !errors.Is(err, ErrOpenAISpendLimit) {
+		t.Fatalf("wrong pending amount finish error = %v", err)
+	}
+	if err := s.FinishPartyOpenAISpendLimitUpdate(ctx, party.ID, host.ID, "proj_spend", 725); err != nil {
+		t.Fatal(err)
+	}
+	ready, err := s.PartyForHost(ctx, party.ID, host.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ready.OpenAIStatus != "ready" || ready.OpenAISpendLimitCents != 725 || ready.OpenAISpendPendingCents != 0 || ready.OpenAISpendLimitStatus != "ready" {
+		t.Fatalf("unexpected confirmed spend state: %#v", ready)
+	}
+	if routing, err := s.RoutingServices(ctx); err != nil || len(routing) != 1 || !routing[0].AIEnabled || !routing[0].WeatherEnabled {
+		t.Fatalf("AI routes did not resume after spend update: %#v, %v", routing, err)
 	}
 }
 
@@ -536,5 +600,22 @@ func TestOpenAddsCurrentColumnsToLegacyDatabase(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("openai_api_key_id column count = %d", count)
+	}
+	for _, column := range []string{"openai_spend_limit_cents", "openai_spend_pending_cents", "openai_spend_limit_status"} {
+		if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('parties') WHERE name = ?`, column).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("%s column count = %d", column, count)
+		}
+	}
+	var spendLimit int
+	var pending sql.NullInt64
+	var spendStatus string
+	if err := store.db.QueryRow(`SELECT openai_spend_limit_cents, openai_spend_pending_cents, openai_spend_limit_status FROM parties WHERE id = 'pty_legacy'`).Scan(&spendLimit, &pending, &spendStatus); err != nil {
+		t.Fatal(err)
+	}
+	if spendLimit != 0 || pending.Valid || spendStatus != "unknown" {
+		t.Fatalf("legacy spend state = limit %d pending %#v status %q", spendLimit, pending, spendStatus)
 	}
 }

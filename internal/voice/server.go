@@ -219,7 +219,7 @@ func (s *Server) weatherAudio(ctx context.Context, partyID string) (string, erro
 	if err != nil {
 		return "", err
 	}
-	if !services.WeatherEnabled || services.WeatherLabel == "" || party.OpenAIStatus != "ready" || party.OpenAIKeyCiphertext == "" {
+	if !services.WeatherEnabled || services.WeatherLabel == "" || party.OpenAIStatus != "ready" || party.OpenAIUsagePausedForSpendLimit() || party.OpenAIKeyCiphertext == "" {
 		return "", errors.New("party weather line is unavailable")
 	}
 	filename := "weather-" + partyID + ".wav"

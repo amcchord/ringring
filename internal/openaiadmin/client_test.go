@@ -25,7 +25,12 @@ func TestProvision(t *testing.T) {
 			}
 			_, _ = w.Write([]byte(`{"id":"proj_test"}`))
 		case "/organization/projects/proj_test/spend_limit":
-			_, _ = w.Write([]byte(`{"object":"project.spend_limit"}`))
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body["threshold_amount"] != float64(1000) || body["currency"] != "USD" || body["interval"] != "month" {
+				t.Errorf("unexpected spend limit request: %#v", body)
+			}
+			_, _ = w.Write([]byte(`{"object":"project.spend_limit","threshold_amount":1000,"currency":"USD","interval":"month","enforcement":{"status":"enforcing"}}`))
 		case "/organization/projects/proj_test/service_accounts":
 			_, _ = w.Write([]byte(`{"id":"svc_test","api_key":{"id":"key_initial","value":"sk-party-test"}}`))
 		default:
@@ -40,7 +45,7 @@ func TestProvision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := ProvisionedProject{"proj_test", "svc_test", "key_initial", "sk-party-test"}
+	want := ProvisionedProject{ProjectID: "proj_test", ServiceAccountID: "svc_test", APIKeyID: "key_initial", APIKey: "sk-party-test", SpendLimitCents: 1000}
 	if got != want {
 		t.Fatalf("got %#v, want %#v", got, want)
 	}
@@ -51,6 +56,45 @@ func TestProvision(t *testing.T) {
 	}
 	if !reflect.DeepEqual(paths, wantPaths) {
 		t.Fatalf("paths = %#v", paths)
+	}
+}
+
+func TestUpdateProjectSpendLimitRequiresExactActiveConfirmation(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+		ok       bool
+	}{
+		{"enforcing", `{"object":"project.spend_limit","threshold_amount":725,"currency":"USD","interval":"month","enforcement":{"status":"enforcing"}}`, true},
+		{"inactive", `{"object":"project.spend_limit","threshold_amount":725,"currency":"USD","interval":"month","enforcement":{"status":"inactive"}}`, false},
+		{"wrong amount", `{"object":"project.spend_limit","threshold_amount":726,"currency":"USD","interval":"month","enforcement":{"status":"enforcing"}}`, false},
+		{"wrong currency", `{"object":"project.spend_limit","threshold_amount":725,"currency":"EUR","interval":"month","enforcement":{"status":"enforcing"}}`, false},
+		{"wrong interval", `{"object":"project.spend_limit","threshold_amount":725,"currency":"USD","interval":"day","enforcement":{"status":"enforcing"}}`, false},
+		{"wrong object", `{"object":"other","threshold_amount":725,"currency":"USD","interval":"month","enforcement":{"status":"enforcing"}}`, false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.URL.EscapedPath() != "/organization/projects/proj%2Fsafe/spend_limit" {
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.EscapedPath())
+				}
+				_, _ = w.Write([]byte(test.response))
+			}))
+			defer server.Close()
+			client := New("sk-admin-test", 1000, server.Client())
+			client.baseURL = server.URL
+			limit, err := client.UpdateProjectSpendLimit(t.Context(), "proj/safe", 725)
+			if test.ok && (err != nil || limit.ThresholdAmount != 725 || limit.EnforcementStatus != "enforcing") {
+				t.Fatalf("valid response rejected: limit=%#v error=%v", limit, err)
+			}
+			if !test.ok && err == nil {
+				t.Fatalf("unsafe response accepted: %#v", limit)
+			}
+		})
+	}
+	client := New("sk-admin-test", 1000, http.DefaultClient)
+	if _, err := client.UpdateProjectSpendLimit(t.Context(), "project", 0); err == nil {
+		t.Fatal("accepted a zero spend limit")
 	}
 }
 

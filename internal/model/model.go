@@ -20,16 +20,24 @@ type LocalCredential struct {
 }
 
 type Party struct {
-	ID                     string
-	Name                   string
-	Slug                   string
-	HostUserID             string
-	OpenAIProjectID        string
-	OpenAIServiceAccountID string
-	OpenAIAPIKeyID         string
-	OpenAIKeyCiphertext    string
-	OpenAIStatus           string
-	CreatedAt              time.Time
+	ID                      string
+	Name                    string
+	Slug                    string
+	HostUserID              string
+	OpenAIProjectID         string
+	OpenAIServiceAccountID  string
+	OpenAIAPIKeyID          string
+	OpenAIKeyCiphertext     string
+	OpenAIStatus            string
+	OpenAISpendLimitCents   int
+	OpenAISpendPendingCents int
+	OpenAISpendLimitStatus  string
+	CreatedAt               time.Time
+}
+
+func (p Party) OpenAIUsagePausedForSpendLimit() bool {
+	return p.OpenAISpendLimitStatus == "updating" || p.OpenAISpendLimitStatus == "update-error" ||
+		p.OpenAIStatus == "spend-updating" || p.OpenAIStatus == "spend-update-error"
 }
 
 type PartyServices struct {
