@@ -387,7 +387,12 @@ func TestNATSmokeWaitsForBothDisposableHouseholdPaths(t *testing.T) {
 		}
 	}
 	linphone := readRepositoryFile(t, "scripts/linphone-smoke.sh")
-	if !strings.Contains(linphone, `chmod 0555 "$work_directory/state"`) {
-		t.Error("scripts/linphone-smoke.sh does not expose its read-only bind root to the dropped Asterisk UID")
+	for _, marker := range []string{
+		`chmod 0555 "$work_directory/state" "$work_directory/provision" "$work_directory/certs"`,
+		`chmod 0400 "$work_directory/certs/ca.key" "$work_directory/certs/private-key.pem"`,
+	} {
+		if !strings.Contains(linphone, marker) {
+			t.Errorf("scripts/linphone-smoke.sh is missing dropped-UID bind boundary %q", marker)
+		}
 	}
 }
