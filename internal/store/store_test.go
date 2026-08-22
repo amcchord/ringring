@@ -223,6 +223,110 @@ func TestHostCanRevokeAndReconnectDevice(t *testing.T) {
 	}
 }
 
+func TestDeviceReadinessIsHostScopedResettableAndClearedByRotation(t *testing.T) {
+	ctx := t.Context()
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Date(2026, 8, 22, 20, 0, 0, 0, time.UTC)
+	host, _ := s.UpsertGoogleUser(ctx, GoogleProfile{Subject: "readiness-host", Email: "host@example.test", Name: "Host"}, now, "usr_readiness_host")
+	other, _ := s.UpsertGoogleUser(ctx, GoogleProfile{Subject: "readiness-other", Email: "other@example.test", Name: "Other"}, now, "usr_readiness_other")
+	party, _ := s.CreateParty(ctx, NewParty{ID: "pty_readiness", Name: "Party", Slug: "readiness", HostUserID: host.ID, CreatedAt: now})
+	if err := s.CreateInvitation(ctx, NewInvitation{
+		ID: "inv_readiness", PartyID: party.ID, CreatedByUserID: host.ID,
+		TokenHash: secure.Hash("readiness-invite"), ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, member, device, err := s.ClaimInvitation(ctx, NewClaim{
+		TokenHash: secure.Hash("readiness-invite"), MemberID: "mem_readiness", DisplayName: "Kitchen", Extension: "101",
+		DeviceID: "dev_readiness", DeviceLabel: "ATA", SIPUsername: "rrd_readiness", SIPSecretCiphertext: "cipher",
+		Provisioning: testProvisioning("readiness-provision", now), Now: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateDeviceReadiness(ctx, party.ID, other.ID, device.ID, DeviceReadinessInput{EchoTested: true, UpdatedAt: now}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("non-host readiness error = %v", err)
+	}
+
+	firstCheck := now.Add(time.Minute)
+	if err := s.UpdateDeviceReadiness(ctx, party.ID, host.ID, device.ID, DeviceReadinessInput{
+		EchoTested: true, OutgoingCallTested: true, UpdatedAt: firstCheck,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	members, err := s.ListMembers(ctx, party.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readiness := members[0].Devices[0].Readiness
+	if readiness.CompletedCount() != 2 || readiness.Complete() || readiness.EchoTestedAt == nil || readiness.OutgoingCallTestedAt == nil || readiness.IncomingCallTestedAt != nil {
+		t.Fatalf("unexpected first readiness state: %#v", readiness)
+	}
+
+	secondCheck := now.Add(2 * time.Minute)
+	if err := s.UpdateDeviceReadiness(ctx, party.ID, host.ID, device.ID, DeviceReadinessInput{
+		EchoTested: true, IncomingCallTested: true, UpdatedAt: secondCheck,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	members, err = s.ListMembers(ctx, party.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readiness = members[0].Devices[0].Readiness
+	if readiness.CompletedCount() != 2 || readiness.OutgoingCallTestedAt != nil || readiness.IncomingCallTestedAt == nil || !readiness.EchoTestedAt.Equal(firstCheck) || !readiness.IncomingCallTestedAt.Equal(secondCheck) {
+		t.Fatalf("readiness did not preserve and clear individual checks: %#v", readiness)
+	}
+
+	if err := s.RevokeDevice(ctx, party.ID, host.ID, device.ID, now.Add(3*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateDeviceReadiness(ctx, party.ID, host.ID, device.ID, DeviceReadinessInput{EchoTested: true, UpdatedAt: now.Add(4 * time.Minute)}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoked-device readiness error = %v", err)
+	}
+	if _, err := s.RotateDevice(ctx, party.ID, host.ID, device.ID, "rrd_readiness_fresh", "fresh-cipher", testProvisioning("fresh-readiness-provision", now.Add(5*time.Minute))); err != nil {
+		t.Fatal(err)
+	}
+	members, err = s.ListMembers(ctx, party.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := members[0].Devices[0].Readiness.CompletedCount(); got != 0 {
+		t.Fatalf("credential rotation retained %d readiness checks", got)
+	}
+	if err := s.UpdateDeviceReadiness(ctx, party.ID, host.ID, device.ID, DeviceReadinessInput{EchoTested: true, UpdatedAt: now.Add(6 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateDeviceReadiness(ctx, party.ID, host.ID, device.ID, DeviceReadinessInput{UpdatedAt: now.Add(7 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	var readinessRows int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM device_readiness`).Scan(&readinessRows); err != nil {
+		t.Fatal(err)
+	}
+	if readinessRows != 0 {
+		t.Fatalf("clearing every check left %d empty readiness rows", readinessRows)
+	}
+	if err := s.UpdateDeviceReadiness(ctx, party.ID, host.ID, device.ID, DeviceReadinessInput{
+		EchoTested: true, OutgoingCallTested: true, IncomingCallTested: true, UpdatedAt: now.Add(8 * time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteMember(ctx, party.ID, host.ID, member.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM device_readiness`).Scan(&readinessRows); err != nil {
+		t.Fatal(err)
+	}
+	if readinessRows != 0 {
+		t.Fatalf("member deletion left %d readiness rows", readinessRows)
+	}
+}
+
 func TestProvisioningTokenIsHashedOneTimeExpiringAndRevocable(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(":memory:")
@@ -608,6 +712,12 @@ func TestOpenAddsCurrentColumnsToLegacyDatabase(t *testing.T) {
 		if count != 1 {
 			t.Fatalf("%s column count = %d", column, count)
 		}
+	}
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'device_readiness'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("device_readiness table count = %d", count)
 	}
 	var spendLimit int
 	var pending sql.NullInt64

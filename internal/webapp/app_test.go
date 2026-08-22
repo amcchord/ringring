@@ -476,10 +476,26 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	onlineRendered := strings.Contains(hostPartyBody, "presence-online\">online")
 	memberLabelRendered := strings.Contains(hostPartyBody, `aria-label="At least one phone is online"`)
 	unavailableRendered := strings.Contains(hostPartyBody, "Live phone status is temporarily unavailable")
-	if presenceCounter.calls != 1 || !onlineRendered || !memberLabelRendered || unavailableRendered {
+	readinessRendered := strings.Contains(hostPartyBody, "Real phone check · 0 of 3") && strings.Contains(hostPartyBody, "different internet connection") && strings.Contains(hostPartyBody, "does not save who called, network details, call audio, or a call log")
+	if presenceCounter.calls != 1 || !onlineRendered || !memberLabelRendered || unavailableRendered || !readinessRendered {
 		t.Fatalf("party live presence calls=%d online=%t member_label=%t unavailable=%t", presenceCounter.calls, onlineRendered, memberLabelRendered, unavailableRendered)
 	}
 	deviceID := firstMatch(t, hostPartyBody, `/devices/([^/]+)/rotate`)
+	readinessPath := server.URL + "/parties/" + partyID + "/devices/" + deviceID + "/readiness"
+	outsiderReadiness := postForm(t, outsiderClient, readinessPath, url.Values{
+		"csrf": {outsiderCSRF}, "echo_tested": {"1"}, "outgoing_call_tested": {"1"}, "incoming_call_tested": {"1"},
+	})
+	if outsiderReadiness.StatusCode != http.StatusNotFound {
+		t.Fatalf("another host updated phone readiness: status=%d", outsiderReadiness.StatusCode)
+	}
+	_ = readBody(t, outsiderReadiness)
+	checkedPhone := postForm(t, client, readinessPath, url.Values{
+		"csrf": {csrf}, "echo_tested": {"1"}, "outgoing_call_tested": {"1"}, "incoming_call_tested": {"1"},
+	})
+	checkedPhoneBody := readBody(t, checkedPhone)
+	if checkedPhone.StatusCode != http.StatusOK || !strings.Contains(checkedPhoneBody, "host-confirmed real-phone checks were saved") || !strings.Contains(checkedPhoneBody, "Real phone check · 3 of 3") || !strings.Contains(checkedPhoneBody, "All three checks are host-confirmed") {
+		t.Fatalf("phone readiness response was not successful: status=%d", checkedPhone.StatusCode)
+	}
 	rotated := postForm(t, client, server.URL+"/parties/"+partyID+"/devices/"+deviceID+"/rotate", url.Values{"csrf": {csrf}})
 	rotatedBody := readBody(t, rotated)
 	if rotated.StatusCode != http.StatusOK || !strings.Contains(rotatedBody, "Fresh phone settings") || !strings.Contains(rotatedBody, "old username and password no longer work") {
@@ -497,6 +513,11 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 		t.Fatalf("setup reveal could be read twice: status=%d", again.StatusCode)
 	} else {
 		_ = readBody(t, again)
+	}
+	app.presence = fakeContactPresence{statuses: map[string]telephony.ContactState{freshUsername: telephony.ContactReachable}}
+	hostParty = get(t, client, server.URL+"/parties/"+partyID)
+	if !strings.Contains(readBody(t, hostParty), "Real phone check · 0 of 3") {
+		t.Fatal("credential rotation did not clear host-confirmed phone checks")
 	}
 
 	app.presence = fakeContactPresence{statuses: map[string]telephony.ContactState{freshUsername: telephony.ContactUnreachable}}

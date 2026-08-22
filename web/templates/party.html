@@ -146,14 +146,38 @@
     {{if .Members}}
       {{$root := .}}{{$party := .Party}}{{$csrf := .CSRF}}
       {{range .Members}}
+      {{$member := .}}
       <article class="member-row">
         <span class="extension">{{.Extension}}</span>
         <span class="member-details">
           <strong>{{.DisplayName}}</strong>
           {{range .Devices}}
           {{$phone := index $root.DevicePresence .ID}}
-          <span class="device-line">
+          <span class="device-line" id="phone-checks-{{.ID}}">
             <span><small>{{.Label}} · <span class="device-presence {{$phone.CSSClass}}">{{$phone.Label}}</span></small></span>
+            {{if not .RevokedAt}}
+            <details class="device-readiness">
+              <summary>Real phone check · {{.Readiness.CompletedCount}} of 3</summary>
+              <form class="device-readiness-card" method="post" action="/parties/{{$party.ID}}/devices/{{.ID}}/readiness">
+                <input type="hidden" name="csrf" value="{{$csrf}}">
+                <p><strong>{{if .Readiness.Complete}}All three checks are host-confirmed.{{else}}Try these after the phone says it is online.{{end}}</strong> Registration above is automatic; these checkmarks are saved only when you confirm them.</p>
+                <label class="readiness-check">
+                  <input type="checkbox" name="echo_tested" value="1" {{if .Readiness.EchoTestedAt}}checked{{end}}>
+                  <span>I dialed <strong>*10</strong> and heard my voice come back.</span>
+                </label>
+                <label class="readiness-check">
+                  <input type="checkbox" name="outgoing_call_tested" value="1" {{if .Readiness.OutgoingCallTestedAt}}checked{{end}}>
+                  <span>This phone called another party phone on a different internet connection; it connected and both people heard each other.</span>
+                </label>
+                <label class="readiness-check">
+                  <input type="checkbox" name="incoming_call_tested" value="1" {{if .Readiness.IncomingCallTestedAt}}checked{{end}}>
+                  <span>That remote phone called extension <strong>{{$member.Extension}}</strong>; this phone rang, connected, and both people heard each other.</span>
+                </label>
+                <p class="readiness-privacy">RingRing saves only when each item was confirmed. It does not save who called, network details, call audio, or a call log.</p>
+                <button class="button button-primary" type="submit">Save phone checks</button>
+              </form>
+            </details>
+            {{end}}
             <details class="device-actions">
               <summary>{{if .RevokedAt}}Reconnect{{else}}Manage{{end}}</summary>
               <div class="device-action-card">

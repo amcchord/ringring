@@ -20,6 +20,8 @@ The Linphone QR is rendered inside RingRing and contains a one-time HTTPS URL ra
 
 The `*10` phone test is an in-memory Asterisk media loop inside the caller's party context. It sends the caller's RTP straight back to that same authenticated channel and does not record, persist, transcribe, or send audio to another service.
 
+The authenticated host may save three real-phone setup confirmations: successful `*10` echo, an outgoing party call to a phone on a different internet connection, and an incoming call from that remote phone. These are explicitly host-confirmed observations, not automatic call records. RingRing stores only one nullable timestamp per completed check plus an update timestamp; it stores no peer identity, dialed number, contact address, network detail, user-agent, call time/duration, audio, or transcript. Unchecking an item removes that timestamp, and clearing all three removes the row. SIP credential rotation clears all three because the connection under test has changed, and device deletion cascades through the record.
+
 The `*15` extension chooser trusts only Asterisk's authenticated PJSIP endpoint identity, not caller ID or a user-entered identity. Its database update requires an active device mapped to the supplied party and accepts only 2–5 ASCII digits; uniqueness is enforced inside that party. It changes only the member extension, sends no data outside the private app/PBX network, and records no prompt audio or DTMF. Invalid, occupied, revoked, unknown, and cross-party attempts receive generic phone prompts.
 
 ## Deletion lifecycle
@@ -41,6 +43,7 @@ Telephony configuration is derived from SQLite. If an Asterisk regeneration or p
 - Each party's OpenAI key identifier is stored alongside its encrypted value so a host can replace it. During replacement, AI-powered routes pause until RingRing confirms the fresh key exists and every older active key owned by that party's dedicated service account is deleted. Partial failures remain retryable and never reveal a key to the browser.
 - Invitation tokens are random, expire, are single-use, and are stored as hashes.
 - Linphone provisioning tokens have 32 random bytes, are stored only as hashes, expire after 30 minutes, and are consumed once. Rotation replaces them and revocation or device deletion removes them.
+- Real-phone readiness records contain only host-confirmed check timestamps. They are host-only, cannot be updated for a revoked phone, reset on credential rotation, and cascade with device deletion.
 - Session cookies are secure, HTTP-only, same-site, rotated at authentication, and backed by server-side state.
 - Host passwords use salted Argon2id hashes at the [OWASP password-storage minimum](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html). Passwords and the family access code are never logged.
 - Random offline recovery codes follow [OWASP's offline-recovery guidance](https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html): they are stored only as domain-separated hashes, revealed once, and rotated as a set after use. A reset invalidates all sessions.

@@ -31,6 +31,8 @@ func TestSharedAccessibilityContract(t *testing.T) {
 		`.site-header nav > a { min-height: 44px;`,
 		`.text-button { min-height: 44px;`,
 		`.device-actions summary { width: fit-content; min-height: 44px;`,
+		`.device-readiness summary { width: fit-content; min-height: 44px;`,
+		`.readiness-check { min-height: 44px;`,
 		`.kicker.light { color: var(--white); }`,
 	} {
 		if !strings.Contains(css, want) {

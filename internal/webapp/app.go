@@ -241,6 +241,7 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 	mux.HandleFunc("POST /parties/{partyID}/openai-spend-limit", app.requireUser(app.updatePartyOpenAISpendLimit))
 	mux.HandleFunc("POST /parties/{partyID}/openai-key/rotate", app.requireUser(app.rotatePartyOpenAIKey))
 	mux.HandleFunc("GET /parties/{partyID}/setup", app.requireUser(app.rotatedSetup))
+	mux.HandleFunc("POST /parties/{partyID}/devices/{deviceID}/readiness", app.requireUser(app.updateDeviceReadiness))
 	mux.HandleFunc("POST /parties/{partyID}/devices/{deviceID}/rotate", app.requireUser(app.rotateDevice))
 	mux.HandleFunc("POST /parties/{partyID}/devices/{deviceID}/revoke", app.requireUser(app.revokeDevice))
 	mux.HandleFunc("GET /parties/{partyID}/members/{memberID}/delete", app.requireUser(app.deleteMemberForm))
@@ -865,6 +866,9 @@ func (a *App) party(w http.ResponseWriter, r *http.Request, session authSession)
 	if r.URL.Query().Get("ai-spend") == "updated" {
 		data.Notice = "OpenAI confirmed this party’s hard monthly spend limit is enforcing."
 	}
+	if r.URL.Query().Get("phone-checks") == "saved" {
+		data.Notice = "The host-confirmed real-phone checks were saved."
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	a.render(w, "party", data)
 }
@@ -1289,6 +1293,31 @@ func (a *App) createInvitation(w http.ResponseWriter, r *http.Request, session a
 	}
 	a.setInviteFlash(w, partyID, token)
 	http.Redirect(w, r, "/parties/"+url.PathEscape(partyID), http.StatusSeeOther)
+}
+
+func (a *App) updateDeviceReadiness(w http.ResponseWriter, r *http.Request, session authSession) {
+	if !a.validCSRF(r, session) {
+		http.Error(w, "invalid request", http.StatusForbidden)
+		return
+	}
+	partyID := r.PathValue("partyID")
+	deviceID := r.PathValue("deviceID")
+	err := a.store.UpdateDeviceReadiness(r.Context(), partyID, session.User.ID, deviceID, store.DeviceReadinessInput{
+		EchoTested:         r.FormValue("echo_tested") == "1",
+		OutgoingCallTested: r.FormValue("outgoing_call_tested") == "1",
+		IncomingCallTested: r.FormValue("incoming_call_tested") == "1",
+		UpdatedAt:          a.now(),
+	})
+	if errors.Is(err, store.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	backURL := "/parties/" + url.PathEscape(partyID) + "?phone-checks=saved#phone-checks-" + url.PathEscape(deviceID)
+	http.Redirect(w, r, backURL, http.StatusSeeOther)
 }
 
 func (a *App) rotateDevice(w http.ResponseWriter, r *http.Request, session authSession) {

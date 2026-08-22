@@ -115,6 +115,13 @@ type ServiceSettingsInput struct {
 	UpdatedAt        time.Time
 }
 
+type DeviceReadinessInput struct {
+	EchoTested         bool
+	OutgoingCallTested bool
+	IncomingCallTested bool
+	UpdatedAt          time.Time
+}
+
 func Open(path string) (*Store, error) {
 	if path != ":memory:" && !strings.HasPrefix(path, "file:") {
 		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
@@ -799,9 +806,11 @@ func (s *Store) ClaimInvitation(ctx context.Context, input NewClaim) (model.Part
 func (s *Store) ListMembers(ctx context.Context, partyID string) ([]model.Member, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT m.id, m.party_id, m.display_name, m.extension, m.created_at,
-			d.id, d.label, d.sip_username, d.created_at, d.revoked_at
+			d.id, d.label, d.sip_username, d.created_at, d.revoked_at,
+			r.echo_tested_at, r.outgoing_call_tested_at, r.incoming_call_tested_at
 		FROM members m
 		LEFT JOIN devices d ON d.member_id = m.id
+		LEFT JOIN device_readiness r ON r.device_id = d.id
 		WHERE m.party_id = ?
 		ORDER BY CAST(m.extension AS INTEGER), m.extension, d.created_at`, partyID)
 	if err != nil {
@@ -815,9 +824,10 @@ func (s *Store) ListMembers(ctx context.Context, partyID string) ([]model.Member
 		var member model.Member
 		var memberCreated int64
 		var deviceID, deviceLabel, sipUsername sql.NullString
-		var deviceCreated, revoked sql.NullInt64
+		var deviceCreated, revoked, echoTested, outgoingTested, incomingTested sql.NullInt64
 		if err := rows.Scan(&member.ID, &member.PartyID, &member.DisplayName, &member.Extension, &memberCreated,
-			&deviceID, &deviceLabel, &sipUsername, &deviceCreated, &revoked); err != nil {
+			&deviceID, &deviceLabel, &sipUsername, &deviceCreated, &revoked,
+			&echoTested, &outgoingTested, &incomingTested); err != nil {
 			return nil, fmt.Errorf("scan member: %w", err)
 		}
 		index, ok := byID[member.ID]
@@ -833,10 +843,59 @@ func (s *Store) ListMembers(ctx context.Context, partyID string) ([]model.Member
 				value := fromUnix(revoked.Int64)
 				device.RevokedAt = &value
 			}
+			device.Readiness = readinessFromNulls(echoTested, outgoingTested, incomingTested)
 			members[index].Devices = append(members[index].Devices, device)
 		}
 	}
 	return members, rows.Err()
+}
+
+// UpdateDeviceReadiness records only the host's yes/no setup confirmations.
+// It deliberately stores no call peer, audio, address, contact, or user-agent
+// data. An unchecked item is cleared; an already-checked item's original
+// confirmation time is retained.
+func (s *Store) UpdateDeviceReadiness(ctx context.Context, partyID, hostUserID, deviceID string, input DeviceReadinessInput) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin device readiness update: %w", err)
+	}
+	defer tx.Rollback()
+
+	_, _, device, err := deviceForHostTx(ctx, tx, partyID, hostUserID, deviceID)
+	if err != nil {
+		return err
+	}
+	if device.RevokedAt != nil {
+		return ErrNotFound
+	}
+	if !input.EchoTested && !input.OutgoingCallTested && !input.IncomingCallTested {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM device_readiness WHERE device_id = ?`, deviceID); err != nil {
+			return fmt.Errorf("clear device readiness: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit cleared device readiness: %w", err)
+		}
+		return nil
+	}
+	now := unix(input.UpdatedAt)
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO device_readiness (
+			device_id, echo_tested_at, outgoing_call_tested_at, incoming_call_tested_at, updated_at
+		) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(device_id) DO UPDATE SET
+			echo_tested_at = CASE WHEN excluded.echo_tested_at IS NULL THEN NULL ELSE COALESCE(device_readiness.echo_tested_at, excluded.echo_tested_at) END,
+			outgoing_call_tested_at = CASE WHEN excluded.outgoing_call_tested_at IS NULL THEN NULL ELSE COALESCE(device_readiness.outgoing_call_tested_at, excluded.outgoing_call_tested_at) END,
+			incoming_call_tested_at = CASE WHEN excluded.incoming_call_tested_at IS NULL THEN NULL ELSE COALESCE(device_readiness.incoming_call_tested_at, excluded.incoming_call_tested_at) END,
+			updated_at = excluded.updated_at`,
+		deviceID, nullableUnix(input.EchoTested, now), nullableUnix(input.OutgoingCallTested, now),
+		nullableUnix(input.IncomingCallTested, now), now)
+	if err != nil {
+		return fmt.Errorf("update device readiness: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit device readiness update: %w", err)
+	}
+	return nil
 }
 
 // ChangeMemberExtensionByDevice lets an authenticated, active SIP endpoint
@@ -998,6 +1057,9 @@ func (s *Store) RotateDevice(ctx context.Context, partyID, hostUserID, deviceID,
 	}
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return RotatedDevice{}, ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM device_readiness WHERE device_id = ?`, deviceID); err != nil {
+		return RotatedDevice{}, fmt.Errorf("clear device readiness after credential rotation: %w", err)
 	}
 	if err := replaceProvisioningTokenTx(ctx, tx, deviceID, provisioning); err != nil {
 		return RotatedDevice{}, err
@@ -1250,6 +1312,30 @@ func boolInt(value bool) int {
 	return 0
 }
 
+func nullableUnix(enabled bool, value int64) any {
+	if !enabled {
+		return nil
+	}
+	return value
+}
+
+func readinessFromNulls(echo, outgoing, incoming sql.NullInt64) model.DeviceReadiness {
+	readiness := model.DeviceReadiness{}
+	if echo.Valid {
+		value := fromUnix(echo.Int64)
+		readiness.EchoTestedAt = &value
+	}
+	if outgoing.Valid {
+		value := fromUnix(outgoing.Int64)
+		readiness.OutgoingCallTestedAt = &value
+	}
+	if incoming.Valid {
+		value := fromUnix(incoming.Int64)
+		readiness.IncomingCallTestedAt = &value
+	}
+	return readiness
+}
+
 const schema = `
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
@@ -1345,6 +1431,14 @@ CREATE TABLE IF NOT EXISTS devices (
     revoked_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS devices_member ON devices(member_id);
+
+CREATE TABLE IF NOT EXISTS device_readiness (
+    device_id TEXT PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
+    echo_tested_at INTEGER CHECK(echo_tested_at IS NULL OR echo_tested_at > 0),
+    outgoing_call_tested_at INTEGER CHECK(outgoing_call_tested_at IS NULL OR outgoing_call_tested_at > 0),
+    incoming_call_tested_at INTEGER CHECK(incoming_call_tested_at IS NULL OR incoming_call_tested_at > 0),
+    updated_at INTEGER NOT NULL CHECK(updated_at > 0)
+);
 
 CREATE TABLE IF NOT EXISTS device_provisioning_tokens (
     token_hash BLOB PRIMARY KEY,

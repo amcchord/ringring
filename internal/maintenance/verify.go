@@ -26,6 +26,7 @@ type StateReport struct {
 	Sessions      int    `json:"sessions"`
 	RecoveryCodes int    `json:"recovery_codes"`
 	Provisioning  int    `json:"provisioning_tokens"`
+	PhoneChecks   int    `json:"phone_readiness_records"`
 	PartyKeys     int    `json:"party_keys_verified"`
 	DeviceSecrets int    `json:"device_secrets_verified"`
 }
@@ -93,8 +94,10 @@ func VerifyState(ctx context.Context, databasePath string, masterKey []byte) (St
 	currentSchema, err := database.QueryContext(ctx, `
 		SELECT p.openai_api_key_id, p.openai_spend_limit_cents, p.openai_spend_pending_cents,
 			p.openai_spend_limit_status, s.ai_enabled, s.radio_station,
-			t.token_hash, t.device_id, t.expires_at, t.used_at, t.created_at
-		FROM parties p CROSS JOIN party_services s CROSS JOIN device_provisioning_tokens t LIMIT 0`)
+			t.token_hash, t.device_id, t.expires_at, t.used_at, t.created_at,
+			r.echo_tested_at, r.outgoing_call_tested_at, r.incoming_call_tested_at, r.updated_at
+		FROM parties p CROSS JOIN party_services s CROSS JOIN device_provisioning_tokens t
+		CROSS JOIN device_readiness r LIMIT 0`)
 	if err != nil {
 		return StateReport{}, errors.New("database schema is not current")
 	}
@@ -135,6 +138,7 @@ func VerifyState(ctx context.Context, databasePath string, masterKey []byte) (St
 		{"sessions", &report.Sessions},
 		{"recovery_codes", &report.RecoveryCodes},
 		{"device_provisioning_tokens", &report.Provisioning},
+		{"device_readiness", &report.PhoneChecks},
 	}
 	for _, count := range counts {
 		if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+count.table).Scan(count.value); err != nil {
