@@ -46,3 +46,5 @@ If an operator adds Prometheus or another scraper, keep the loopback boundary an
 - `ringring_ai_calls_active` above the configured concurrency limit or unchanged beyond the configured call duration plus a small shutdown margin.
 
 These alerts identify subsystem failure without identifying which family, phone, or caller was active. A host-triggered setup ring appears only as the fixed host HTTP route/status surface; RingRing adds no device, SIP username, extension, or call label. Physical call quality and background ringing still require the host-confirmed checklist and real-device testing; aggregate metrics do not prove them.
+
+Creating an additional member phone uses the fixed host device-creation route surface. Metrics and application logs do not include its party, member, device label, generated SIP username, extension, provisioning token, or fan-out size.

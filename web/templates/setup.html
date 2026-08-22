@@ -3,9 +3,15 @@
 <section class="setup-shell wrap">
   <div class="success-burst" aria-hidden="true">✓</div>
   {{if .SetupForHost}}
+  {{if .SetupForNewDevice}}
+  <span class="eyebrow">Another phone ready</span>
+  <h1>{{.Claim.Member.DisplayName}} can now ring on <em>{{.Claim.Device.Label}}.</em></h1>
+  <p>This new phone shares extension {{.Claim.Member.Extension}}. Existing phones stay connected with their own settings.</p>
+  {{else}}
   <span class="eyebrow">Fresh phone settings</span>
   <h1>{{.Claim.Member.DisplayName}} is ready to <em>reconnect.</em></h1>
   <p>Send these settings privately to the person configuring {{.Claim.Device.Label}}. The old username and password no longer work.</p>
+  {{end}}
   {{else}}
   <span class="eyebrow">Number claimed</span>
   <h1>Hello, {{.Claim.Member.DisplayName}}!<br><em>You are extension {{.Claim.Member.Extension}}.</em></h1>

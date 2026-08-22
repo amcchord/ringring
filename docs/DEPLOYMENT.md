@@ -339,3 +339,7 @@ The spend-limit control uses the additive `parties` columns described in environ
 ### Host-triggered phone ring upgrade and rollback
 
 The incoming setup ring adds no schema, stored call state, secret, public port, provider request, or generated party route. It adds a fixed internal Asterisk prompt context and the narrow AMI `originate` write privilege described above. Upgrading or rolling back recreates Asterisk from the matching source-controlled configuration; older application builds never invoke the permission. A ring already queued at rollback may finish within its 20-second absolute timeout. Use the isolated SIP smoke before promotion and do not ring a real family device as a deployment probe.
+
+### Additional member phones upgrade and rollback
+
+Adding another phone uses the existing `devices` and `device_provisioning_tokens` tables, encryption key, setup reveal, and generated PJSIP/dialplan files. It adds no schema, environment variable, public port, provider request, or background service. Existing members and phones are unchanged at startup. Newer releases may store several independent device rows for one member; older releases already list, route, rotate, revoke, and cascade-delete those rows correctly, so rollback preserves same-extension ringing. The isolated SIP smoke creates the extra device through the host web route and verifies the loaded explicit fan-out without changing a production family record.

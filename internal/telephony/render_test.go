@@ -12,6 +12,7 @@ import (
 func TestRenderIsolatesPartyDialplans(t *testing.T) {
 	config, err := Render([]DialDevice{
 		{PartyID: "pty_blue", DeviceID: "dev_a", Extension: "101", SIPUsername: "rrd_blue_a", SIPSecret: "secret-a"},
+		{PartyID: "pty_blue", DeviceID: "dev_a_tablet", Extension: "101", SIPUsername: "rrd_blue_a_tablet", SIPSecret: "secret-a-tablet"},
 		{PartyID: "pty_blue", DeviceID: "dev_b", Extension: "102", SIPUsername: "rrd_blue_b", SIPSecret: "secret-b"},
 		{PartyID: "pty_gold", DeviceID: "dev_c", Extension: "101", SIPUsername: "rrd_gold_c", SIPSecret: "secret-c"},
 	}, []model.RoutingServices{
@@ -69,6 +70,9 @@ func TestRenderIsolatesPartyDialplans(t *testing.T) {
 	}
 	if strings.Contains(blue, "pty_gold") || strings.Contains(gold, "pty_blue") {
 		t.Fatalf("service party ID leaked across contexts:\n%s", dialplan)
+	}
+	if !strings.Contains(blue, "exten => 101,1,NoOp(RingRing party call)\n same => n,Dial(PJSIP/rrd_blue_a&PJSIP/rrd_blue_a_tablet,30)") {
+		t.Fatalf("same-extension phones must ring together with explicit party endpoints:\n%s", blue)
 	}
 }
 

@@ -7,6 +7,7 @@
 - [x] Party creation and isolated extension range.
 - [x] Single-use member invite.
 - [x] Member and device provisioning with one-time SIP setup card.
+- [x] Host-added independent phones sharing one member extension and ringing together.
 - [x] Generated Asterisk PJSIP endpoints and party dialplans.
 - [x] Simulated two-household NAT registration, party-call, and bidirectional-media gate.
 - [ ] Calls between two remotely registered devices, verified with real hardware.

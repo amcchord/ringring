@@ -28,6 +28,8 @@ For a capable client, configure:
 
 Use UDP port `5060` only when the client cannot use TLS. Do not disable certificate verification to make a TLS device connect; fix its clock, trust store, server name, or firmware instead.
 
+When one person uses both an ATA and a softphone, add them as separate phones under that member in the host console. They share the visible extension and ring together, but each setup card has its own SIP username and password. Never copy one device's credential into the other.
+
 ## Adding physical evidence
 
 Record the exact vendor, model, firmware/app version, transport, certificate behavior, NAT type, registration duration, host-triggered incoming ring result, incoming and outgoing party-call result, two-way audio result, and any reboot or renewal behavior. Use **Ring this phone** first to prove that an online device accepts an inbound server call and speaks its extension without needing a second device. A physical row must still cover at least one call to another remote network. Mobile apps additionally need foreground ringing, background/push ringing, and Wi-Fi/cellular transitions before they count toward the family-hardware gate.

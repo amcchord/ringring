@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -300,6 +301,96 @@ func TestHostCanRevokeAndReconnectDevice(t *testing.T) {
 	}
 	if _, reconnected, err := s.ActiveDeviceForHost(ctx, party.ID, host.ID, device.ID); err != nil || reconnected.SIPUsername != "rrd_fresh" {
 		t.Fatalf("reconnected device was not ringable: %#v error=%v", reconnected, err)
+	}
+}
+
+func TestHostCanAddIndependentPhonesToExistingMember(t *testing.T) {
+	ctx := t.Context()
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Date(2026, 8, 22, 21, 0, 0, 0, time.UTC)
+	host, _ := s.UpsertGoogleUser(ctx, GoogleProfile{Subject: "add-device-host", Email: "host@example.test", Name: "Host"}, now, "usr_add_device_host")
+	other, _ := s.UpsertGoogleUser(ctx, GoogleProfile{Subject: "add-device-other", Email: "other@example.test", Name: "Other"}, now, "usr_add_device_other")
+	party, _ := s.CreateParty(ctx, NewParty{ID: "pty_add_device", Name: "Party", Slug: "add-device", HostUserID: host.ID, CreatedAt: now})
+	otherParty, _ := s.CreateParty(ctx, NewParty{ID: "pty_add_device_other", Name: "Other", Slug: "add-device-other", HostUserID: host.ID, CreatedAt: now})
+	if err := s.CreateInvitation(ctx, NewInvitation{
+		ID: "inv_add_device", PartyID: party.ID, CreatedByUserID: host.ID,
+		TokenHash: secure.Hash("add-device-invite"), ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, member, first, err := s.ClaimInvitation(ctx, NewClaim{
+		TokenHash: secure.Hash("add-device-invite"), MemberID: "mem_add_device", DisplayName: "Kitchen", Extension: "101",
+		DeviceID: "dev_add_device_first", DeviceLabel: "ATA", SIPUsername: "rrd_add_device_first", SIPSecretCiphertext: "cipher-first",
+		Provisioning: testProvisioning("add-device-first-provision", now), Now: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	base := NewHostedDevice{
+		PartyID: party.ID, HostUserID: host.ID, MemberID: member.ID,
+		DeviceID: "dev_add_device_second", DeviceLabel: "Tablet", SIPUsername: "rrd_add_device_second",
+		SIPSecretCiphertext: "cipher-second", Provisioning: testProvisioning("add-device-second-provision", now), Now: now,
+	}
+	wrongHost := base
+	wrongHost.HostUserID = other.ID
+	if _, err := s.AddDeviceForHost(ctx, wrongHost); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-host device creation error = %v", err)
+	}
+	wrongParty := base
+	wrongParty.PartyID = otherParty.ID
+	if _, err := s.AddDeviceForHost(ctx, wrongParty); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-party device creation error = %v", err)
+	}
+	invalidProvisioning := base
+	invalidProvisioning.Provisioning.ExpiresAt = invalidProvisioning.Provisioning.CreatedAt
+	if _, err := s.AddDeviceForHost(ctx, invalidProvisioning); err == nil {
+		t.Fatal("invalid provisioning token created a device")
+	}
+
+	created, err := s.AddDeviceForHost(ctx, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Party.ID != party.ID || created.Member.ID != member.ID || created.Member.Extension != "101" ||
+		created.Device.ID != base.DeviceID || created.Device.SIPUsername != base.SIPUsername || created.Device.SIPSecretCiphertext != "cipher-second" {
+		t.Fatalf("unexpected created phone: %#v", created)
+	}
+	routing, err := s.RoutingDevices(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routing) != 2 || routing[0].DeviceID != first.ID || routing[0].Extension != "101" || routing[1].DeviceID != base.DeviceID || routing[1].Extension != "101" {
+		t.Fatalf("same-extension phones were not independently routable: %#v", routing)
+	}
+	provisioned, err := s.ConsumeProvisioningToken(ctx, secure.Hash("add-device-second-provision"), now.Add(time.Minute))
+	if err != nil || provisioned.DeviceID != base.DeviceID || provisioned.SIPUsername != base.SIPUsername || provisioned.SIPSecretCiphertext != "cipher-second" || provisioned.Extension != "101" {
+		t.Fatalf("unexpected second-phone provisioning: %#v error=%v", provisioned, err)
+	}
+
+	for index := 3; index <= MaxDevicesPerMember; index++ {
+		input := base
+		input.DeviceID = fmt.Sprintf("dev_add_device_%d", index)
+		input.SIPUsername = fmt.Sprintf("rrd_add_device_%d", index)
+		input.SIPSecretCiphertext = fmt.Sprintf("cipher-%d", index)
+		input.Provisioning = testProvisioning(fmt.Sprintf("add-device-provision-%d", index), now)
+		if _, err := s.AddDeviceForHost(ctx, input); err != nil {
+			t.Fatalf("add device %d: %v", index, err)
+		}
+	}
+	overLimit := base
+	overLimit.DeviceID = "dev_add_device_over_limit"
+	overLimit.SIPUsername = "rrd_add_device_over_limit"
+	overLimit.Provisioning = testProvisioning("add-device-over-limit-provision", now)
+	if _, err := s.AddDeviceForHost(ctx, overLimit); !errors.Is(err, ErrDeviceLimit) {
+		t.Fatalf("device limit error = %v", err)
+	}
+	if routing, err := s.RoutingDevices(ctx); err != nil || len(routing) != MaxDevicesPerMember {
+		t.Fatalf("device limit changed routing: count=%d error=%v", len(routing), err)
 	}
 }
 

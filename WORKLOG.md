@@ -2,6 +2,33 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — One extension, several independent phones
+
+### Shipped
+
+- Added a host-only **Add another phone** flow to every member. An ATA, desk phone, and softphone can now share the member's familiar extension and ring together without sharing a SIP username or password.
+- Reused the private one-time setup sheet and Linphone QR path for each added device. The new page says that existing phones remain connected, while every device retains independent presence, incoming-ring testing, readiness checks, credential rotation, revocation, and cascading deletion.
+- Added one transactional store boundary that requires the exact host, party, and member, caps a member at eight saved devices, inserts a fresh encrypted credential, and creates its hashed expiring provisioning token. Rejected, cross-host, cross-party, invalid-token, and over-limit requests leave routing unchanged.
+- Extended the disposable SIP gate to create the extra phone through the authenticated web route, verify its generated PJSIP endpoint, and require the loaded extension to contain both explicit party endpoint names before continuing the call/media suite.
+
+### Decisions
+
+- Model multiple physical devices as separate credentials on one member, not as copies of one password. Losing or disconnecting a softphone must not force the family to reconfigure the ATA beside it.
+- Keep fan-out explicit in generated Asterisk configuration. RingRing joins only validated active endpoints already attached to that member and party; it does not use a wildcard contact lookup, global context, or dynamic destination supplied by the host.
+- Bound retained devices at eight per member. A family that reaches the cap can reconnect a saved disconnected phone, avoiding unbounded database and dialplan growth without complicating the normal one-or-two-phone path.
+
+### Verification
+
+- Focused store, web, renderer, accessibility, and executable security-contract tests cover transactional ownership, independent secrets and one-use tokens, one-time reveal, exact same-extension fan-out, rejection without mutation, individual revocation, unchanged first-phone routing, accessible labels/help, and the device cap.
+- `make check`, `make security`, and `make admin-test` pass locally, including formatting, shell/operator fixtures, vet, the complete race-enabled suite, and the reachable-vulnerability scan. The accepted module advisory remains unreachable from RingRing.
+- A disposable browser host, party, member, and added second phone exercised the complete one-time handoff. The first 390×844 pass exposed a squeezed form caused by the member grid; the corrected layout gives both input and action 258px of usable width, keeps the targets 52px and 54px tall, has no horizontal overflow, and remains clean at 1280×900. Both independently managed device labels remained on the shared member, the temporary viewport/tab/listeners were removed, and both disposable databases were moved to Trash.
+
+### Remaining
+
+- Run the exact-candidate SIP/NAT/Linphone tests, guarded production upgrade, and record runtime evidence below without adding a real production family device.
+- Complete the physical ATA, desk-phone, and mobile softphone matrix across two real networks, including simultaneous ringing and background transitions.
+- Obtain the external child-safety review and OpenAI Zero Data Retention eligibility before opening the AI conversation gate.
+
 ## 2026-08-22 — Host-triggered incoming phone setup ring
 
 ### Shipped

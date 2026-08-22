@@ -27,11 +27,14 @@ var (
 	ErrPartiesRemain    = errors.New("host still owns parties")
 	ErrProvisionUsed    = errors.New("provisioning link has already been used")
 	ErrProvisionExpired = errors.New("provisioning link has expired")
+	ErrDeviceLimit      = errors.New("member device limit reached")
 	ErrOpenAIRotation   = errors.New("OpenAI key rotation state changed")
 	ErrOpenAISpendLimit = errors.New("OpenAI spend limit state changed")
 	ErrInvalidRadio     = errors.New("radio station is not in the catalog")
 	ErrAIChildSafety    = errors.New("AI conversation child-safety gate is closed")
 )
+
+const MaxDevicesPerMember = 8
 
 type Store struct {
 	db *sql.DB
@@ -85,6 +88,18 @@ type NewClaim struct {
 	Now                 time.Time
 }
 
+type NewHostedDevice struct {
+	PartyID             string
+	HostUserID          string
+	MemberID            string
+	DeviceID            string
+	DeviceLabel         string
+	SIPUsername         string
+	SIPSecretCiphertext string
+	Provisioning        NewProvisioningToken
+	Now                 time.Time
+}
+
 type NewProvisioningToken struct {
 	TokenHash []byte
 	ExpiresAt time.Time
@@ -99,6 +114,12 @@ type ProvisioningDevice struct {
 }
 
 type RotatedDevice struct {
+	Party  model.Party
+	Member model.Member
+	Device model.Device
+}
+
+type CreatedDevice struct {
 	Party  model.Party
 	Member model.Member
 	Device model.Device
@@ -1149,6 +1170,72 @@ func (s *Store) DeleteUserWithoutParties(ctx context.Context, userID string) err
 		return fmt.Errorf("commit user deletion: %w", err)
 	}
 	return nil
+}
+
+// AddDeviceForHost gives an existing member another independently revocable
+// phone credential. The party ownership check, member lookup, bounded device
+// count, credential insert, and one-time provisioning token are one transaction.
+func (s *Store) AddDeviceForHost(ctx context.Context, input NewHostedDevice) (CreatedDevice, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return CreatedDevice{}, fmt.Errorf("begin hosted device creation: %w", err)
+	}
+	defer tx.Rollback()
+
+	party, err := scanParty(tx.QueryRowContext(ctx, `
+		SELECT id, name, slug, host_user_id, openai_project_id,
+			openai_service_account_id, openai_api_key_id, openai_key_ciphertext, openai_status,
+			openai_spend_limit_cents, openai_spend_pending_cents, openai_spend_limit_status, created_at
+		FROM parties WHERE id = ? AND host_user_id = ?`, input.PartyID, input.HostUserID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return CreatedDevice{}, ErrNotFound
+	}
+	if err != nil {
+		return CreatedDevice{}, fmt.Errorf("load hosted device party: %w", err)
+	}
+
+	var member model.Member
+	var memberCreated int64
+	err = tx.QueryRowContext(ctx, `
+		SELECT id, party_id, display_name, extension, created_at
+		FROM members WHERE id = ? AND party_id = ?`, input.MemberID, input.PartyID).Scan(
+		&member.ID, &member.PartyID, &member.DisplayName, &member.Extension, &memberCreated,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CreatedDevice{}, ErrNotFound
+	}
+	if err != nil {
+		return CreatedDevice{}, fmt.Errorf("load hosted device member: %w", err)
+	}
+	member.CreatedAt = fromUnix(memberCreated)
+
+	var deviceCount int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM devices WHERE member_id = ?`, input.MemberID).Scan(&deviceCount); err != nil {
+		return CreatedDevice{}, fmt.Errorf("count hosted member devices: %w", err)
+	}
+	if deviceCount >= MaxDevicesPerMember {
+		return CreatedDevice{}, ErrDeviceLimit
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO devices (id, member_id, label, sip_username, sip_secret_ciphertext, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)`, input.DeviceID, input.MemberID, input.DeviceLabel,
+		input.SIPUsername, input.SIPSecretCiphertext, unix(input.Now))
+	if err != nil {
+		return CreatedDevice{}, fmt.Errorf("create hosted member device: %w", err)
+	}
+	if err := replaceProvisioningTokenTx(ctx, tx, input.DeviceID, input.Provisioning); err != nil {
+		return CreatedDevice{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return CreatedDevice{}, fmt.Errorf("commit hosted device creation: %w", err)
+	}
+
+	device := model.Device{
+		ID: input.DeviceID, MemberID: input.MemberID, Label: input.DeviceLabel,
+		SIPUsername: input.SIPUsername, SIPSecretCiphertext: input.SIPSecretCiphertext, CreatedAt: input.Now.UTC(),
+	}
+	return CreatedDevice{Party: party, Member: member, Device: device}, nil
 }
 
 // RotateDevice replaces a device's registration identity and re-enables it if

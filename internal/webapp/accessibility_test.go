@@ -34,6 +34,8 @@ func TestSharedAccessibilityContract(t *testing.T) {
 		`.device-readiness summary { width: fit-content; min-height: 44px;`,
 		`.readiness-check { min-height: 44px;`,
 		`.device-ring-test .text-button:disabled { color: var(--muted);`,
+		`.add-device-card input { min-height: 48px;`,
+		`.device-line, .member-add-device, .member-remove-link { grid-column: 1 / -1; }`,
 		`.kicker.light { color: var(--white); }`,
 	} {
 		if !strings.Contains(css, want) {
@@ -100,6 +102,9 @@ func TestFormInstructionsAreVisibleAndAssociated(t *testing.T) {
 				`aria-describedby="openai-spend-help"`,
 				`aria-describedby="ring-test-help-{{.ID}}"`,
 				`id="ring-test-help-{{.ID}}"`,
+				`id="new-device-label-{{$member.ID}}"`,
+				`aria-describedby="new-device-help-{{$member.ID}}"`,
+				`id="new-device-help-{{$member.ID}}"`,
 			},
 		},
 		{

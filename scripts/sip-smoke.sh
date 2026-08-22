@@ -301,6 +301,20 @@ party_page=$(docker exec ringring-sip-smoke-app curl --fail --silent --show-erro
   --cookie /tmp/ringring-smoke-cookies http://127.0.0.1:8080/parties/pty_smoke)
 csrf=$(printf '%s\n' "$party_page" | sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' | head -n 1)
 test -n "$csrf"
+echo "Adding a separately credentialed phone to extension 102..."
+added_phone_setup=$(docker exec ringring-sip-smoke-app sh -c \
+  "curl --fail --silent --show-error --location --cookie /tmp/ringring-smoke-cookies \
+    --data-urlencode csrf=$csrf --data-urlencode 'device_label=Smoke spare phone' \
+    http://127.0.0.1:8080/parties/pty_smoke/members/mem_smoke_b/devices")
+printf '%s\n' "$added_phone_setup" | grep -q 'Another phone ready'
+printf '%s\n' "$added_phone_setup" | grep -q 'Existing phones stay connected'
+added_sip_username=$(printf '%s\n' "$added_phone_setup" | \
+  sed -n 's/.*id="setup-username"[^>]*>\([^<]*\)<.*/\1/p' | head -n 1)
+printf '%s\n' "$added_sip_username" | grep -Eq '^rrd_[A-Za-z0-9_-]+$'
+grep -Fq "[$added_sip_username-auth]" "$work_directory/state/pjsip.conf"
+shared_extension=$(docker exec ringring-sip-smoke-asterisk asterisk -rx 'dialplan show 102@rr-party-pty_smoke')
+printf '%s\n' "$shared_extension" | grep -q 'PJSIP/rr_smoke_b'
+printf '%s\n' "$shared_extension" | grep -q "PJSIP/$added_sip_username"
 ring_started=$(date +%s)
 docker exec ringring-sip-smoke-app sh -c \
   "curl --fail --silent --show-error --location --cookie /tmp/ringring-smoke-cookies \
@@ -430,4 +444,4 @@ if docker logs ringring-sip-smoke-app 2>&1 | grep -Eq 'change extension from pho
 fi
 channels=$(docker exec ringring-sip-smoke-asterisk asterisk -rx 'core show channels count')
 printf '%s\n' "$channels" | grep -q '^0 active channels'
-echo "SIP smoke test passed: verified TLS 1.2 plus UDP registration, mixed-transport extension calling, *10 echo, bidirectional RTP, and authenticated *15 DTMF extension selection."
+echo "SIP smoke test passed: verified TLS 1.2 plus UDP registration, host-added same-extension routing, mixed-transport extension calling, *10 echo, bidirectional RTP, and authenticated *15 DTMF extension selection."

@@ -171,6 +171,14 @@ input:focus { border-color: var(--purple); box-shadow: 0 0 0 4px rgba(108,76,255
 .device-action-card { margin-top: 8px; padding: 12px; display: grid; gap: 8px; background: var(--paper); border: 1.5px solid var(--line); border-radius: 12px; }
 .device-action-card form { margin: 0; }
 .device-action-card small { color: var(--muted); line-height: 1.4; }
+.member-add-device { margin-top: 10px; }
+.add-device-card { max-width: 430px; }
+.add-device-card > p { margin: 0; color: var(--muted); font-size: .78rem; line-height: 1.45; }
+.add-device-card > p strong { display: inline; }
+.add-device-card form { display: grid; gap: 8px; }
+.add-device-card label { font-size: .78rem; font-weight: 850; }
+.add-device-card input { min-height: 48px; background: var(--white); }
+.add-device-card .button { width: 100%; margin-top: 2px; }
 .text-button { min-height: 44px; padding: 0; display: inline-flex; align-items: center; color: var(--purple-dark); background: none; border: 0; cursor: pointer; font-size: .82rem; font-weight: 850; text-decoration: underline; text-align: left; }
 .danger-button { color: #b32635; }
 .button-danger { color: var(--white); background: #b32635; border-color: var(--ink); box-shadow: 4px 4px 0 var(--ink); }
@@ -294,7 +302,7 @@ input:focus { border-color: var(--purple); box-shadow: 0 0 0 4px rgba(108,76,255
   .hero-art { min-height: 350px; overflow: hidden; }.hero-art::before { height: 315px; }.phone { width: 135px; height: 135px; border-radius: 26px; }.handset { width: 116px; height: 44px; }.dial { width: 64px; height: 64px; }.call-bubble { padding: 10px 13px; }.call-bubble strong { font-size: 1.3rem; }
   .steps-grid { gap: 16px; }.step-card { min-height: 300px; }.step-icon { margin-bottom: 40px; }.number-pad { gap: 9px; }.number-pad div { min-height: 120px; padding: 16px; }.number-pad strong { font-size: 2.2rem; }
   .page-hero { padding-top: 60px; }.panel, .party-list, .directory, .join-panel, .auth-panel { padding: 22px; }.dashboard-grid, .party-layout { gap: 18px; }.join-intro h1, .auth-intro h1 { font-size: 4rem; }.auth-links { align-items: flex-start; flex-direction: column; }.recovery-code-grid { grid-template-columns: 1fr; }.recovery-card { padding: 18px; }
-  .member-row { grid-template-columns: 54px minmax(0, 1fr) 12px; row-gap: 10px; align-items: start; }.member-details { display: contents; }.member-details > strong:first-child { grid-column: 2; grid-row: 1; align-self: center; }.member-row > .extension { grid-column: 1; grid-row: 1; }.member-row > .status-dot { grid-column: 3; grid-row: 1; align-self: center; }.device-line, .member-remove-link { grid-column: 1 / -1; }.device-line { width: 100%; }
+  .member-row { grid-template-columns: 54px minmax(0, 1fr) 12px; row-gap: 10px; align-items: start; }.member-details { display: contents; }.member-details > strong:first-child { grid-column: 2; grid-row: 1; align-self: center; }.member-row > .extension { grid-column: 1; grid-row: 1; }.member-row > .status-dot { grid-column: 3; grid-row: 1; align-self: center; }.device-line, .member-add-device, .member-remove-link { grid-column: 1 / -1; }.device-line, .member-add-device { width: 100%; }
   .danger-zone, .account-footer { align-items: stretch; flex-direction: column; }.danger-zone .button { width: 100%; }.account-footer { align-items: flex-start; }
   .linphone-card { padding: 20px; gap: 22px; }.linphone-actions { align-items: stretch; flex-direction: column; }.linphone-actions > span { max-width: none; text-align: center; }.provision-copy-field, .setup-copy-actions { align-items: stretch; flex-direction: column; }.manual-setup-heading { margin-top: 44px; }
   .setup-card > div { align-items: flex-start; flex-direction: column; gap: 8px; }.setup-card dd.copy-value { width: 100%; justify-content: space-between; }.setup-card strong { text-align: left; }.field-translator { grid-template-columns: 1fr; }.field-translator dl > div { grid-template-columns: 1fr; gap: 3px; }.site-footer { padding-inline: 18px; }

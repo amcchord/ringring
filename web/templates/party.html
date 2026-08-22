@@ -202,6 +202,19 @@
             </details>
           </span>
           {{end}}
+          <details class="device-actions member-add-device">
+            <summary>＋ Add another phone</summary>
+            <div class="device-action-card add-device-card">
+              <p>It will share extension <strong>{{$member.Extension}}</strong>. Every active phone gets its own password, and calls to this extension ring them together.</p>
+              <form method="post" action="/parties/{{$party.ID}}/members/{{$member.ID}}/devices">
+                <input type="hidden" name="csrf" value="{{$csrf}}">
+                <label for="new-device-label-{{$member.ID}}">Phone name</label>
+                <input id="new-device-label-{{$member.ID}}" name="device_label" maxlength="40" placeholder="Bedroom phone" autocomplete="off" aria-describedby="new-device-help-{{$member.ID}}" required>
+                <small id="new-device-help-{{$member.ID}}">Name the actual adapter, desk phone, or app so it is easy to disconnect later.</small>
+                <button class="button button-quiet" type="submit">Create phone settings</button>
+              </form>
+            </div>
+          </details>
           <a class="member-remove-link" href="/parties/{{$party.ID}}/members/{{.ID}}/delete">Remove this member</a>
         </span>
         {{$memberStatus := index $root.MemberPresence .ID}}

@@ -261,3 +261,33 @@ func TestHostPhoneRingHasFixedScopedBoundaries(t *testing.T) {
 		}
 	}
 }
+
+func TestHostAddedPhonesStayBoundedToOnePartyMember(t *testing.T) {
+	required := map[string][]string{
+		"internal/store/store.go": {
+			"const MaxDevicesPerMember = 8", "AddDeviceForHost", "WHERE id = ? AND host_user_id = ?",
+			"FROM members WHERE id = ? AND party_id = ?", "SELECT COUNT(*) FROM devices WHERE member_id = ?",
+			"replaceProvisioningTokenTx(ctx, tx, input.DeviceID, input.Provisioning)",
+		},
+		"internal/webapp/app.go": {
+			`POST /parties/{partyID}/members/{memberID}/devices`, "addMemberDevice",
+			"a.parseSmallForm(w, r)", "a.validCSRF(r, session)", "store.NewHostedDevice{",
+			"telephony reconcile after device creation", "NewDevice: true",
+		},
+		"internal/telephony/render.go": {
+			`parties[contextName][device.Extension] = append`, `strings.Join(endpoints, "&")`,
+		},
+		"web/templates/party.html": {
+			"Add another phone", "/members/{{$member.ID}}/devices", "calls to this extension ring them together",
+		},
+		"web/templates/setup.html": {"Another phone ready", "Existing phones stay connected"},
+	}
+	for filename, markers := range required {
+		contents := readRepositoryFile(t, filename)
+		for _, marker := range markers {
+			if !strings.Contains(contents, marker) {
+				t.Errorf("%s is missing same-extension phone boundary %q", filename, marker)
+			}
+		}
+	}
+}

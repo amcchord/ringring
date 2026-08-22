@@ -126,6 +126,7 @@ type PageData struct {
 	LinphoneOpenURL          template.URL
 	LinphoneQR               template.URL
 	SetupForHost             bool
+	SetupForNewDevice        bool
 	PartyURL                 string
 	ErrorTitle               string
 	ErrorMessage             string
@@ -174,6 +175,7 @@ type setupFlash struct {
 	SIPUsername       string `json:"sip_username"`
 	SIPSecret         string `json:"sip_secret"`
 	ProvisioningToken string `json:"provisioning_token"`
+	NewDevice         bool   `json:"new_device,omitempty"`
 }
 
 type recoveryFlash struct {
@@ -264,6 +266,7 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 	mux.HandleFunc("POST /parties/{partyID}/openai-spend-limit", app.requireUser(app.updatePartyOpenAISpendLimit))
 	mux.HandleFunc("POST /parties/{partyID}/openai-key/rotate", app.requireUser(app.rotatePartyOpenAIKey))
 	mux.HandleFunc("GET /parties/{partyID}/setup", app.requireUser(app.rotatedSetup))
+	mux.HandleFunc("POST /parties/{partyID}/members/{memberID}/devices", app.requireUser(app.addMemberDevice))
 	mux.HandleFunc("POST /parties/{partyID}/devices/{deviceID}/readiness", app.requireUser(app.updateDeviceReadiness))
 	mux.HandleFunc("POST /parties/{partyID}/devices/{deviceID}/ring-test", app.requireUser(app.ringDeviceTest))
 	mux.HandleFunc("POST /parties/{partyID}/devices/{deviceID}/rotate", app.requireUser(app.rotateDevice))
@@ -1360,6 +1363,69 @@ func (a *App) createInvitation(w http.ResponseWriter, r *http.Request, session a
 	http.Redirect(w, r, "/parties/"+url.PathEscape(partyID), http.StatusSeeOther)
 }
 
+func (a *App) addMemberDevice(w http.ResponseWriter, r *http.Request, session authSession) {
+	if !a.parseSmallForm(w, r) {
+		return
+	}
+	if !a.validCSRF(r, session) {
+		http.Error(w, "invalid request", http.StatusForbidden)
+		return
+	}
+	partyID := r.PathValue("partyID")
+	memberID := r.PathValue("memberID")
+	deviceLabel := strings.Join(strings.Fields(r.FormValue("device_label")), " ")
+	if deviceLabel == "" {
+		deviceLabel = "Another phone"
+	}
+	if utf8.RuneCountInString(deviceLabel) > 40 {
+		a.errorPage(w, http.StatusBadRequest, "That phone name is too long", "Use a short name such as Bedroom phone, Tablet app, or Grandstream adapter.", "/parties/"+url.PathEscape(partyID), "Back to the party")
+		return
+	}
+
+	deviceID, err := secure.ID("dev")
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	sipUsername, sipSecret, ciphertext, err := a.newSIPCredentials(deviceID)
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	now := a.now()
+	provisionToken, provisionRecord, err := newProvisioningToken(now)
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	created, err := a.store.AddDeviceForHost(r.Context(), store.NewHostedDevice{
+		PartyID: partyID, HostUserID: session.User.ID, MemberID: memberID,
+		DeviceID: deviceID, DeviceLabel: deviceLabel, SIPUsername: sipUsername,
+		SIPSecretCiphertext: ciphertext, Provisioning: provisionRecord, Now: now,
+	})
+	if errors.Is(err, store.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if errors.Is(err, store.ErrDeviceLimit) {
+		a.errorPage(w, http.StatusConflict, "That extension already has plenty of phones", "Reconnect one of its disconnected phones instead. RingRing limits each member to eight saved devices.", "/parties/"+url.PathEscape(partyID), "Back to the party")
+		return
+	}
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	if err := a.ReconcileTelephony(r.Context()); err != nil {
+		a.logger.Error("telephony reconcile after device creation", "error_class", observability.ErrorClass(err))
+	}
+	a.setSetupFlash(w, setupFlash{
+		PartyID: partyID, MemberID: created.Member.ID, MemberName: created.Member.DisplayName,
+		Extension: created.Member.Extension, DeviceID: created.Device.ID, DeviceLabel: created.Device.Label,
+		SIPUsername: sipUsername, SIPSecret: sipSecret, ProvisioningToken: provisionToken, NewDevice: true,
+	})
+	http.Redirect(w, r, "/parties/"+url.PathEscape(partyID)+"/setup", http.StatusSeeOther)
+}
+
 func (a *App) updateDeviceReadiness(w http.ResponseWriter, r *http.Request, session authSession) {
 	if !a.validCSRF(r, session) {
 		http.Error(w, "invalid request", http.StatusForbidden)
@@ -1671,6 +1737,7 @@ func (a *App) rotatedSetup(w http.ResponseWriter, r *http.Request, session authS
 	}
 	data := a.pageData(&session)
 	data.SetupForHost = true
+	data.SetupForNewDevice = flash.NewDevice
 	data.PartyURL = "/parties/" + url.PathEscape(partyID)
 	data.SIPPublicHost = a.cfg.SIPPublicHost
 	data.Claim = model.ClaimedDevice{

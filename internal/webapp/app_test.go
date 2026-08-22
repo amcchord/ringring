@@ -558,6 +558,96 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if presenceCounter.calls != 1 || !onlineRendered || !memberLabelRendered || unavailableRendered || !readinessRendered {
 		t.Fatalf("party live presence calls=%d online=%t member_label=%t unavailable=%t", presenceCounter.calls, onlineRendered, memberLabelRendered, unavailableRendered)
 	}
+	memberID := firstMatch(t, hostPartyBody, `/members/([^/]+)/devices`)
+	addDevicePath := server.URL + "/parties/" + partyID + "/members/" + memberID + "/devices"
+	if !strings.Contains(hostPartyBody, "Add another phone") || !strings.Contains(hostPartyBody, "calls to this extension ring them together") ||
+		!strings.Contains(hostPartyBody, `id="new-device-label-`+memberID+`"`) {
+		t.Fatal("member row omitted the same-extension phone setup flow")
+	}
+	missingAddCSRF := postForm(t, client, addDevicePath, url.Values{"device_label": {"Tablet app"}})
+	if missingAddCSRF.StatusCode != http.StatusForbidden {
+		t.Fatalf("phone creation accepted a missing CSRF token: status=%d", missingAddCSRF.StatusCode)
+	}
+	_ = readBody(t, missingAddCSRF)
+	outsiderAdd := postForm(t, outsiderClient, addDevicePath, url.Values{"csrf": {outsiderCSRF}, "device_label": {"Tablet app"}})
+	if outsiderAdd.StatusCode != http.StatusNotFound {
+		t.Fatalf("another host added a phone: status=%d", outsiderAdd.StatusCode)
+	}
+	_ = readBody(t, outsiderAdd)
+	longLabelAdd := postForm(t, client, addDevicePath, url.Values{"csrf": {csrf}, "device_label": {strings.Repeat("x", 41)}})
+	if longLabelAdd.StatusCode != http.StatusBadRequest || !strings.Contains(readBody(t, longLabelAdd), "phone name is too long") {
+		t.Fatalf("overlong phone label status=%d", longLabelAdd.StatusCode)
+	}
+	routing, err = database.RoutingDevices(t.Context())
+	if err != nil || len(routing) != 1 {
+		t.Fatalf("rejected phone additions changed routing: %#v error=%v", routing, err)
+	}
+
+	addedPhone := postForm(t, client, addDevicePath, url.Values{"csrf": {csrf}, "device_label": {"Tablet app"}})
+	addedPhoneBody := readBody(t, addedPhone)
+	if addedPhone.StatusCode != http.StatusOK || addedPhone.Header.Get("Cache-Control") != "no-store" ||
+		!strings.Contains(addedPhoneBody, "Another phone ready") || !strings.Contains(addedPhoneBody, "shares extension 101") ||
+		!strings.Contains(addedPhoneBody, "Existing phones stay connected") || !strings.Contains(addedPhoneBody, "Tablet app") {
+		t.Fatalf("second-phone setup response was not successful: status=%d", addedPhone.StatusCode)
+	}
+	secondUsername := firstMatch(t, addedPhoneBody, `(rrd_[A-Za-z0-9_-]+)`)
+	if secondUsername == oldUsername {
+		t.Fatal("second phone reused the first phone's SIP username")
+	}
+	secondProvisionURL := firstMatch(t, addedPhoneBody, `value="(http://[^"]+/provision/linphone/[A-Za-z0-9_-]{43})"`)
+	membersAfterAdd, err := database.ListMembers(t.Context(), partyID)
+	if err != nil || len(membersAfterAdd) != 1 || len(membersAfterAdd[0].Devices) != 2 {
+		t.Fatalf("second phone was not attached to one member: %#v error=%v", membersAfterAdd, err)
+	}
+	var secondDeviceID string
+	for _, candidate := range membersAfterAdd[0].Devices {
+		if candidate.Label == "Tablet app" {
+			secondDeviceID = candidate.ID
+		}
+	}
+	if secondDeviceID == "" {
+		t.Fatal("could not identify the newly added phone")
+	}
+	routing, err = database.RoutingDevices(t.Context())
+	if err != nil || len(routing) != 2 || routing[0].Extension != "101" || routing[1].Extension != "101" {
+		t.Fatalf("same-extension phones were not both routable: %#v error=%v", routing, err)
+	}
+	dialDevices, err := telephony.FromRoutingDevices(routing, cipher.Decrypt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configuration, err := telephony.Render(dialDevices, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundForkedRing := false
+	for _, line := range strings.Split(string(configuration.Dialplan), "\n") {
+		if strings.Contains(line, "Dial(PJSIP/") && strings.Contains(line, oldUsername) && strings.Contains(line, secondUsername) {
+			foundForkedRing = true
+		}
+	}
+	if !foundForkedRing {
+		t.Fatalf("same-extension phones did not share one explicit Dial line:\n%s", configuration.Dialplan)
+	}
+	if again := get(t, client, addedPhone.Request.URL.String()); again.StatusCode != http.StatusGone {
+		t.Fatalf("new-phone setup reveal could be read twice: status=%d", again.StatusCode)
+	} else {
+		_ = readBody(t, again)
+	}
+	revokedSecond := postForm(t, client, server.URL+"/parties/"+partyID+"/devices/"+secondDeviceID+"/revoke", url.Values{"csrf": {csrf}})
+	if revokedSecond.StatusCode != http.StatusOK || !strings.Contains(readBody(t, revokedSecond), "Tablet app") {
+		t.Fatalf("second phone could not be independently disconnected: status=%d", revokedSecond.StatusCode)
+	}
+	if staleProvision := get(t, client, secondProvisionURL); staleProvision.StatusCode != http.StatusGone {
+		t.Fatalf("disconnected second phone retained provisioning: status=%d", staleProvision.StatusCode)
+	} else {
+		_ = readBody(t, staleProvision)
+	}
+	routing, err = database.RoutingDevices(t.Context())
+	if err != nil || len(routing) != 1 || routing[0].SIPUsername != oldUsername {
+		t.Fatalf("disconnecting the second phone changed the first: %#v error=%v", routing, err)
+	}
+
 	deviceID := firstMatch(t, hostPartyBody, `/devices/([^/]+)/rotate`)
 	ringer := &fakeDeviceRinger{statuses: map[string]telephony.ContactState{oldUsername: telephony.ContactReachable}}
 	app.ringer = ringer
