@@ -8,15 +8,15 @@
     <div class="hero-actions">
       {{if .User}}
         <a class="button button-primary" href="/app">Open my parties <span aria-hidden="true">→</span></a>
-      {{else if .AuthConfigured}}
-        <a class="button button-primary" href="/auth/google">Create a party <span aria-hidden="true">→</span></a>
+      {{else if .SignupEnabled}}
+        <a class="button button-primary" href="/signup">Create a party <span aria-hidden="true">→</span></a>
       {{else}}
-        <span class="button button-primary button-disabled" aria-disabled="true">Opening soon</span>
+        <a class="button button-primary" href="/login">Host sign in <span aria-hidden="true">→</span></a>
       {{end}}
       <a class="button button-quiet" href="#how-it-works">See how it works</a>
     </div>
-    {{if not .AuthConfigured}}
-      <p class="launch-note">The phones are being plugged in now. Host sign-up will open as soon as Google login is connected.</p>
+    {{if not .SignupEnabled}}
+      <p class="launch-note">New host signup is paused, but existing hosts can still sign in.</p>
     {{end}}
     {{if .DevAuth}}
       <form method="post" action="/auth/dev" class="dev-login">
@@ -53,7 +53,7 @@
       <span class="step-number">1</span>
       <div class="step-icon">🎉</div>
       <h3>Start a party</h3>
-      <p>Sign in with Google, name your private group, and choose the extensions you like.</p>
+      <p>Choose a RingRing username, name your private group, and choose the extensions you like. No email required.</p>
     </article>
     <article class="step-card mint">
       <span class="step-number">2</span>

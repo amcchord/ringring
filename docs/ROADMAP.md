@@ -2,37 +2,42 @@
 
 ## Milestone 1 — A party can ring
 
-- Public splash page and production health endpoint.
-- Google host sign-in.
-- Party creation and isolated extension range.
-- Single-use member invite.
-- Member and device provisioning with one-time SIP setup card.
-- Generated Asterisk PJSIP endpoints and party dialplans.
-- Calls between two remotely registered devices.
-- Device revocation and credential rotation.
+- [x] Public splash page and production health endpoint.
+- [x] Native no-email host signup, login, and offline recovery; Google is optional.
+- [x] Party creation and isolated extension range.
+- [x] Single-use member invite.
+- [x] Member and device provisioning with one-time SIP setup card.
+- [x] Generated Asterisk PJSIP endpoints and party dialplans.
+- [ ] Calls between two remotely registered devices, verified with real hardware.
+- [x] Device revocation and credential rotation.
 
 ## Milestone 2 — Friendly enough for family
 
-- Device-specific setup guides and QR-assisted softphone setup.
-- Host member directory, presence hints, and test-call flow.
-- Voice-guided extension selection.
-- Time and weather service lines.
-- Internet radio line with host-selected stations.
-- Accessibility and real-device usability pass.
+- [x] Device-specific setup guides for ATAs, VoIP phones, and softphones.
+- [ ] QR-assisted softphone setup.
+- [x] Host member directory and device controls.
+- [ ] Presence hints and a test-call flow.
+- [ ] Voice-guided extension selection.
+- [x] Host-controlled time and weather service lines.
+- [x] Internet radio line with a safe fixed station.
+- [ ] Vetted host station selection without arbitrary URL injection.
+- [ ] Accessibility and real-device usability pass.
 
 ## Milestone 3 — OpenAI voice
 
-- Automated per-party OpenAI project/service-account provisioning.
-- Encrypted key lifecycle and immediate revocation.
-- Host-set project spend limit and service toggle.
-- Realtime voice line with child-appropriate party instructions.
-- Clear disclosure when a caller is talking to an AI and no default transcript retention.
+- [x] Automated per-party OpenAI project/service-account provisioning.
+- [x] Per-party encrypted runtime key use.
+- [ ] Immediate party-key revocation and replacement.
+- [ ] Host-set project spend limit; service toggles are implemented.
+- [ ] Realtime voice line with child-appropriate party instructions.
+- [x] AI disclosure for generated weather speech and no default transcript retention.
 
 ## Milestone 4 — Dependable self-hosting
 
-- Guided installation and upgrade commands.
-- Backup, restore, and disaster-recovery verification.
-- SIP TLS device compatibility matrix.
-- Observability without call-content collection.
-- Security review and threat-model tests.
-- Optional PostgreSQL and multi-node migration path.
+- [x] Reproducible Docker Compose deployment and SIP firewall installer.
+- [ ] Guided installation and upgrade command.
+- [ ] Backup, restore, and disaster-recovery verification.
+- [ ] SIP TLS device compatibility matrix.
+- [ ] Observability without call-content collection.
+- [ ] Security review and threat-model tests.
+- [ ] Optional PostgreSQL and multi-node migration path.

@@ -61,11 +61,13 @@ func (a *App) rateLimit(next http.Handler) http.Handler {
 
 func rateCategory(r *http.Request) (string, int, time.Duration) {
 	switch {
+	case r.URL.Path == "/signup" || r.URL.Path == "/login" || r.URL.Path == "/recover":
+		return "native-auth", 20, 5 * time.Minute
 	case strings.HasPrefix(r.URL.Path, "/auth/"):
 		return "auth", 30, 5 * time.Minute
 	case strings.HasPrefix(r.URL.Path, "/join/"):
 		return "join", 60, 5 * time.Minute
-	case r.Method == http.MethodPost && (r.URL.Path == "/parties" || strings.HasSuffix(r.URL.Path, "/invites")):
+	case r.Method == http.MethodPost && (r.URL.Path == "/parties" || strings.HasSuffix(r.URL.Path, "/invites") || strings.HasSuffix(r.URL.Path, "/services") || strings.Contains(r.URL.Path, "/devices/")):
 		return "party-write", 30, 5 * time.Minute
 	default:
 		return "", 0, 0

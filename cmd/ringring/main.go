@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -11,8 +12,11 @@ import (
 	"time"
 
 	"github.com/amcchord/ringring/internal/config"
+	"github.com/amcchord/ringring/internal/openairuntime"
 	"github.com/amcchord/ringring/internal/secure"
 	"github.com/amcchord/ringring/internal/store"
+	"github.com/amcchord/ringring/internal/voice"
+	"github.com/amcchord/ringring/internal/weather"
 	"github.com/amcchord/ringring/internal/webapp"
 )
 
@@ -44,6 +48,21 @@ func main() {
 	if err := app.ReconcileTelephony(context.Background()); err != nil {
 		logger.Warn("initial telephony reconcile", "error", err)
 	}
+	voiceListener, err := net.Listen("tcp", cfg.FastAGIAddr)
+	if err != nil {
+		logger.Error("listen for FastAGI", "address", cfg.FastAGIAddr, "error", err)
+		os.Exit(1)
+	}
+	defer voiceListener.Close()
+	voiceServer := &voice.Server{
+		Source: database, Cipher: cipher, Weather: weather.New(nil), Speech: openairuntime.New(nil),
+		AudioDir: cfg.VoiceAudioDir, PlaybackDir: cfg.VoicePlaybackDir, Logger: logger,
+	}
+	go func() {
+		if err := voiceServer.Serve(voiceListener); err != nil {
+			logger.Error("FastAGI server stopped", "error", err)
+		}
+	}()
 
 	server := &http.Server{
 		Addr: cfg.HTTPAddr, Handler: app,
@@ -55,6 +74,7 @@ func main() {
 	defer stop()
 	go func() {
 		<-shutdownSignals.Done()
+		_ = voiceListener.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := server.Shutdown(ctx); err != nil {
@@ -62,7 +82,7 @@ func main() {
 		}
 	}()
 
-	logger.Info("RingRing listening", "address", cfg.HTTPAddr, "environment", cfg.Environment)
+	logger.Info("RingRing listening", "address", cfg.HTTPAddr, "fastagi_address", cfg.FastAGIAddr, "environment", cfg.Environment)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Error("HTTP server stopped", "error", err)
 		os.Exit(1)

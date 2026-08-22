@@ -1,0 +1,28 @@
+{{define "title"}}Recover host account{{end}}
+{{define "content"}}
+<section class="auth-shell wrap">
+  <div class="auth-intro">
+    <span class="eyebrow"><span class="live-dot"></span> Offline recovery</span>
+    <h1>Back in<br><em>without email.</em></h1>
+    <p>Use one of the recovery codes RingRing showed when you created the account. A successful reset signs out every other browser.</p>
+  </div>
+  <div class="panel auth-panel">
+    <span class="panel-icon">🔑</span>
+    <h2>Reset the password</h2>
+    {{if .FormError}}<div class="form-error" role="alert">{{.FormError}}</div>{{end}}
+    <form method="post" action="/recover" class="stack-form">
+      <input type="hidden" name="csrf" value="{{.AuthCSRF}}">
+      <label for="recover-username">Username</label>
+      <input id="recover-username" name="username" value="{{.FormUsername}}" maxlength="32" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+      <label for="recovery-code">Unused recovery code</label>
+      <input id="recovery-code" name="recovery_code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" placeholder="ABCD-EFGH-…" required>
+      <label for="recover-password">New password <small>12+ characters</small></label>
+      <input id="recover-password" name="password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
+      <label for="recover-confirm">Type it again</label>
+      <input id="recover-confirm" name="password_confirm" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
+      <button class="button button-primary" type="submit">Reset my password <span aria-hidden="true">→</span></button>
+    </form>
+    <p class="auth-switch"><a href="/login">Back to sign in</a></p>
+  </div>
+</section>
+{{end}}

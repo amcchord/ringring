@@ -7,30 +7,85 @@
   <div class="party-meta"><span>☎ {{len .Members}} members</span><span>AI line: {{.Party.OpenAIStatus}}</span></div>
 </section>
 <section class="party-layout wrap">
-  <div class="panel invite-panel">
-    <span class="panel-icon">💌</span>
-    <h2>Invite one phone</h2>
-    <p>The link works once and expires after 48 hours. Send it privately to the person setting up the phone.</p>
-    <form method="post" action="/parties/{{.Party.ID}}/invites">
-      <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <button class="button button-primary" type="submit">Make an invite link</button>
-    </form>
-    {{if .InviteURL}}
-    <div class="reveal-card" role="status">
-      <strong>Your one-time link</strong>
-      <input value="{{.InviteURL}}" readonly aria-label="Invitation URL">
-      <p>Copy it now—RingRing will not show this token again.</p>
+  <div class="party-sidebar">
+    <div class="panel invite-panel">
+      <span class="panel-icon">💌</span>
+      <h2>Invite one phone</h2>
+      <p>The link works once and expires after 48 hours. Send it privately to the person setting up the phone.</p>
+      <form method="post" action="/parties/{{.Party.ID}}/invites">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <button class="button button-primary" type="submit">Make an invite link</button>
+      </form>
+      {{if .InviteURL}}
+      <div class="reveal-card" role="status">
+        <strong>Your one-time link</strong>
+        <input value="{{.InviteURL}}" readonly aria-label="Invitation URL">
+        <p>Copy it now—RingRing will not show this token again.</p>
+      </div>
+      {{end}}
     </div>
-    {{end}}
+
+    <div class="panel service-panel">
+      <span class="panel-icon">✨</span>
+      <h2>Fun numbers</h2>
+      <p>Choose which special lines phones in this party can dial.</p>
+      {{$voiceReady := eq .Party.OpenAIStatus "ready"}}
+      <form class="service-form" method="post" action="/parties/{{.Party.ID}}/services">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <label class="service-toggle">
+          <input type="checkbox" name="time_enabled" value="1" {{if .Services.TimeEnabled}}checked{{end}}>
+          <span><strong><span class="service-number">*11</span> The time</strong><small>Speaks the current date and time.</small></span>
+        </label>
+        <div class="service-choice">
+          <label class="service-toggle">
+            <input type="checkbox" name="weather_enabled" value="1" {{if .Services.WeatherEnabled}}checked{{end}} {{if not $voiceReady}}disabled{{end}}>
+            <span><strong><span class="service-number">*12</span> Local weather</strong><small>{{if $voiceReady}}A clearly disclosed AI voice reads Open-Meteo data.{{else}}Available when this party's AI voice is ready.{{end}}</small></span>
+          </label>
+          <label class="weather-field" for="weather-location">Weather place</label>
+          <input id="weather-location" name="weather_query" value="{{.Services.WeatherQuery}}" maxlength="80" placeholder="City, state or postal code" autocomplete="postal-code">
+          {{if .Services.WeatherLabel}}<small class="resolved-place">Using {{.Services.WeatherLabel}}</small>{{end}}
+        </div>
+        <label class="service-toggle">
+          <input type="checkbox" name="radio_enabled" value="1" {{if .Services.RadioEnabled}}checked{{end}}>
+          <span><strong><span class="service-number">*13</span> Groove Salad radio</strong><small>Streams the listener-supported SomaFM station until the phone hangs up.</small></span>
+        </label>
+        <button class="button button-primary" type="submit">Save fun numbers</button>
+      </form>
+      <p class="service-note">Special lines stay inside this party. RingRing never routes them to the regular phone network.</p>
+    </div>
   </div>
   <div class="directory">
     <div class="list-heading"><h2>Phone book</h2><span>Dial inside this party</span></div>
     {{if .Members}}
+      {{$party := .Party}}{{$csrf := .CSRF}}
       {{range .Members}}
       <article class="member-row">
         <span class="extension">{{.Extension}}</span>
-        <span><strong>{{.DisplayName}}</strong><small>{{len .Devices}} phone{{if ne (len .Devices) 1}}s{{end}}</small></span>
-        <span class="status-dot" title="Provisioned"></span>
+        <span class="member-details">
+          <strong>{{.DisplayName}}</strong>
+          {{range .Devices}}
+          <span class="device-line">
+            <span><small>{{.Label}} · {{if .RevokedAt}}disconnected{{else}}ready{{end}}</small></span>
+            <details class="device-actions">
+              <summary>{{if .RevokedAt}}Reconnect{{else}}Manage{{end}}</summary>
+              <div class="device-action-card">
+                <form method="post" action="/parties/{{$party.ID}}/devices/{{.ID}}/rotate">
+                  <input type="hidden" name="csrf" value="{{$csrf}}">
+                  <button class="text-button" type="submit">{{if .RevokedAt}}Reconnect with fresh settings{{else}}Make a fresh password{{end}}</button>
+                </form>
+                {{if not .RevokedAt}}
+                <form method="post" action="/parties/{{$party.ID}}/devices/{{.ID}}/revoke">
+                  <input type="hidden" name="csrf" value="{{$csrf}}">
+                  <button class="text-button danger-button" type="submit">Disconnect this phone</button>
+                </form>
+                {{end}}
+                <small>Fresh settings immediately replace the old username and password.</small>
+              </div>
+            </details>
+          </span>
+          {{end}}
+        </span>
+        <span class="status-dot{{range .Devices}}{{if .RevokedAt}} status-off{{end}}{{end}}" title="Phone status"></span>
       </article>
       {{end}}
     {{else}}

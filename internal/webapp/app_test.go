@@ -1,6 +1,7 @@
 package webapp
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -15,7 +16,17 @@ import (
 	"github.com/amcchord/ringring/internal/config"
 	"github.com/amcchord/ringring/internal/secure"
 	"github.com/amcchord/ringring/internal/store"
+	"github.com/amcchord/ringring/internal/weather"
 )
+
+type fakeWeatherGeocoder struct {
+	query string
+}
+
+func (f *fakeWeatherGeocoder) Geocode(_ context.Context, query string) (weather.Location, error) {
+	f.query = query
+	return weather.Location{Query: query, Label: "Portland, Maine", Latitude: 43.66, Longitude: -70.25}, nil
+}
 
 func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	database, err := store.Open(":memory:")
@@ -73,6 +84,33 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if !strings.Contains(partyPage, "Cousins Club") || !strings.Contains(partyPage, "not-configured") {
 		t.Fatal("party page missing expected details")
 	}
+	if err := database.UpdatePartyOpenAI(t.Context(), partyID, "proj_test", "svc_test", "encrypted-key", "ready"); err != nil {
+		t.Fatal(err)
+	}
+	geocoder := &fakeWeatherGeocoder{}
+	app.weather = geocoder
+	servicePage := postForm(t, client, server.URL+"/parties/"+partyID+"/services", url.Values{
+		"csrf": {csrf}, "time_enabled": {"1"}, "weather_enabled": {"1"},
+		"weather_query": {" Portland,   Maine "}, "radio_enabled": {"1"},
+	})
+	serviceBody := readBody(t, servicePage)
+	if servicePage.StatusCode != http.StatusOK || !strings.Contains(serviceBody, "Using Portland, Maine") || geocoder.query != "Portland, Maine" {
+		t.Fatalf("service settings were not saved: status=%d query=%q", servicePage.StatusCode, geocoder.query)
+	}
+	services, err := database.PartyServices(t.Context(), partyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !services.TimeEnabled || !services.WeatherEnabled || !services.RadioEnabled || services.WeatherLatitude != 43.66 {
+		t.Fatalf("unexpected service settings: %#v", services)
+	}
+	routingServices, err := database.RoutingServices(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routingServices) != 1 || !routingServices[0].WeatherEnabled {
+		t.Fatalf("weather service was not routable: %#v", routingServices)
+	}
 
 	invite := postForm(t, client, server.URL+"/parties/"+partyID+"/invites", url.Values{"csrf": {csrf}})
 	if invite.StatusCode != http.StatusOK {
@@ -92,6 +130,7 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if setup.StatusCode != http.StatusOK || !strings.Contains(setupBody, "You are extension 101") || !strings.Contains(setupBody, "sip.example.test") {
 		t.Fatalf("setup response was not successful: status=%d", setup.StatusCode)
 	}
+	oldUsername := firstMatch(t, setupBody, `(rrd_[A-Za-z0-9_-]+)`)
 	if setup.Header.Get("Cache-Control") != "no-store" {
 		t.Fatal("setup credentials must not be cached")
 	}
@@ -107,6 +146,37 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if len(routing) != 1 || routing[0].Extension != "101" || strings.Contains(routing[0].SIPSecretCiphertext, "Blue phone") {
 		t.Fatalf("unexpected routing state: %#v", routing)
 	}
+
+	hostParty := get(t, client, server.URL+"/parties/"+partyID)
+	deviceID := firstMatch(t, readBody(t, hostParty), `/devices/([^/]+)/rotate`)
+	rotated := postForm(t, client, server.URL+"/parties/"+partyID+"/devices/"+deviceID+"/rotate", url.Values{"csrf": {csrf}})
+	rotatedBody := readBody(t, rotated)
+	if rotated.StatusCode != http.StatusOK || !strings.Contains(rotatedBody, "Fresh phone settings") || !strings.Contains(rotatedBody, "old username and password no longer work") {
+		t.Fatalf("rotation setup response was not successful: status=%d", rotated.StatusCode)
+	}
+	freshUsername := firstMatch(t, rotatedBody, `(rrd_[A-Za-z0-9_-]+)`)
+	if freshUsername == oldUsername {
+		t.Fatal("rotation did not replace the SIP username")
+	}
+	if again := get(t, client, rotated.Request.URL.String()); again.StatusCode != http.StatusGone {
+		t.Fatalf("setup reveal could be read twice: status=%d", again.StatusCode)
+	} else {
+		_ = readBody(t, again)
+	}
+
+	hostParty = get(t, client, server.URL+"/parties/"+partyID)
+	revokeDeviceID := firstMatch(t, readBody(t, hostParty), `/devices/([^/]+)/revoke`)
+	revoked := postForm(t, client, server.URL+"/parties/"+partyID+"/devices/"+revokeDeviceID+"/revoke", url.Values{"csrf": {csrf}})
+	if revoked.StatusCode != http.StatusOK || !strings.Contains(readBody(t, revoked), "disconnected") {
+		t.Fatalf("revocation response was not successful: status=%d", revoked.StatusCode)
+	}
+	routing, err = database.RoutingDevices(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routing) != 0 {
+		t.Fatalf("revoked device remained routable: %#v", routing)
+	}
 }
 
 func TestProductionRejectsNullOrigin(t *testing.T) {
@@ -115,6 +185,119 @@ func TestProductionRejectsNullOrigin(t *testing.T) {
 	req.Header.Set("Origin", "null")
 	if app.sameOrigin(req) {
 		t.Fatal("production must not trust a null origin")
+	}
+}
+
+func TestNativeSignupLoginAndOfflineRecovery(t *testing.T) {
+	database, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	cipher, err := secure.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewUnstartedServer(nil)
+	cfg := config.Config{
+		Environment: "development", BaseURL: "http://" + server.Listener.Addr().String(),
+		MasterKey: make([]byte, 32), SessionSecret: make([]byte, 32),
+		HostSignupCode: "family-door-code", InviteTTL: time.Hour,
+	}
+	app, err := New(cfg, database, cipher, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixedNow := time.Date(2026, 8, 22, 10, 0, 0, 0, time.UTC)
+	app.now = func() time.Time { return fixedNow }
+	server.Config.Handler = app
+	server.Start()
+	defer server.Close()
+
+	jar, _ := cookiejar.New(nil)
+	client := server.Client()
+	client.Jar = jar
+	signupPage := get(t, client, server.URL+"/signup")
+	signupBody := readBody(t, signupPage)
+	if !strings.Contains(signupBody, "No email runaround") || !strings.Contains(signupBody, "Family access code") {
+		t.Fatal("native signup form was not rendered")
+	}
+	signupCSRF := firstMatch(t, signupBody, `name="csrf" value="([^"]+)"`)
+	created := postForm(t, client, server.URL+"/signup", url.Values{
+		"csrf": {signupCSRF}, "name": {"Austin Host"}, "username": {"Austin.Rings"},
+		"signup_code": {"family-door-code"}, "password": {"a colorful phone party"},
+		"password_confirm": {"a colorful phone party"},
+	})
+	createdBody := readBody(t, created)
+	if created.StatusCode != http.StatusOK || created.Request.URL.Path != "/account/recovery-codes" || !strings.Contains(createdBody, "Save your recovery codes") {
+		t.Fatalf("signup ended at %s with %d", created.Request.URL, created.StatusCode)
+	}
+	recoveryCode := firstMatch(t, createdBody, `<code>([A-Z2-7-]+)</code>`)
+	if secondReveal := get(t, client, server.URL+"/account/recovery-codes"); secondReveal.StatusCode != http.StatusGone {
+		t.Fatalf("recovery codes could be revealed twice: status=%d", secondReveal.StatusCode)
+	} else {
+		_ = readBody(t, secondReveal)
+	}
+	if dashboard := get(t, client, server.URL+"/app"); dashboard.StatusCode != http.StatusOK {
+		t.Fatalf("new account was not signed in: status=%d", dashboard.StatusCode)
+	} else {
+		_ = readBody(t, dashboard)
+	}
+
+	secondJar, _ := cookiejar.New(nil)
+	secondClient := server.Client()
+	secondClient.Jar = secondJar
+	duplicateForm := get(t, secondClient, server.URL+"/signup")
+	duplicateCSRF := firstMatch(t, readBody(t, duplicateForm), `name="csrf" value="([^"]+)"`)
+	duplicate := postForm(t, secondClient, server.URL+"/signup", url.Values{
+		"csrf": {duplicateCSRF}, "name": {"Someone Else"}, "username": {"austin.rings"},
+		"signup_code": {"family-door-code"}, "password": {"another colorful phrase"},
+		"password_confirm": {"another colorful phrase"},
+	})
+	if duplicate.StatusCode != http.StatusConflict || !strings.Contains(readBody(t, duplicate), "not available") {
+		t.Fatalf("duplicate username status=%d", duplicate.StatusCode)
+	}
+
+	recoverPage := get(t, client, server.URL+"/recover")
+	recoverCSRF := firstMatch(t, readBody(t, recoverPage), `name="csrf" value="([^"]+)"`)
+	recovered := postForm(t, client, server.URL+"/recover", url.Values{
+		"csrf": {recoverCSRF}, "username": {"AUSTIN.RINGS"}, "recovery_code": {strings.ToLower(recoveryCode)},
+		"password": {"the fresh colorful phrase"}, "password_confirm": {"the fresh colorful phrase"},
+	})
+	recoveredBody := readBody(t, recovered)
+	if recovered.StatusCode != http.StatusOK || recovered.Request.URL.Path != "/account/recovery-codes" || !strings.Contains(recoveredBody, "All old sessions") {
+		t.Fatalf("recovery ended at %s with %d", recovered.Request.URL, recovered.StatusCode)
+	}
+	if appPage := get(t, client, server.URL+"/app"); appPage.Request.URL.Path != "/login" {
+		t.Fatalf("recovery did not invalidate the current session: ended at %s", appPage.Request.URL)
+	} else {
+		_ = readBody(t, appPage)
+	}
+
+	loginPage := get(t, client, server.URL+"/login")
+	loginCSRF := firstMatch(t, readBody(t, loginPage), `name="csrf" value="([^"]+)"`)
+	oldLogin := postForm(t, client, server.URL+"/login", url.Values{
+		"csrf": {loginCSRF}, "username": {"austin.rings"}, "password": {"a colorful phone party"},
+	})
+	if oldLogin.StatusCode != http.StatusUnauthorized || !strings.Contains(readBody(t, oldLogin), "did not match") {
+		t.Fatalf("old password remained valid: status=%d", oldLogin.StatusCode)
+	}
+	loginPage = get(t, client, server.URL+"/login")
+	loginCSRF = firstMatch(t, readBody(t, loginPage), `name="csrf" value="([^"]+)"`)
+	newLogin := postForm(t, client, server.URL+"/login", url.Values{
+		"csrf": {loginCSRF}, "username": {"austin.rings"}, "password": {"the fresh colorful phrase"},
+	})
+	if newLogin.StatusCode != http.StatusOK || newLogin.Request.URL.Path != "/app" {
+		t.Fatalf("new password did not sign in: ended at %s with %d", newLogin.Request.URL, newLogin.StatusCode)
+	}
+}
+
+func TestProductionSignupNeedsFamilyCode(t *testing.T) {
+	if (config.Config{Environment: "production"}).HostSignupEnabled() {
+		t.Fatal("production signup must stay closed without a family access code")
+	}
+	if !(config.Config{Environment: "production", HostSignupCode: "secret"}).HostSignupEnabled() {
+		t.Fatal("family access code must enable production signup")
 	}
 }
 

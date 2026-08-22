@@ -1,0 +1,35 @@
+{{define "title"}}Create a host account{{end}}
+{{define "content"}}
+<section class="auth-shell wrap">
+  <div class="auth-intro">
+    <span class="eyebrow"><span class="live-dot"></span> No email runaround</span>
+    <h1>Make your<br><em>host account.</em></h1>
+    <p>Pick a username and a long password. You will go straight to RingRing—no inbox, organization approval, or confirmation link.</p>
+    <div class="auth-promise"><span>✦</span><strong>Family members still join with one invite link.</strong></div>
+  </div>
+  <div class="panel auth-panel">
+    <span class="panel-icon">🎉</span>
+    <h2>Create an account</h2>
+    {{if .FormError}}<div class="form-error" role="alert">{{.FormError}}</div>{{end}}
+    {{if .SignupEnabled}}
+    <form method="post" action="/signup" class="stack-form">
+      <input type="hidden" name="csrf" value="{{.AuthCSRF}}">
+      <label for="signup-name">Your name</label>
+      <input id="signup-name" name="name" value="{{.FormName}}" maxlength="40" autocomplete="name" placeholder="Austin" required>
+      <label for="signup-username">Username</label>
+      <input id="signup-username" name="username" value="{{.FormUsername}}" minlength="3" maxlength="32" pattern="[A-Za-z0-9](?:[A-Za-z0-9._-]{1,30}[A-Za-z0-9])" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="austin" required>
+      {{if .SignupCode}}
+      <label for="signup-code">Family access code <small>Ask the person who runs this RingRing.</small></label>
+      <input id="signup-code" name="signup_code" type="password" autocomplete="off" required>
+      {{end}}
+      <label for="signup-password">Password <small>12+ characters; a phrase is great.</small></label>
+      <input id="signup-password" name="password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
+      <label for="signup-confirm">Type it again</label>
+      <input id="signup-confirm" name="password_confirm" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
+      <button class="button button-primary" type="submit">Create my account <span aria-hidden="true">→</span></button>
+    </form>
+    {{end}}
+    <p class="auth-switch">Already a host? <a href="/login">Sign in</a></p>
+  </div>
+</section>
+{{end}}

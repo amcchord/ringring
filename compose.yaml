@@ -13,6 +13,8 @@ services:
     networks:
       ringring:
         ipv4_address: 172.31.88.10
+    expose:
+      - "4573"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/readyz"]
@@ -32,6 +34,7 @@ services:
         condition: service_healthy
     volumes:
       - ./deploy/state/asterisk:/var/lib/ringring/asterisk:ro
+      - ./deploy/state/log/asterisk:/var/log/asterisk
     ports:
       - "5060:5060/udp"
       - "10000-10199:10000-10199/udp"

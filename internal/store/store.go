@@ -19,6 +19,8 @@ var (
 	ErrInviteUsed     = errors.New("invitation has already been used")
 	ErrInviteExpired  = errors.New("invitation has expired")
 	ErrExtensionTaken = errors.New("extension is already in use")
+	ErrUsernameTaken  = errors.New("username is already in use")
+	ErrRecoveryCode   = errors.New("invalid recovery code")
 )
 
 type Store struct {
@@ -40,6 +42,17 @@ type NewParty struct {
 	CreatedAt  time.Time
 }
 
+type NewLocalUser struct {
+	ID                 string
+	Name               string
+	Username           string
+	PasswordHash       string
+	RecoveryCodeHashes [][]byte
+	SessionTokenHash   []byte
+	SessionExpiresAt   time.Time
+	CreatedAt          time.Time
+}
+
 type NewInvitation struct {
 	ID              string
 	PartyID         string
@@ -59,6 +72,23 @@ type NewClaim struct {
 	SIPUsername         string
 	SIPSecretCiphertext string
 	Now                 time.Time
+}
+
+type RotatedDevice struct {
+	Party  model.Party
+	Member model.Member
+	Device model.Device
+}
+
+type ServiceSettingsInput struct {
+	TimeEnabled      bool
+	WeatherEnabled   bool
+	WeatherQuery     string
+	WeatherLabel     string
+	WeatherLatitude  float64
+	WeatherLongitude float64
+	RadioEnabled     bool
+	UpdatedAt        time.Time
 }
 
 func Open(path string) (*Store, error) {
@@ -112,6 +142,111 @@ func (s *Store) UpsertGoogleUser(ctx context.Context, profile GoogleProfile, now
 	}
 	user.CreatedAt = fromUnix(created)
 	return user, nil
+}
+
+func (s *Store) CreateLocalUser(ctx context.Context, input NewLocalUser) (model.User, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return model.User{}, fmt.Errorf("begin local user: %w", err)
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO users (id, google_subject, email, name, avatar_url, created_at)
+		VALUES (?, ?, '', ?, '', ?)`, input.ID, "local:"+input.ID, input.Name, unix(input.CreatedAt))
+	if err != nil {
+		return model.User{}, fmt.Errorf("create local user: %w", err)
+	}
+	result, err := tx.ExecContext(ctx, `
+		INSERT OR IGNORE INTO local_credentials (user_id, username, password_hash, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)`, input.ID, input.Username, input.PasswordHash, unix(input.CreatedAt), unix(input.CreatedAt))
+	if err != nil {
+		return model.User{}, fmt.Errorf("create local credential: %w", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return model.User{}, ErrUsernameTaken
+	}
+	for _, hash := range input.RecoveryCodeHashes {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO recovery_codes (user_id, code_hash, created_at) VALUES (?, ?, ?)`,
+			input.ID, hash, unix(input.CreatedAt)); err != nil {
+			return model.User{}, fmt.Errorf("create recovery code: %w", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)`,
+		input.SessionTokenHash, input.ID, unix(input.SessionExpiresAt), unix(input.CreatedAt)); err != nil {
+		return model.User{}, fmt.Errorf("create initial session: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return model.User{}, fmt.Errorf("commit local user: %w", err)
+	}
+	return model.User{ID: input.ID, Name: input.Name, CreatedAt: input.CreatedAt.UTC()}, nil
+}
+
+func (s *Store) LocalCredentialByUsername(ctx context.Context, username string) (model.LocalCredential, error) {
+	const query = `
+		SELECT u.id, u.google_subject, u.email, u.name, u.avatar_url, u.created_at,
+			c.username, c.password_hash, c.created_at, c.updated_at
+		FROM local_credentials c JOIN users u ON u.id = c.user_id
+		WHERE c.username = ?`
+	var credential model.LocalCredential
+	var userCreated, credentialCreated, updated int64
+	err := s.db.QueryRowContext(ctx, query, username).Scan(
+		&credential.User.ID, &credential.User.GoogleSubject, &credential.User.Email, &credential.User.Name,
+		&credential.User.AvatarURL, &userCreated, &credential.Username, &credential.PasswordHash,
+		&credentialCreated, &updated,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.LocalCredential{}, ErrNotFound
+	}
+	if err != nil {
+		return model.LocalCredential{}, fmt.Errorf("load local credential: %w", err)
+	}
+	credential.User.CreatedAt = fromUnix(userCreated)
+	credential.CreatedAt = fromUnix(credentialCreated)
+	credential.UpdatedAt = fromUnix(updated)
+	return credential, nil
+}
+
+func (s *Store) RecoverLocalUser(ctx context.Context, username string, recoveryCodeHash []byte, passwordHash string, replacementCodeHashes [][]byte, now time.Time) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin local recovery: %w", err)
+	}
+	defer tx.Rollback()
+
+	var userID string
+	if err := tx.QueryRowContext(ctx, `SELECT user_id FROM local_credentials WHERE username = ?`, username).Scan(&userID); errors.Is(err, sql.ErrNoRows) {
+		return ErrRecoveryCode
+	} else if err != nil {
+		return fmt.Errorf("load recovery account: %w", err)
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM recovery_codes WHERE user_id = ? AND code_hash = ?`, userID, recoveryCodeHash)
+	if err != nil {
+		return fmt.Errorf("consume recovery code: %w", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return ErrRecoveryCode
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE local_credentials SET password_hash = ?, updated_at = ? WHERE user_id = ?`, passwordHash, unix(now), userID); err != nil {
+		return fmt.Errorf("replace local password: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, userID); err != nil {
+		return fmt.Errorf("invalidate recovered sessions: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM recovery_codes WHERE user_id = ?`, userID); err != nil {
+		return fmt.Errorf("rotate recovery codes: %w", err)
+	}
+	for _, hash := range replacementCodeHashes {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO recovery_codes (user_id, code_hash, created_at) VALUES (?, ?, ?)`, userID, hash, unix(now)); err != nil {
+			return fmt.Errorf("create replacement recovery code: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit local recovery: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) CreateSession(ctx context.Context, tokenHash []byte, userID string, expiresAt, now time.Time) error {
@@ -180,6 +315,75 @@ func (s *Store) UpdatePartyOpenAI(ctx context.Context, partyID, projectID, servi
 		return ErrNotFound
 	}
 	return nil
+}
+
+func (s *Store) PartyServices(ctx context.Context, partyID string) (model.PartyServices, error) {
+	var services model.PartyServices
+	var timeEnabled, weatherEnabled, radioEnabled int
+	var updated int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT party_id, time_enabled, weather_enabled, weather_query, weather_label,
+			weather_latitude, weather_longitude, radio_enabled, updated_at
+		FROM party_services WHERE party_id = ?`, partyID).Scan(
+		&services.PartyID, &timeEnabled, &weatherEnabled, &services.WeatherQuery, &services.WeatherLabel,
+		&services.WeatherLatitude, &services.WeatherLongitude, &radioEnabled, &updated,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		if _, err := s.partyByID(ctx, partyID); err != nil {
+			return model.PartyServices{}, err
+		}
+		return model.PartyServices{PartyID: partyID, TimeEnabled: true}, nil
+	}
+	if err != nil {
+		return model.PartyServices{}, fmt.Errorf("load party services: %w", err)
+	}
+	services.TimeEnabled = timeEnabled != 0
+	services.WeatherEnabled = weatherEnabled != 0
+	services.RadioEnabled = radioEnabled != 0
+	services.UpdatedAt = fromUnix(updated)
+	return services, nil
+}
+
+func (s *Store) UpdatePartyServices(ctx context.Context, partyID, hostUserID string, input ServiceSettingsInput) (model.PartyServices, error) {
+	result, err := s.db.ExecContext(ctx, `
+		INSERT INTO party_services (
+			party_id, time_enabled, weather_enabled, weather_query, weather_label,
+			weather_latitude, weather_longitude, radio_enabled, updated_at
+		)
+		SELECT id, ?, ?, ?, ?, ?, ?, ?, ? FROM parties WHERE id = ? AND host_user_id = ?
+		ON CONFLICT(party_id) DO UPDATE SET
+			time_enabled = excluded.time_enabled,
+			weather_enabled = excluded.weather_enabled,
+			weather_query = excluded.weather_query,
+			weather_label = excluded.weather_label,
+			weather_latitude = excluded.weather_latitude,
+			weather_longitude = excluded.weather_longitude,
+			radio_enabled = excluded.radio_enabled,
+			updated_at = excluded.updated_at`,
+		boolInt(input.TimeEnabled), boolInt(input.WeatherEnabled), input.WeatherQuery, input.WeatherLabel,
+		input.WeatherLatitude, input.WeatherLongitude, boolInt(input.RadioEnabled), unix(input.UpdatedAt), partyID, hostUserID,
+	)
+	if err != nil {
+		return model.PartyServices{}, fmt.Errorf("update party services: %w", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return model.PartyServices{}, ErrNotFound
+	}
+	return model.PartyServices{
+		PartyID: partyID, TimeEnabled: input.TimeEnabled, WeatherEnabled: input.WeatherEnabled,
+		WeatherQuery: input.WeatherQuery, WeatherLabel: input.WeatherLabel,
+		WeatherLatitude: input.WeatherLatitude, WeatherLongitude: input.WeatherLongitude,
+		RadioEnabled: input.RadioEnabled, UpdatedAt: input.UpdatedAt.UTC(),
+	}, nil
+}
+
+func (s *Store) PartyVoiceSettings(ctx context.Context, partyID string) (model.Party, model.PartyServices, error) {
+	party, err := s.partyByID(ctx, partyID)
+	if err != nil {
+		return model.Party{}, model.PartyServices{}, err
+	}
+	services, err := s.PartyServices(ctx, partyID)
+	return party, services, err
 }
 
 func (s *Store) ListPartiesByHost(ctx context.Context, hostUserID string) ([]model.Party, error) {
@@ -368,6 +572,63 @@ func (s *Store) ListMembers(ctx context.Context, partyID string) ([]model.Member
 	return members, rows.Err()
 }
 
+// RotateDevice replaces a device's registration identity and re-enables it if
+// it was previously revoked. Both the party and device ownership checks happen
+// inside the same transaction as the update.
+func (s *Store) RotateDevice(ctx context.Context, partyID, hostUserID, deviceID, sipUsername, secretCiphertext string) (RotatedDevice, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return RotatedDevice{}, fmt.Errorf("begin device rotation: %w", err)
+	}
+	defer tx.Rollback()
+
+	party, member, device, err := deviceForHostTx(ctx, tx, partyID, hostUserID, deviceID)
+	if err != nil {
+		return RotatedDevice{}, err
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE devices
+		SET sip_username = ?, sip_secret_ciphertext = ?, revoked_at = NULL
+		WHERE id = ?`, sipUsername, secretCiphertext, deviceID)
+	if err != nil {
+		return RotatedDevice{}, fmt.Errorf("rotate device credentials: %w", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return RotatedDevice{}, ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return RotatedDevice{}, fmt.Errorf("commit device rotation: %w", err)
+	}
+
+	device.SIPUsername = sipUsername
+	device.SIPSecretCiphertext = secretCiphertext
+	device.RevokedAt = nil
+	return RotatedDevice{Party: party, Member: member, Device: device}, nil
+}
+
+func (s *Store) RevokeDevice(ctx context.Context, partyID, hostUserID, deviceID string, now time.Time) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin device revocation: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, _, _, err := deviceForHostTx(ctx, tx, partyID, hostUserID, deviceID); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE devices SET revoked_at = ? WHERE id = ?`, unix(now), deviceID)
+	if err != nil {
+		return fmt.Errorf("revoke device: %w", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit device revocation: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) RoutingDevices(ctx context.Context) ([]model.RoutingDevice, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT m.party_id, m.id, m.extension, d.id, d.sip_username, d.sip_secret_ciphertext
@@ -388,6 +649,33 @@ func (s *Store) RoutingDevices(ctx context.Context) ([]model.RoutingDevice, erro
 		devices = append(devices, device)
 	}
 	return devices, rows.Err()
+}
+
+func (s *Store) RoutingServices(ctx context.Context) ([]model.RoutingServices, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT p.id,
+			COALESCE(s.time_enabled, 1),
+			CASE WHEN COALESCE(s.weather_enabled, 0) = 1 AND p.openai_status = 'ready' THEN 1 ELSE 0 END,
+			COALESCE(s.radio_enabled, 0)
+		FROM parties p LEFT JOIN party_services s ON s.party_id = p.id
+		ORDER BY p.id`)
+	if err != nil {
+		return nil, fmt.Errorf("list routing services: %w", err)
+	}
+	defer rows.Close()
+	var services []model.RoutingServices
+	for rows.Next() {
+		var item model.RoutingServices
+		var timeEnabled, weatherEnabled, radioEnabled int
+		if err := rows.Scan(&item.PartyID, &timeEnabled, &weatherEnabled, &radioEnabled); err != nil {
+			return nil, fmt.Errorf("scan routing services: %w", err)
+		}
+		item.TimeEnabled = timeEnabled != 0
+		item.WeatherEnabled = weatherEnabled != 0
+		item.RadioEnabled = radioEnabled != 0
+		services = append(services, item)
+	}
+	return services, rows.Err()
 }
 
 type scanner interface {
@@ -416,8 +704,63 @@ func partyByIDTx(ctx context.Context, tx *sql.Tx, partyID string) (model.Party, 
 			openai_key_ciphertext, openai_status, created_at FROM parties WHERE id = ?`, partyID))
 }
 
+func (s *Store) partyByID(ctx context.Context, partyID string) (model.Party, error) {
+	party, err := scanParty(s.db.QueryRowContext(ctx, `
+		SELECT id, name, slug, host_user_id, openai_project_id, openai_service_account_id,
+			openai_key_ciphertext, openai_status, created_at FROM parties WHERE id = ?`, partyID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Party{}, ErrNotFound
+	}
+	return party, err
+}
+
+func deviceForHostTx(ctx context.Context, tx *sql.Tx, partyID, hostUserID, deviceID string) (model.Party, model.Member, model.Device, error) {
+	party, err := scanParty(tx.QueryRowContext(ctx, `
+		SELECT id, name, slug, host_user_id, openai_project_id,
+			openai_service_account_id, openai_key_ciphertext, openai_status, created_at
+		FROM parties WHERE id = ? AND host_user_id = ?`, partyID, hostUserID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Party{}, model.Member{}, model.Device{}, ErrNotFound
+	}
+	if err != nil {
+		return model.Party{}, model.Member{}, model.Device{}, fmt.Errorf("load device party: %w", err)
+	}
+
+	var member model.Member
+	var device model.Device
+	var memberCreated, deviceCreated int64
+	var revoked sql.NullInt64
+	err = tx.QueryRowContext(ctx, `
+		SELECT m.id, m.party_id, m.display_name, m.extension, m.created_at,
+			d.id, d.member_id, d.label, d.sip_username, d.sip_secret_ciphertext, d.created_at, d.revoked_at
+		FROM devices d JOIN members m ON m.id = d.member_id
+		WHERE d.id = ? AND m.party_id = ?`, deviceID, partyID).Scan(
+		&member.ID, &member.PartyID, &member.DisplayName, &member.Extension, &memberCreated,
+		&device.ID, &device.MemberID, &device.Label, &device.SIPUsername, &device.SIPSecretCiphertext, &deviceCreated, &revoked,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Party{}, model.Member{}, model.Device{}, ErrNotFound
+	}
+	if err != nil {
+		return model.Party{}, model.Member{}, model.Device{}, fmt.Errorf("load hosted device: %w", err)
+	}
+	member.CreatedAt = fromUnix(memberCreated)
+	device.CreatedAt = fromUnix(deviceCreated)
+	if revoked.Valid {
+		value := fromUnix(revoked.Int64)
+		device.RevokedAt = &value
+	}
+	return party, member, device, nil
+}
+
 func unix(value time.Time) int64     { return value.UTC().Unix() }
 func fromUnix(value int64) time.Time { return time.Unix(value, 0).UTC() }
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
 
 const schema = `
 CREATE TABLE IF NOT EXISTS users (
@@ -437,6 +780,21 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS sessions_expires_at ON sessions(expires_at);
 
+CREATE TABLE IF NOT EXISTS local_credentials (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS recovery_codes (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash BLOB NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, code_hash)
+);
+
 CREATE TABLE IF NOT EXISTS parties (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -449,6 +807,18 @@ CREATE TABLE IF NOT EXISTS parties (
     created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS parties_host ON parties(host_user_id);
+
+CREATE TABLE IF NOT EXISTS party_services (
+    party_id TEXT PRIMARY KEY REFERENCES parties(id) ON DELETE CASCADE,
+    time_enabled INTEGER NOT NULL DEFAULT 1 CHECK(time_enabled IN (0, 1)),
+    weather_enabled INTEGER NOT NULL DEFAULT 0 CHECK(weather_enabled IN (0, 1)),
+    weather_query TEXT NOT NULL DEFAULT '',
+    weather_label TEXT NOT NULL DEFAULT '',
+    weather_latitude REAL NOT NULL DEFAULT 0,
+    weather_longitude REAL NOT NULL DEFAULT 0,
+    radio_enabled INTEGER NOT NULL DEFAULT 0 CHECK(radio_enabled IN (0, 1)),
+    updated_at INTEGER NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS invitations (
     id TEXT PRIMARY KEY,

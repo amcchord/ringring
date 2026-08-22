@@ -20,6 +20,7 @@ type Config struct {
 	SessionSecret              []byte
 	GoogleClientID             string
 	GoogleClientSecret         string
+	HostSignupCode             string
 	OpenAIAdminKey             string
 	OpenAIPartySpendLimitCents int
 	SIPPublicHost              string
@@ -27,6 +28,9 @@ type Config struct {
 	AsteriskAMIAddr            string
 	AsteriskAMIUser            string
 	AsteriskAMISecret          string
+	FastAGIAddr                string
+	VoiceAudioDir              string
+	VoicePlaybackDir           string
 	InviteTTL                  time.Duration
 	DevAuth                    bool
 }
@@ -39,6 +43,7 @@ func Load() (Config, error) {
 		DatabasePath:               env("DATABASE_PATH", "data/ringring.db"),
 		GoogleClientID:             os.Getenv("GOOGLE_CLIENT_ID"),
 		GoogleClientSecret:         os.Getenv("GOOGLE_CLIENT_SECRET"),
+		HostSignupCode:             os.Getenv("HOST_SIGNUP_CODE"),
 		OpenAIAdminKey:             os.Getenv("OPENAI_ADMIN_KEY"),
 		OpenAIPartySpendLimitCents: envInt("OPENAI_PARTY_SPEND_LIMIT_CENTS", 1000),
 		SIPPublicHost:              env("SIP_PUBLIC_HOST", "localhost"),
@@ -46,6 +51,9 @@ func Load() (Config, error) {
 		AsteriskAMIAddr:            env("ASTERISK_AMI_ADDR", "asterisk:5038"),
 		AsteriskAMIUser:            env("ASTERISK_AMI_USER", "ringring"),
 		AsteriskAMISecret:          os.Getenv("ASTERISK_AMI_SECRET"),
+		FastAGIAddr:                env("FASTAGI_ADDR", ":4573"),
+		VoiceAudioDir:              env("VOICE_AUDIO_DIR", "/asterisk/audio"),
+		VoicePlaybackDir:           env("VOICE_PLAYBACK_DIR", "/var/lib/ringring/asterisk/audio"),
 		InviteTTL:                  48 * time.Hour,
 		DevAuth:                    envBool("DEV_AUTH", false),
 	}
@@ -86,6 +94,10 @@ func Load() (Config, error) {
 
 func (c Config) GoogleAuthConfigured() bool {
 	return c.GoogleClientID != "" && c.GoogleClientSecret != ""
+}
+
+func (c Config) HostSignupEnabled() bool {
+	return c.Environment != "production" || c.HostSignupCode != ""
 }
 
 func (c Config) OpenAIProvisioningConfigured() bool {

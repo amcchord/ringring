@@ -1,0 +1,17 @@
+{{define "title"}}Save recovery codes{{end}}
+{{define "content"}}
+<section class="recovery-shell wrap">
+  <div class="success-burst" aria-hidden="true">✓</div>
+  <span class="eyebrow">Account: {{.FormUsername}}</span>
+  <h1>{{.RecoveryTitle}}</h1>
+  <p>{{.RecoveryText}}</p>
+  <div class="recovery-card">
+    <div class="recovery-code-grid" aria-label="One-time recovery codes">
+      {{range .RecoveryCodes}}<code>{{.}}</code>{{end}}
+    </div>
+    <p><strong>Shown once.</strong> RingRing stores only protected fingerprints of these codes and cannot show them again.</p>
+  </div>
+  <div class="warning-card"><strong>Do this before continuing.</strong><p>A screenshot is convenient, but a password manager or printed copy is safer.</p></div>
+  <a class="button button-primary recovery-next" href="{{.RecoveryNext}}">{{.RecoveryButton}} <span aria-hidden="true">→</span></a>
+</section>
+{{end}}

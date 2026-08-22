@@ -25,7 +25,7 @@ FROM debian:13-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-      ca-certificates libedit2 libjansson4 libsqlite3-0 libssl3t64 libuuid1 libxml2 \
+      ca-certificates libedit2 libjansson4 libsqlite3-0 libssl3t64 libuuid1 libxml2 mpg123 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 ringring \
     && useradd --uid 10002 --gid 10001 --home-dir /var/lib/asterisk --shell /usr/sbin/nologin asterisk \

@@ -1,0 +1,27 @@
+{{define "title"}}Host sign in{{end}}
+{{define "content"}}
+<section class="auth-shell wrap">
+  <div class="auth-intro">
+    <span class="eyebrow"><span class="live-dot"></span> Welcome back</span>
+    <h1>Your parties<br><em>are ringing.</em></h1>
+    <p>Use the RingRing username and password you chose. There is no email confirmation step.</p>
+  </div>
+  <div class="panel auth-panel">
+    <span class="panel-icon">☎️</span>
+    <h2>Host sign in</h2>
+    {{if .FormError}}<div class="form-error" role="alert">{{.FormError}}</div>{{end}}
+    <form method="post" action="/login" class="stack-form">
+      <input type="hidden" name="csrf" value="{{.AuthCSRF}}">
+      <label for="login-username">Username</label>
+      <input id="login-username" name="username" value="{{.FormUsername}}" maxlength="32" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus>
+      <label for="login-password">Password</label>
+      <input id="login-password" name="password" type="password" maxlength="128" autocomplete="current-password" required>
+      <button class="button button-primary" type="submit">Sign in <span aria-hidden="true">→</span></button>
+    </form>
+    <div class="auth-links">
+      {{if .SignupEnabled}}<a href="/signup">Create an account</a>{{end}}
+      <a href="/recover">Use a recovery code</a>
+    </div>
+  </div>
+</section>
+{{end}}

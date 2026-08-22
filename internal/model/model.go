@@ -11,6 +11,14 @@ type User struct {
 	CreatedAt     time.Time
 }
 
+type LocalCredential struct {
+	User         User
+	Username     string
+	PasswordHash string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
 type Party struct {
 	ID                     string
 	Name                   string
@@ -21,6 +29,25 @@ type Party struct {
 	OpenAIKeyCiphertext    string
 	OpenAIStatus           string
 	CreatedAt              time.Time
+}
+
+type PartyServices struct {
+	PartyID          string
+	TimeEnabled      bool
+	WeatherEnabled   bool
+	WeatherQuery     string
+	WeatherLabel     string
+	WeatherLatitude  float64
+	WeatherLongitude float64
+	RadioEnabled     bool
+	UpdatedAt        time.Time
+}
+
+type RoutingServices struct {
+	PartyID        string
+	TimeEnabled    bool
+	WeatherEnabled bool
+	RadioEnabled   bool
 }
 
 type Invitation struct {

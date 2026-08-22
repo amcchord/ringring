@@ -2,6 +2,37 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-21 — Native accounts and family service controls
+
+### Shipped
+
+- Replaced Google as the host-signup prerequisite with RingRing-native username/password accounts. Production signup uses a shared high-entropy family access code and requires no email, organization membership, approval, or confirmation link; Google remains optional.
+- Added salted Argon2id password hashing, generic login failures, per-address and per-username throttling, bounded password-hash concurrency, 32 KiB auth-form limits, server-side sessions, and CSRF-protected signup/login/recovery forms.
+- Added eight random offline recovery codes, one-time encrypted reveal screens, hashed storage, full code rotation after use, and automatic invalidation of every session after password recovery.
+- Added host device reconnect/disconnect controls with fresh one-time SIP credentials and device-specific ATA, VoIP-phone, and softphone setup guides.
+- Added host-controlled `*11` time, `*12` weather, and `*13` Groove Salad radio routes. Weather uses Open-Meteo, a private FastAGI service, party-scoped OpenAI text-to-speech, settings-aware caching, and explicit AI/source disclosure.
+- Added a reproducible Fail2Ban Asterisk jail, dedicated PJSIP security log, and installer targeting Docker's pre-forwarding `DOCKER-USER` chain.
+
+### Decisions
+
+- A completely open signup would let bots provision paid OpenAI projects. The shared family code keeps enrollment immediate while placing the public reference instance behind one out-of-band secret.
+- Recovery is offline because RingRing intentionally does not require an email address. Recovery codes are the proof of control and are never recoverable from the database.
+- Weather speech uses only the party key; the organization admin key remains provisioning-only. Disabling weather is checked before cached audio can play.
+- Internet radio starts with a code-controlled direct stream. Arbitrary URLs and interactive AI calling remain deferred until SSRF, dialplan-injection, under-18 safety, disclosure, and retention rules are designed.
+
+### Verification
+
+- `make check` passes with formatting, vet, and race-enabled tests. Coverage includes native signup/login/recovery, duplicate usernames, one-time recovery reveal, old-session and old-password invalidation, host-scoped device changes, party-scoped service routing, weather lookup, speech conversion, disclosure text, and cache-disable behavior.
+- The complete native signup and sign-in flow passed in a real browser at desktop and 390×844 mobile viewports. The recovery screen issued exactly eight codes and the second reveal was rejected.
+- Shell syntax and whitespace checks pass. Modified Compose images, the live Fail2Ban jail, FastAGI connectivity, and Asterisk media applications still require production deployment verification.
+
+### Remaining
+
+- Deploy this release and verify native host signup, the SIP firewall, special lines, and rollback safety at `ringring.live`.
+- Verify registration and two-way audio with two remote physical devices.
+- Exercise backup/restore and add host/member deletion flows.
+- Design the interactive OpenAI voice line with child-appropriate instructions, clear disclosure, and no default transcript retention.
+
 ## 2026-08-21 — First vertical slice deployed
 
 ### Shipped

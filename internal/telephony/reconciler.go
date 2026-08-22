@@ -14,8 +14,9 @@ import (
 	"github.com/amcchord/ringring/internal/model"
 )
 
-type DeviceSource interface {
+type RoutingSource interface {
 	RoutingDevices(context.Context) ([]model.RoutingDevice, error)
+	RoutingServices(context.Context) ([]model.RoutingServices, error)
 }
 
 type SecretDecryptor interface {
@@ -27,7 +28,7 @@ type Reloader interface {
 }
 
 type Reconciler struct {
-	Source    DeviceSource
+	Source    RoutingSource
 	Cipher    SecretDecryptor
 	ConfigDir string
 	Reloader  Reloader
@@ -45,7 +46,11 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	config, err := Render(dialDevices)
+	services, err := r.Source.RoutingServices(ctx)
+	if err != nil {
+		return err
+	}
+	config, err := Render(dialDevices, services)
 	if err != nil {
 		return err
 	}
