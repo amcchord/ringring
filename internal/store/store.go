@@ -24,6 +24,7 @@ var (
 	ErrPartiesRemain    = errors.New("host still owns parties")
 	ErrProvisionUsed    = errors.New("provisioning link has already been used")
 	ErrProvisionExpired = errors.New("provisioning link has expired")
+	ErrOpenAIRotation   = errors.New("OpenAI key rotation state changed")
 )
 
 type Store struct {
@@ -133,6 +134,10 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate AI service setting: %w", err)
 	}
+	if err := ensurePartyOpenAIAPIKeyColumn(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate OpenAI key identifier: %w", err)
+	}
 	return &Store{db: db}, nil
 }
 
@@ -161,6 +166,34 @@ func ensurePartyServicesAIColumn(db *sql.DB) error {
 		return nil
 	}
 	_, err = db.Exec(`ALTER TABLE party_services ADD COLUMN ai_enabled INTEGER NOT NULL DEFAULT 0 CHECK(ai_enabled IN (0, 1))`)
+	return err
+}
+
+func ensurePartyOpenAIAPIKeyColumn(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(parties)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	found := false
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return err
+		}
+		if name == "openai_api_key_id" {
+			found = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if found {
+		return nil
+	}
+	_, err = db.Exec(`ALTER TABLE parties ADD COLUMN openai_api_key_id TEXT`)
 	return err
 }
 
@@ -352,17 +385,55 @@ func (s *Store) CreateParty(ctx context.Context, input NewParty) (model.Party, e
 	}, nil
 }
 
-func (s *Store) UpdatePartyOpenAI(ctx context.Context, partyID, projectID, serviceAccountID, keyCiphertext, status string) error {
+func (s *Store) UpdatePartyOpenAI(ctx context.Context, partyID, projectID, serviceAccountID, apiKeyID, keyCiphertext, status string) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE parties SET openai_project_id = ?, openai_service_account_id = ?,
-			openai_key_ciphertext = ?, openai_status = ? WHERE id = ?`,
-		projectID, serviceAccountID, keyCiphertext, status, partyID,
+			openai_api_key_id = ?, openai_key_ciphertext = ?, openai_status = ? WHERE id = ?`,
+		projectID, serviceAccountID, apiKeyID, keyCiphertext, status, partyID,
 	)
 	if err != nil {
 		return fmt.Errorf("update party OpenAI configuration: %w", err)
 	}
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return ErrNotFound
+	}
+	return nil
+}
+
+// StartPartyOpenAIKeyRotation atomically installs the fresh encrypted key and
+// pauses AI-powered routing. Matching the previous key ID prevents concurrent
+// host requests from both becoming authoritative.
+func (s *Store) StartPartyOpenAIKeyRotation(ctx context.Context, partyID, hostUserID, previousKeyID, freshKeyID, freshKeyCiphertext string) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE parties SET openai_api_key_id = ?, openai_key_ciphertext = ?, openai_status = 'rotating'
+		WHERE id = ? AND host_user_id = ? AND COALESCE(openai_api_key_id, '') = ?
+			AND openai_status = 'ready' AND openai_project_id <> '' AND openai_service_account_id <> ''`,
+		freshKeyID, freshKeyCiphertext, partyID, hostUserID, previousKeyID,
+	)
+	if err != nil {
+		return fmt.Errorf("start party OpenAI key rotation: %w", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return ErrOpenAIRotation
+	}
+	return nil
+}
+
+func (s *Store) SetPartyOpenAIKeyRotationStatus(ctx context.Context, partyID, hostUserID, currentKeyID, status string) error {
+	if status != "ready" && status != "rotation-error" {
+		return errors.New("invalid OpenAI key rotation status")
+	}
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE parties SET openai_status = ?
+		WHERE id = ? AND host_user_id = ? AND openai_api_key_id = ?
+			AND openai_status IN ('rotating', 'rotation-error')`,
+		status, partyID, hostUserID, currentKeyID,
+	)
+	if err != nil {
+		return fmt.Errorf("finish party OpenAI key rotation: %w", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return ErrOpenAIRotation
 	}
 	return nil
 }
@@ -441,7 +512,7 @@ func (s *Store) PartyVoiceSettings(ctx context.Context, partyID string) (model.P
 func (s *Store) ListPartiesByHost(ctx context.Context, hostUserID string) ([]model.Party, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, slug, host_user_id, openai_project_id, openai_service_account_id,
-			openai_key_ciphertext, openai_status, created_at
+			openai_api_key_id, openai_key_ciphertext, openai_status, created_at
 		FROM parties WHERE host_user_id = ? ORDER BY created_at DESC`, hostUserID)
 	if err != nil {
 		return nil, fmt.Errorf("list parties: %w", err)
@@ -462,7 +533,7 @@ func (s *Store) ListPartiesByHost(ctx context.Context, hostUserID string) ([]mod
 func (s *Store) PartyForHost(ctx context.Context, partyID, hostUserID string) (model.Party, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, name, slug, host_user_id, openai_project_id, openai_service_account_id,
-			openai_key_ciphertext, openai_status, created_at
+			openai_api_key_id, openai_key_ciphertext, openai_status, created_at
 		FROM parties WHERE id = ? AND host_user_id = ?`, partyID, hostUserID)
 	party, err := scanParty(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -486,16 +557,16 @@ func (s *Store) CreateInvitation(ctx context.Context, input NewInvitation) error
 func (s *Store) PartyByInvitation(ctx context.Context, tokenHash []byte, now time.Time) (model.Party, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT p.id, p.name, p.slug, p.host_user_id, p.openai_project_id,
-			p.openai_service_account_id, p.openai_key_ciphertext, p.openai_status, p.created_at,
+			p.openai_service_account_id, p.openai_api_key_id, p.openai_key_ciphertext, p.openai_status, p.created_at,
 			i.expires_at, i.used_at
 		FROM invitations i JOIN parties p ON p.id = i.party_id
 		WHERE i.token_hash = ?`, tokenHash)
 	var party model.Party
-	var projectID, serviceID, keyCipher, status sql.NullString
+	var projectID, serviceID, apiKeyID, keyCipher, status sql.NullString
 	var created, expires int64
 	var used sql.NullInt64
 	err := row.Scan(&party.ID, &party.Name, &party.Slug, &party.HostUserID, &projectID, &serviceID,
-		&keyCipher, &status, &created, &expires, &used)
+		&apiKeyID, &keyCipher, &status, &created, &expires, &used)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.Party{}, ErrNotFound
 	}
@@ -510,6 +581,7 @@ func (s *Store) PartyByInvitation(ctx context.Context, tokenHash []byte, now tim
 	}
 	party.OpenAIProjectID = projectID.String
 	party.OpenAIServiceAccountID = serviceID.String
+	party.OpenAIAPIKeyID = apiKeyID.String
 	party.OpenAIKeyCiphertext = keyCipher.String
 	party.OpenAIStatus = status.String
 	party.CreatedAt = fromUnix(created)
@@ -906,14 +978,15 @@ type scanner interface {
 
 func scanParty(row scanner) (model.Party, error) {
 	var party model.Party
-	var projectID, serviceID, keyCipher, status sql.NullString
+	var projectID, serviceID, apiKeyID, keyCipher, status sql.NullString
 	var created int64
 	if err := row.Scan(&party.ID, &party.Name, &party.Slug, &party.HostUserID, &projectID,
-		&serviceID, &keyCipher, &status, &created); err != nil {
+		&serviceID, &apiKeyID, &keyCipher, &status, &created); err != nil {
 		return model.Party{}, err
 	}
 	party.OpenAIProjectID = projectID.String
 	party.OpenAIServiceAccountID = serviceID.String
+	party.OpenAIAPIKeyID = apiKeyID.String
 	party.OpenAIKeyCiphertext = keyCipher.String
 	party.OpenAIStatus = status.String
 	party.CreatedAt = fromUnix(created)
@@ -923,13 +996,13 @@ func scanParty(row scanner) (model.Party, error) {
 func partyByIDTx(ctx context.Context, tx *sql.Tx, partyID string) (model.Party, error) {
 	return scanParty(tx.QueryRowContext(ctx, `
 		SELECT id, name, slug, host_user_id, openai_project_id, openai_service_account_id,
-			openai_key_ciphertext, openai_status, created_at FROM parties WHERE id = ?`, partyID))
+			openai_api_key_id, openai_key_ciphertext, openai_status, created_at FROM parties WHERE id = ?`, partyID))
 }
 
 func (s *Store) partyByID(ctx context.Context, partyID string) (model.Party, error) {
 	party, err := scanParty(s.db.QueryRowContext(ctx, `
 		SELECT id, name, slug, host_user_id, openai_project_id, openai_service_account_id,
-			openai_key_ciphertext, openai_status, created_at FROM parties WHERE id = ?`, partyID))
+			openai_api_key_id, openai_key_ciphertext, openai_status, created_at FROM parties WHERE id = ?`, partyID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.Party{}, ErrNotFound
 	}
@@ -939,7 +1012,7 @@ func (s *Store) partyByID(ctx context.Context, partyID string) (model.Party, err
 func deviceForHostTx(ctx context.Context, tx *sql.Tx, partyID, hostUserID, deviceID string) (model.Party, model.Member, model.Device, error) {
 	party, err := scanParty(tx.QueryRowContext(ctx, `
 		SELECT id, name, slug, host_user_id, openai_project_id,
-			openai_service_account_id, openai_key_ciphertext, openai_status, created_at
+			openai_service_account_id, openai_api_key_id, openai_key_ciphertext, openai_status, created_at
 		FROM parties WHERE id = ? AND host_user_id = ?`, partyID, hostUserID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.Party{}, model.Member{}, model.Device{}, ErrNotFound
@@ -1024,6 +1097,7 @@ CREATE TABLE IF NOT EXISTS parties (
     host_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     openai_project_id TEXT,
     openai_service_account_id TEXT,
+    openai_api_key_id TEXT,
     openai_key_ciphertext TEXT,
     openai_status TEXT NOT NULL DEFAULT 'pending',
     created_at INTEGER NOT NULL

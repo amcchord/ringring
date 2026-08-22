@@ -256,7 +256,7 @@ func TestPartyServiceSettingsAreHostScopedAndDefaultToTime(t *testing.T) {
 	if updated.TimeEnabled || !updated.WeatherEnabled || !updated.RadioEnabled || !updated.AIEnabled || updated.WeatherLabel != "Portland, Maine" {
 		t.Fatalf("unexpected updated settings: %#v", updated)
 	}
-	if err := s.UpdatePartyOpenAI(ctx, party.ID, "project", "service-account", "encrypted-key", "ready"); err != nil {
+	if err := s.UpdatePartyOpenAI(ctx, party.ID, "project", "service-account", "key-old", "encrypted-key", "ready"); err != nil {
 		t.Fatal(err)
 	}
 	routing, err := s.RoutingServices(ctx)
@@ -265,6 +265,63 @@ func TestPartyServiceSettingsAreHostScopedAndDefaultToTime(t *testing.T) {
 	}
 	if len(routing) != 1 || routing[0].TimeEnabled || !routing[0].WeatherEnabled || !routing[0].RadioEnabled || !routing[0].AIEnabled {
 		t.Fatalf("unexpected routing services: %#v", routing)
+	}
+}
+
+func TestPartyOpenAIKeyRotationIsHostScopedAndCompareAndSwap(t *testing.T) {
+	ctx := t.Context()
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Date(2026, 8, 22, 18, 0, 0, 0, time.UTC)
+	host, _ := s.UpsertGoogleUser(ctx, GoogleProfile{Subject: "rotation-host", Email: "host@example.test", Name: "Host"}, now, "usr_rotation_host")
+	other, _ := s.UpsertGoogleUser(ctx, GoogleProfile{Subject: "rotation-other", Email: "other@example.test", Name: "Other"}, now, "usr_rotation_other")
+	party, _ := s.CreateParty(ctx, NewParty{ID: "pty_rotation", Name: "Party", Slug: "rotation", HostUserID: host.ID, CreatedAt: now})
+	if err := s.UpdatePartyOpenAI(ctx, party.ID, "proj_rotation", "svc_rotation", "key_old", "cipher_old", "ready"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpdatePartyServices(ctx, party.ID, host.ID, ServiceSettingsInput{TimeEnabled: true, WeatherEnabled: true, WeatherQuery: "Portland", WeatherLabel: "Portland", AIEnabled: true, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.StartPartyOpenAIKeyRotation(ctx, party.ID, other.ID, "key_old", "key_outsider", "cipher_outsider"); !errors.Is(err, ErrOpenAIRotation) {
+		t.Fatalf("non-host rotation error = %v", err)
+	}
+	if err := s.StartPartyOpenAIKeyRotation(ctx, party.ID, host.ID, "wrong_key", "key_wrong", "cipher_wrong"); !errors.Is(err, ErrOpenAIRotation) {
+		t.Fatalf("stale rotation error = %v", err)
+	}
+	if err := s.StartPartyOpenAIKeyRotation(ctx, party.ID, host.ID, "key_old", "key_fresh", "cipher_fresh"); err != nil {
+		t.Fatal(err)
+	}
+	rotating, err := s.PartyForHost(ctx, party.ID, host.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rotating.OpenAIAPIKeyID != "key_fresh" || rotating.OpenAIKeyCiphertext != "cipher_fresh" || rotating.OpenAIStatus != "rotating" {
+		t.Fatalf("unexpected rotating state: %#v", rotating)
+	}
+	if routing, err := s.RoutingServices(ctx); err != nil || len(routing) != 1 || routing[0].AIEnabled || routing[0].WeatherEnabled {
+		t.Fatalf("AI routes were not paused during rotation: %#v, %v", routing, err)
+	}
+	if err := s.StartPartyOpenAIKeyRotation(ctx, party.ID, host.ID, "key_old", "key_second", "cipher_second"); !errors.Is(err, ErrOpenAIRotation) {
+		t.Fatalf("concurrent rotation error = %v", err)
+	}
+	if err := s.SetPartyOpenAIKeyRotationStatus(ctx, party.ID, host.ID, "key_fresh", "rotation-error"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPartyOpenAIKeyRotationStatus(ctx, party.ID, host.ID, "key_fresh", "ready"); err != nil {
+		t.Fatal(err)
+	}
+	ready, err := s.PartyForHost(ctx, party.ID, host.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ready.OpenAIAPIKeyID != "key_fresh" || ready.OpenAIStatus != "ready" {
+		t.Fatalf("unexpected completed state: %#v", ready)
+	}
+	if err := s.SetPartyOpenAIKeyRotationStatus(ctx, party.ID, host.ID, "key_fresh", "unknown"); err == nil {
+		t.Fatal("accepted an invalid rotation status")
 	}
 }
 
@@ -330,13 +387,24 @@ func TestDeletionIsHostScopedAndCascades(t *testing.T) {
 	}
 }
 
-func TestOpenAddsAIServiceColumnToLegacyDatabase(t *testing.T) {
+func TestOpenAddsCurrentColumnsToLegacyDatabase(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.db")
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.Exec(`CREATE TABLE party_services (
+	_, err = db.Exec(`CREATE TABLE parties (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		slug TEXT NOT NULL UNIQUE,
+		host_user_id TEXT NOT NULL,
+		openai_project_id TEXT,
+		openai_service_account_id TEXT,
+		openai_key_ciphertext TEXT,
+		openai_status TEXT NOT NULL DEFAULT 'pending',
+		created_at INTEGER NOT NULL
+	);
+	CREATE TABLE party_services (
 		party_id TEXT PRIMARY KEY,
 		time_enabled INTEGER NOT NULL DEFAULT 1,
 		weather_enabled INTEGER NOT NULL DEFAULT 0,
@@ -365,5 +433,11 @@ func TestOpenAddsAIServiceColumnToLegacyDatabase(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("ai_enabled column count = %d", count)
+	}
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('parties') WHERE name = 'openai_api_key_id'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("openai_api_key_id column count = %d", count)
 	}
 }

@@ -26,6 +26,7 @@ type Party struct {
 	HostUserID             string
 	OpenAIProjectID        string
 	OpenAIServiceAccountID string
+	OpenAIAPIKeyID         string
 	OpenAIKeyCiphertext    string
 	OpenAIStatus           string
 	CreatedAt              time.Time

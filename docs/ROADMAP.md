@@ -30,7 +30,7 @@
 
 - [x] Automated per-party OpenAI project/service-account provisioning.
 - [x] Per-party encrypted runtime key use.
-- [ ] Immediate party-key revocation and replacement.
+- [x] Immediate party-key revocation and replacement.
 - [ ] Host-set project spend limit; service toggles are implemented.
 - [x] Realtime voice line with child-appropriate instructions, disclosure, bounded calls, and no tools.
 - [x] AI disclosure for generated weather speech and no default transcript retention.

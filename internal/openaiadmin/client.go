@@ -24,7 +24,13 @@ type Client struct {
 type ProvisionedProject struct {
 	ProjectID        string
 	ServiceAccountID string
+	APIKeyID         string
 	APIKey           string
+}
+
+type ServiceAccountAPIKey struct {
+	ID    string
+	Value string
 }
 
 type projectResponse struct {
@@ -73,6 +79,7 @@ func (c *Client) Provision(ctx context.Context, partyID, partyName string) (Prov
 	var serviceAccount struct {
 		ID     string `json:"id"`
 		APIKey *struct {
+			ID    string `json:"id"`
 			Value string `json:"value"`
 		} `json:"api_key"`
 	}
@@ -80,15 +87,132 @@ func (c *Client) Provision(ctx context.Context, partyID, partyName string) (Prov
 	if err := c.post(ctx, path, map[string]any{"name": "ringring-runtime"}, &serviceAccount); err != nil {
 		return ProvisionedProject{}, fmt.Errorf("create OpenAI service account: %w", err)
 	}
-	if serviceAccount.ID == "" || serviceAccount.APIKey == nil || serviceAccount.APIKey.Value == "" {
+	if serviceAccount.ID == "" || serviceAccount.APIKey == nil || serviceAccount.APIKey.ID == "" || serviceAccount.APIKey.Value == "" {
 		return ProvisionedProject{}, errors.New("create OpenAI service account: response omitted credentials")
 	}
 
 	return ProvisionedProject{
 		ProjectID:        project.ID,
 		ServiceAccountID: serviceAccount.ID,
+		APIKeyID:         serviceAccount.APIKey.ID,
 		APIKey:           serviceAccount.APIKey.Value,
 	}, nil
+}
+
+// CreateServiceAccountAPIKey creates a replacement runtime key. The returned
+// value is available only in this response and must be encrypted immediately.
+func (c *Client) CreateServiceAccountAPIKey(ctx context.Context, projectID, serviceAccountID string) (ServiceAccountAPIKey, error) {
+	if err := c.validateKeyManagement(projectID, serviceAccountID); err != nil {
+		return ServiceAccountAPIKey{}, err
+	}
+	var created struct {
+		ID    string `json:"id"`
+		Value string `json:"value"`
+	}
+	path := "/organization/projects/" + url.PathEscape(projectID) + "/service_accounts/" + url.PathEscape(serviceAccountID) + "/api_keys"
+	if err := c.post(ctx, path, map[string]any{"name": "ringring-runtime"}, &created); err != nil {
+		return ServiceAccountAPIKey{}, fmt.Errorf("create OpenAI service account key: %w", err)
+	}
+	if created.ID == "" || created.Value == "" {
+		return ServiceAccountAPIKey{}, errors.New("create OpenAI service account key: response omitted credentials")
+	}
+	return ServiceAccountAPIKey{ID: created.ID, Value: created.Value}, nil
+}
+
+// ServiceAccountAPIKeyIDs lists only active project keys owned by the supplied
+// dedicated service account. It never returns redacted or unredacted key values.
+func (c *Client) ServiceAccountAPIKeyIDs(ctx context.Context, projectID, serviceAccountID string) ([]string, error) {
+	if err := c.validateKeyManagement(projectID, serviceAccountID); err != nil {
+		return nil, err
+	}
+	var ids []string
+	after := ""
+	for page := 0; page < 100; page++ {
+		query := url.Values{"limit": {"100"}, "owner_project_access": {"active"}}
+		if after != "" {
+			query.Set("after", after)
+		}
+		var result struct {
+			Data []struct {
+				ID    string `json:"id"`
+				Owner struct {
+					Type           string `json:"type"`
+					ServiceAccount *struct {
+						ID string `json:"id"`
+					} `json:"service_account"`
+				} `json:"owner"`
+			} `json:"data"`
+			LastID  string `json:"last_id"`
+			HasMore bool   `json:"has_more"`
+		}
+		path := "/organization/projects/" + url.PathEscape(projectID) + "/api_keys?" + query.Encode()
+		if err := c.get(ctx, path, &result); err != nil {
+			return nil, fmt.Errorf("list OpenAI service account keys: %w", err)
+		}
+		for _, key := range result.Data {
+			if key.ID != "" && key.Owner.Type == "service_account" && key.Owner.ServiceAccount != nil && key.Owner.ServiceAccount.ID == serviceAccountID {
+				ids = append(ids, key.ID)
+			}
+		}
+		if !result.HasMore {
+			return ids, nil
+		}
+		if result.LastID == "" || result.LastID == after {
+			return nil, errors.New("list OpenAI service account keys: invalid pagination response")
+		}
+		after = result.LastID
+	}
+	return nil, errors.New("list OpenAI service account keys: pagination limit exceeded")
+}
+
+// DeleteProjectAPIKey is retry-safe: a missing key is already retired.
+func (c *Client) DeleteProjectAPIKey(ctx context.Context, projectID, keyID string) error {
+	if c.adminKey == "" {
+		return errors.New("OpenAI admin key is not configured")
+	}
+	if projectID == "" || keyID == "" {
+		return errors.New("OpenAI project and key IDs are required")
+	}
+	path := "/organization/projects/" + url.PathEscape(projectID) + "/api_keys/" + url.PathEscape(keyID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, strings.TrimRight(c.baseURL, "/")+path, nil)
+	if err != nil {
+		return fmt.Errorf("delete OpenAI project key: create request: %w", err)
+	}
+	c.setHeaders(req)
+	response, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("delete OpenAI project key: send request: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusNotFound {
+		_, _ = io.Copy(io.Discard, response.Body)
+		return nil
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		limited, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		return fmt.Errorf("delete OpenAI project key: OpenAI API returned %s: %s", response.Status, safeAPIError(limited))
+	}
+	var deleted struct {
+		ID      string `json:"id"`
+		Deleted bool   `json:"deleted"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&deleted); err != nil {
+		return fmt.Errorf("delete OpenAI project key: decode response: %w", err)
+	}
+	if !deleted.Deleted || deleted.ID != keyID {
+		return errors.New("delete OpenAI project key: response did not confirm deletion")
+	}
+	return nil
+}
+
+func (c *Client) validateKeyManagement(projectID, serviceAccountID string) error {
+	if c.adminKey == "" {
+		return errors.New("OpenAI admin key is not configured")
+	}
+	if projectID == "" || serviceAccountID == "" {
+		return errors.New("OpenAI project and service account IDs are required")
+	}
+	return nil
 }
 
 // ArchiveProject disables a party's external project before RingRing removes

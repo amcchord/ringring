@@ -33,6 +33,7 @@ Telephony configuration is derived from SQLite. If an Asterisk regeneration or p
 
 - Deployment secrets live outside Git in a root-readable environment file or secret manager.
 - The application master key encrypts SIP passwords and party-scoped integration keys.
+- Each party's OpenAI key identifier is stored alongside its encrypted value so a host can replace it. During replacement, AI-powered routes pause until RingRing confirms the fresh key exists and every older active key owned by that party's dedicated service account is deleted. Partial failures remain retryable and never reveal a key to the browser.
 - Invitation tokens are random, expire, are single-use, and are stored as hashes.
 - Linphone provisioning tokens have 32 random bytes, are stored only as hashes, expire after 30 minutes, and are consumed once. Rotation replaces them and revocation or device deletion removes them.
 - Session cookies are secure, HTTP-only, same-site, rotated at authentication, and backed by server-side state.
@@ -61,7 +62,7 @@ The database, AMI, metrics, debug endpoints, and container APIs are never public
 - Native login and recovery are limited both per source address and per normalized username; Argon2 work also has a small concurrency ceiling.
 - Production host signup is closed unless a deployment-chosen `HOST_SIGNUP_CODE` is configured. This prevents anonymous visitors from provisioning party OpenAI resources.
 - Repeated SIP failures trigger temporary address blocking.
-- Hosts can revoke devices and disable integrations immediately.
+- Hosts can revoke devices, disable integrations, and replace a party's OpenAI runtime key immediately.
 - OpenAI projects should use model restrictions and hard spend limits where available.
 
 The reference deployment writes Asterisk PJSIP security events to a dedicated file. Fail2Ban uses its maintained Asterisk filter and inserts bans into Docker's `DOCKER-USER` chain, before published-port forwarding. A legitimate first SIP challenge is not a failure; repeated bad authentication responses are banned with increasing durations.
@@ -78,4 +79,4 @@ Do not open a public issue for a vulnerability that could expose credentials or 
 
 ## Known preview gaps
 
-HTTPS/TLS, narrow published ports, cross-party configuration isolation, native account recovery, one-time Linphone provisioning, official Linphone-engine XML import, SIP registration, party calling, echoed bidirectional audio, simulated distinct NAT paths, SIP credential rotation/revocation, guarded member/party/account deletion, live authentication blocking, and isolated backup/restore are verified in code and disposable environments. The Linphone mobile UI, push/background ringing, real household and carrier-grade NAT paths, and a two-way call between two remote physical devices still need to pass on family hardware before the service leaves preview status.
+HTTPS/TLS, narrow published ports, cross-party configuration isolation, native account recovery, one-time Linphone provisioning, official Linphone-engine XML import, SIP registration, party calling, echoed bidirectional audio, simulated distinct NAT paths, SIP credential rotation/revocation, retry-safe party OpenAI key replacement, guarded member/party/account deletion, live authentication blocking, and isolated backup/restore are verified in code and disposable environments. The Linphone mobile UI, push/background ringing, real household and carrier-grade NAT paths, and a two-way call between two remote physical devices still need to pass on family hardware before the service leaves preview status.

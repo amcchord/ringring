@@ -2,6 +2,32 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Immediate party OpenAI key replacement
+
+### Shipped
+
+- Added a host-only **Party AI key** control that creates a fresh key on the party's dedicated OpenAI service account, installs its encrypted value, and revokes every older active key owned by that account. No key value or provider identifier reaches the browser.
+- Added a nullable provider key ID to party state with a forward-only startup migration. New parties retain the initial service-account key ID; existing parties acquire one on their first replacement without losing their current runtime key.
+- Added an explicit `rotating`/`rotation-error` state that pauses AI-powered routing until the fresh key appears in the provider's active-key list and every older key retirement succeeds. A visible **Finish key replacement** action resumes cleanup without minting another key.
+
+### Decisions
+
+- Use OpenAI's service-account API-key creation endpoint and the project-key list/delete endpoints instead of replacing the project or service account. Filter list results by the exact dedicated service-account owner and keep only the newly persisted key.
+- Install the fresh encrypted key with a compare-and-swap against the prior key ID. A concurrent request loses safely and cleans up its unclaimed key; a timeout, restart, invalid provider response, or partial deletion leaves AI lines paused and the same rotation retryable.
+- Treat key rotation as a deliberate host security action, never a deployment health probe. Production rollout may migrate and display the control but must not submit it against a real family party.
+
+### Verification
+
+- OpenAI client tests cover one-time key creation, owner filtering, pagination, deletion confirmation, retry-safe missing-key deletion, malformed credentials, and invalid pagination. Store tests cover the additive legacy migration, host scope, stale/concurrent compare-and-swap rejection, encrypted-key installation, routing pause, error transition, retry, and completion.
+- The full browser flow covers CSRF rejection, partial external failure, encrypted fresh-key persistence, no key or internal-state disclosure, paused dashboard/party states, retry without a second key, old-key retirement, route resumption, and cross-host denial.
+- `make check` passes formatting, vet, and the complete race-enabled suite. At 390×844 and 1280×900, ready and retry controls have no horizontal overflow, use 54–78px buttons, retain friendly status labels, and expose no provider key identifier or runtime secret; the disposable browser, app, database, and viewport override were removed or reset.
+
+### Remaining
+
+- Let hosts choose a bounded project spend limit and verify the provider enforcement lifecycle.
+- Complete the external child-safety review and confirm OpenAI Zero Data Retention before enabling AI for any caller under 13.
+- Scan and call with real family phones across two remote networks; verify mobile background ringing and Wi-Fi/cellular transitions.
+
 ## 2026-08-22 — Two-household NAT interoperability gate
 
 ### Shipped

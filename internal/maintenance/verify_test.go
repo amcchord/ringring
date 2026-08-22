@@ -83,7 +83,7 @@ func verificationFixture(t *testing.T) (string, []byte, string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := database.UpdatePartyOpenAI(context.Background(), "pty_backup", "project", "service", partyCiphertext, "ready"); err != nil {
+	if err := database.UpdatePartyOpenAI(context.Background(), "pty_backup", "project", "service", "key", partyCiphertext, "ready"); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.CreateInvitation(context.Background(), store.NewInvitation{

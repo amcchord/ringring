@@ -4,7 +4,7 @@
   <a class="back-link" href="/app">← All parties</a>
   <span class="eyebrow">Private party</span>
   <h1>{{.Party.Name}}</h1>
-  <div class="party-meta"><span>☎ {{len .Members}} members</span><span>AI line: {{.Party.OpenAIStatus}}</span></div>
+  <div class="party-meta"><span>☎ {{len .Members}} members</span><span>AI voice: {{if eq .Party.OpenAIStatus "ready"}}ready{{else if or (eq .Party.OpenAIStatus "rotating") (eq .Party.OpenAIStatus "rotation-error")}}paused for key safety{{else if eq .Party.OpenAIStatus "pending"}}getting ready{{else}}unavailable{{end}}</span></div>
 </section>
 <section class="party-layout wrap">
   <div class="party-sidebar">
@@ -69,6 +69,33 @@
         <button class="button button-primary" type="submit">Save fun numbers</button>
       </form>
       <p class="service-note">Special lines stay inside this party. RingRing never routes them to the regular phone network.</p>
+      {{if .Party.OpenAIProjectID}}
+      <div class="ai-key-card">
+        <span class="panel-icon">🔐</span>
+        <div>
+          <h3>Party AI key</h3>
+          {{if $voiceReady}}
+          <p>The private runtime key is encrypted and never shown to phones or browsers. Replace it immediately if you think it may have escaped.</p>
+          <details class="ai-key-actions">
+            <summary>Key safety controls</summary>
+            <p>RingRing installs a fresh key, pauses AI-powered lines, and revokes every older key owned by this party’s dedicated service account.</p>
+            <form method="post" action="/parties/{{.Party.ID}}/openai-key/rotate">
+              <input type="hidden" name="csrf" value="{{.CSRF}}">
+              <button class="button button-danger" type="submit">Replace the party AI key</button>
+            </form>
+          </details>
+          {{else if or (eq .Party.OpenAIStatus "rotating") (eq .Party.OpenAIStatus "rotation-error")}}
+          <p class="ai-key-alert" role="alert">AI-powered lines are paused until RingRing confirms every older key is revoked.</p>
+          <form method="post" action="/parties/{{.Party.ID}}/openai-key/rotate">
+            <input type="hidden" name="csrf" value="{{.CSRF}}">
+            <button class="button button-primary" type="submit">Finish key replacement</button>
+          </form>
+          {{else}}
+          <p>Key safety controls will appear when this party’s OpenAI service account is ready.</p>
+          {{end}}
+        </div>
+      </div>
+      {{end}}
     </div>
   </div>
   <div class="directory">

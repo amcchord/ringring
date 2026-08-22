@@ -30,6 +30,15 @@ type fakeOpenAIProjects struct {
 	archiveAttempts int
 	archived        []string
 	archiveErr      error
+	createAttempts  int
+	createdKey      openaiadmin.ServiceAccountAPIKey
+	createErr       error
+	listAttempts    int
+	keyIDs          []string
+	listErr         error
+	deleteAttempts  int
+	deletedKeys     []string
+	deleteFailures  int
 }
 
 type fakeContactPresence struct {
@@ -61,6 +70,38 @@ func (f *fakeOpenAIProjects) ArchiveProject(_ context.Context, projectID string)
 		return f.archiveErr
 	}
 	f.archived = append(f.archived, projectID)
+	return nil
+}
+
+func (f *fakeOpenAIProjects) CreateServiceAccountAPIKey(context.Context, string, string) (openaiadmin.ServiceAccountAPIKey, error) {
+	f.createAttempts++
+	if f.createErr != nil {
+		return openaiadmin.ServiceAccountAPIKey{}, f.createErr
+	}
+	return f.createdKey, nil
+}
+
+func (f *fakeOpenAIProjects) ServiceAccountAPIKeyIDs(context.Context, string, string) ([]string, error) {
+	f.listAttempts++
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return append([]string(nil), f.keyIDs...), nil
+}
+
+func (f *fakeOpenAIProjects) DeleteProjectAPIKey(_ context.Context, _ string, keyID string) error {
+	f.deleteAttempts++
+	if f.deleteFailures > 0 {
+		f.deleteFailures--
+		return errors.New("temporary key deletion failure")
+	}
+	f.deletedKeys = append(f.deletedKeys, keyID)
+	for index, candidate := range f.keyIDs {
+		if candidate == keyID {
+			f.keyIDs = append(f.keyIDs[:index], f.keyIDs[index+1:]...)
+			break
+		}
+	}
 	return nil
 }
 
@@ -123,10 +164,14 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	}
 	partyPage := readBody(t, created)
 	partyID := strings.TrimPrefix(created.Request.URL.Path, "/parties/")
-	if !strings.Contains(partyPage, "Cousins Club") || !strings.Contains(partyPage, "not-configured") {
+	if !strings.Contains(partyPage, "Cousins Club") || !strings.Contains(partyPage, "AI voice: unavailable") {
 		t.Fatal("party page missing expected details")
 	}
-	if err := database.UpdatePartyOpenAI(t.Context(), partyID, "proj_test", "svc_test", "encrypted-key", "ready"); err != nil {
+	initialPartyKey, err := cipher.Encrypt("sk-old-party", []byte(partyID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.UpdatePartyOpenAI(t.Context(), partyID, "proj_test", "svc_test", "key_old", initialPartyKey, "ready"); err != nil {
 		t.Fatal(err)
 	}
 	unconfirmedAI := postForm(t, client, server.URL+"/parties/"+partyID+"/services", url.Values{
@@ -159,6 +204,69 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	}
 	if len(routingServices) != 1 || !routingServices[0].WeatherEnabled || !routingServices[0].AIEnabled {
 		t.Fatalf("AI-powered services were not routable: %#v", routingServices)
+	}
+
+	keyManager := &fakeOpenAIProjects{
+		createdKey: openaiadmin.ServiceAccountAPIKey{ID: "key_fresh", Value: "sk-fresh-party"},
+		keyIDs:     []string{"key_old", "key_fresh"}, deleteFailures: 1,
+	}
+	app.openAI = keyManager
+	missingRotationCSRF := postForm(t, client, server.URL+"/parties/"+partyID+"/openai-key/rotate", url.Values{})
+	if missingRotationCSRF.StatusCode != http.StatusForbidden || keyManager.createAttempts != 0 {
+		t.Fatalf("key rotation accepted a missing CSRF token: status=%d creates=%d", missingRotationCSRF.StatusCode, keyManager.createAttempts)
+	}
+	_ = readBody(t, missingRotationCSRF)
+	failedRotation := postForm(t, client, server.URL+"/parties/"+partyID+"/openai-key/rotate", url.Values{"csrf": {csrf}})
+	failedRotationBody := readBody(t, failedRotation)
+	if failedRotation.StatusCode != http.StatusBadGateway || !strings.Contains(failedRotationBody, "needs one more try") || strings.Contains(failedRotationBody, "sk-fresh-party") {
+		t.Fatalf("partial key rotation did not fail safely: status=%d", failedRotation.StatusCode)
+	}
+	retryPage := get(t, client, server.URL+"/parties/"+partyID)
+	retryPageBody := readBody(t, retryPage)
+	if retryPage.StatusCode != http.StatusOK || !strings.Contains(retryPageBody, "Finish key replacement") || !strings.Contains(retryPageBody, "paused for key safety") || strings.Contains(retryPageBody, "rotation-error") || strings.Contains(retryPageBody, "key_fresh") || strings.Contains(retryPageBody, "sk-fresh-party") {
+		t.Fatal("party page did not offer a private, retryable rotation state")
+	}
+	pausedDashboard := get(t, client, server.URL+"/app")
+	pausedDashboardBody := readBody(t, pausedDashboard)
+	if pausedDashboard.StatusCode != http.StatusOK || !strings.Contains(pausedDashboardBody, "AI voice: paused for key safety") || strings.Contains(pausedDashboardBody, "rotation-error") {
+		t.Fatal("dashboard exposed an internal key rotation status")
+	}
+	rotatingParty, _, err := database.PartyVoiceSettings(t.Context(), partyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rotatingParty.OpenAIStatus != "rotation-error" || rotatingParty.OpenAIAPIKeyID != "key_fresh" {
+		t.Fatalf("unexpected partial rotation state: %#v", rotatingParty)
+	}
+	decryptedFreshKey, err := cipher.Decrypt(rotatingParty.OpenAIKeyCiphertext, []byte(partyID))
+	if err != nil || decryptedFreshKey != "sk-fresh-party" {
+		t.Fatal("fresh party key was not encrypted and installed")
+	}
+	routingServices, err = database.RoutingServices(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routingServices) != 1 || routingServices[0].WeatherEnabled || routingServices[0].AIEnabled {
+		t.Fatalf("AI-powered routes were not paused after partial rotation: %#v", routingServices)
+	}
+	retriedRotation := postForm(t, client, server.URL+"/parties/"+partyID+"/openai-key/rotate", url.Values{"csrf": {csrf}})
+	retriedRotationBody := readBody(t, retriedRotation)
+	if retriedRotation.StatusCode != http.StatusOK || !strings.Contains(retriedRotationBody, "fresh OpenAI key") || strings.Contains(retriedRotationBody, "sk-fresh-party") {
+		t.Fatalf("key rotation retry did not complete safely: status=%d", retriedRotation.StatusCode)
+	}
+	readyParty, _, err := database.PartyVoiceSettings(t.Context(), partyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if readyParty.OpenAIStatus != "ready" || readyParty.OpenAIAPIKeyID != "key_fresh" || keyManager.createAttempts != 1 || keyManager.listAttempts != 2 || keyManager.deleteAttempts != 2 || len(keyManager.deletedKeys) != 1 || keyManager.deletedKeys[0] != "key_old" {
+		t.Fatalf("unexpected completed key rotation: party=%#v manager=%#v", readyParty, keyManager)
+	}
+	routingServices, err = database.RoutingServices(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routingServices) != 1 || !routingServices[0].WeatherEnabled || !routingServices[0].AIEnabled {
+		t.Fatalf("AI-powered routes did not resume after rotation: %#v", routingServices)
 	}
 
 	invite := postForm(t, client, server.URL+"/parties/"+partyID+"/invites", url.Values{"csrf": {csrf}})
@@ -243,7 +351,14 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	outsiderJar, _ := cookiejar.New(nil)
 	outsiderClient := &http.Client{Transport: server.Client().Transport, Jar: outsiderJar}
 	outsiderLogin := postForm(t, outsiderClient, server.URL+"/auth/dev", url.Values{"email": {"another-host@example.test"}})
-	_ = readBody(t, outsiderLogin)
+	outsiderLoginBody := readBody(t, outsiderLogin)
+	outsiderCSRF := firstMatch(t, outsiderLoginBody, `name="csrf" value="([^"]+)"`)
+	createAttemptsBeforeOutsider := keyManager.createAttempts
+	outsiderRotation := postForm(t, outsiderClient, server.URL+"/parties/"+partyID+"/openai-key/rotate", url.Values{"csrf": {outsiderCSRF}})
+	if outsiderRotation.StatusCode != http.StatusNotFound || keyManager.createAttempts != createAttemptsBeforeOutsider {
+		t.Fatalf("another host reached key rotation: status=%d creates=%d", outsiderRotation.StatusCode, keyManager.createAttempts)
+	}
+	_ = readBody(t, outsiderRotation)
 	outsiderParty := get(t, outsiderClient, server.URL+"/parties/"+partyID)
 	if outsiderParty.StatusCode != http.StatusNotFound || presenceCounter.calls != 0 {
 		t.Fatalf("another host reached party presence: status=%d calls=%d", outsiderParty.StatusCode, presenceCounter.calls)

@@ -185,6 +185,11 @@ input:focus { border-color: var(--purple); box-shadow: 0 0 0 4px rgba(108,76,255
 .resolved-place { display: block; margin: 6px 3px 0; color: var(--muted); }
 .ai-service-choice { display: grid; gap: 10px; }
 .ai-safety-note { margin: 0 3px; padding: 11px 12px; color: #5c4511; background: #fff2bd; border: 1.5px solid #e2bd54; border-radius: 12px; font-size: .76rem; line-height: 1.45; }
+.ai-key-card { margin-top: 24px; padding: 17px; display: grid; grid-template-columns: 48px 1fr; gap: 14px; color: var(--ink); background: #f1edff; border: 1.5px solid var(--ink); border-radius: 16px; }
+.ai-key-card .panel-icon { width: 44px; height: 44px; margin: 0; font-size: 1.3rem; }
+.ai-key-card h3 { margin: 2px 0 5px; }.ai-key-card p { margin: 0; color: #4d4761; font-size: .79rem; line-height: 1.5; }
+.ai-key-actions { margin-top: 9px; }.ai-key-actions summary { min-height: 44px; display: flex; align-items: center; color: var(--purple-dark); cursor: pointer; font-size: .82rem; font-weight: 850; }.ai-key-actions p { margin-bottom: 12px; }
+.ai-key-card .button { width: 100%; margin-top: 12px; }.ai-key-alert { padding: 10px 11px; color: #6d1b27 !important; background: #fff3f4; border: 1.5px solid #d36a77; border-radius: 12px; font-weight: 750; }
 .safety-confirmation { display: grid; grid-template-columns: 24px 1fr; gap: 9px; align-items: start; margin: 0 3px; color: var(--muted); font-size: .76rem; font-weight: 750; line-height: 1.45; cursor: pointer; }
 .safety-confirmation input { width: 20px; min-height: 20px; margin: 1px 0 0; accent-color: var(--purple); }
 .service-form .button { width: 100%; margin-top: 5px; }

@@ -69,6 +69,9 @@ type App struct {
 type openAIProjectManager interface {
 	Provision(context.Context, string, string) (openaiadmin.ProvisionedProject, error)
 	ArchiveProject(context.Context, string) error
+	CreateServiceAccountAPIKey(context.Context, string, string) (openaiadmin.ServiceAccountAPIKey, error)
+	ServiceAccountAPIKeyIDs(context.Context, string, string) ([]string, error)
+	DeleteProjectAPIKey(context.Context, string, string) error
 }
 
 type weatherGeocoder interface {
@@ -224,6 +227,7 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 	mux.HandleFunc("GET /parties/{partyID}", app.requireUser(app.party))
 	mux.HandleFunc("POST /parties/{partyID}/invites", app.requireUser(app.createInvitation))
 	mux.HandleFunc("POST /parties/{partyID}/services", app.requireUser(app.updateServices))
+	mux.HandleFunc("POST /parties/{partyID}/openai-key/rotate", app.requireUser(app.rotatePartyOpenAIKey))
 	mux.HandleFunc("GET /parties/{partyID}/setup", app.requireUser(app.rotatedSetup))
 	mux.HandleFunc("POST /parties/{partyID}/devices/{deviceID}/rotate", app.requireUser(app.rotateDevice))
 	mux.HandleFunc("POST /parties/{partyID}/devices/{deviceID}/revoke", app.requireUser(app.revokeDevice))
@@ -775,14 +779,14 @@ func (a *App) createParty(w http.ResponseWriter, r *http.Request, session authSe
 	}
 	if err := a.provisionOpenAI(r.Context(), party); err != nil {
 		a.logger.Warn("party OpenAI provisioning failed", "party_id", party.ID, "error", err)
-		_ = a.store.UpdatePartyOpenAI(r.Context(), party.ID, "", "", "", "error")
+		_ = a.store.UpdatePartyOpenAI(r.Context(), party.ID, "", "", "", "", "error")
 	}
 	http.Redirect(w, r, "/parties/"+url.PathEscape(party.ID), http.StatusSeeOther)
 }
 
 func (a *App) provisionOpenAI(ctx context.Context, party model.Party) error {
 	if a.openAI == nil {
-		return a.store.UpdatePartyOpenAI(ctx, party.ID, "", "", "", "not-configured")
+		return a.store.UpdatePartyOpenAI(ctx, party.ID, "", "", "", "", "not-configured")
 	}
 	provisioned, err := a.openAI.Provision(ctx, party.ID, party.Name)
 	if err != nil {
@@ -792,7 +796,7 @@ func (a *App) provisionOpenAI(ctx context.Context, party model.Party) error {
 	if err != nil {
 		return err
 	}
-	return a.store.UpdatePartyOpenAI(ctx, party.ID, provisioned.ProjectID, provisioned.ServiceAccountID, ciphertext, "ready")
+	return a.store.UpdatePartyOpenAI(ctx, party.ID, provisioned.ProjectID, provisioned.ServiceAccountID, provisioned.APIKeyID, ciphertext, "ready")
 }
 
 func (a *App) party(w http.ResponseWriter, r *http.Request, session authSession) {
@@ -828,8 +832,112 @@ func (a *App) party(w http.ResponseWriter, r *http.Request, session authSession)
 			data.Notice += " Phone routing cleanup needs an operator retry."
 		}
 	}
+	if r.URL.Query().Get("ai-key") == "fresh" {
+		data.Notice = "This party has a fresh OpenAI key. Every older key for its private service account was revoked."
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	a.render(w, "party", data)
+}
+
+func (a *App) rotatePartyOpenAIKey(w http.ResponseWriter, r *http.Request, session authSession) {
+	if !a.validCSRF(r, session) {
+		http.Error(w, "invalid request", http.StatusForbidden)
+		return
+	}
+	partyID := r.PathValue("partyID")
+	party, err := a.store.PartyForHost(r.Context(), partyID, session.User.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	backURL := "/parties/" + url.PathEscape(partyID)
+	if a.openAI == nil || party.OpenAIProjectID == "" || party.OpenAIServiceAccountID == "" {
+		a.errorPage(w, http.StatusConflict, "Key replacement is unavailable", "This party does not have an OpenAI administrator connection and private service account to rotate.", backURL, "Back to the party")
+		return
+	}
+
+	apiContext, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+	if party.OpenAIStatus == "ready" {
+		fresh, createErr := a.openAI.CreateServiceAccountAPIKey(apiContext, party.OpenAIProjectID, party.OpenAIServiceAccountID)
+		if createErr != nil {
+			a.logger.Warn("create replacement party OpenAI key failed", "party_id", partyID, "error", createErr)
+			a.errorPage(w, http.StatusBadGateway, "The key was not replaced", "RingRing could not create a fresh key, so the current encrypted key and AI lines were left unchanged. Please try again.", backURL, "Back to the party")
+			return
+		}
+		ciphertext, encryptErr := a.cipher.Encrypt(fresh.Value, []byte(party.ID))
+		fresh.Value = ""
+		if encryptErr != nil {
+			a.cleanupUnstoredOpenAIKey(r.Context(), party, fresh.ID)
+			a.internalError(w, r, encryptErr)
+			return
+		}
+		if err := a.store.StartPartyOpenAIKeyRotation(r.Context(), party.ID, session.User.ID, party.OpenAIAPIKeyID, fresh.ID, ciphertext); err != nil {
+			a.cleanupUnstoredOpenAIKey(r.Context(), party, fresh.ID)
+			if errors.Is(err, store.ErrOpenAIRotation) {
+				a.errorPage(w, http.StatusConflict, "The key state changed", "Another key replacement started first. Reload the party before trying again.", backURL, "Back to the party")
+				return
+			}
+			a.internalError(w, r, err)
+			return
+		}
+		party.OpenAIAPIKeyID = fresh.ID
+		party.OpenAIStatus = "rotating"
+	} else if (party.OpenAIStatus == "rotating" || party.OpenAIStatus == "rotation-error") && party.OpenAIAPIKeyID != "" {
+		// Resume the retirement phase without creating another key. This makes a
+		// timeout, process restart, or partial API failure safe to retry.
+	} else {
+		a.errorPage(w, http.StatusConflict, "The AI key is not ready to replace", "Wait until this party has a ready OpenAI service account, then try again.", backURL, "Back to the party")
+		return
+	}
+
+	if err := a.retireOtherOpenAIKeys(apiContext, party); err != nil {
+		if statusErr := a.store.SetPartyOpenAIKeyRotationStatus(r.Context(), party.ID, session.User.ID, party.OpenAIAPIKeyID, "rotation-error"); statusErr != nil {
+			a.logger.Error("record party OpenAI key rotation failure", "party_id", partyID, "error", statusErr)
+		}
+		a.logger.Warn("retire previous party OpenAI keys failed", "party_id", partyID, "error", err)
+		a.errorPage(w, http.StatusBadGateway, "Key replacement needs one more try", "The fresh encrypted key is installed and AI lines are paused, but RingRing could not yet confirm every older key was revoked. Return to the party and choose Finish key replacement.", backURL, "Back to the party")
+		return
+	}
+	if err := a.store.SetPartyOpenAIKeyRotationStatus(r.Context(), party.ID, session.User.ID, party.OpenAIAPIKeyID, "ready"); err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	http.Redirect(w, r, backURL+"?ai-key=fresh", http.StatusSeeOther)
+}
+
+func (a *App) retireOtherOpenAIKeys(ctx context.Context, party model.Party) error {
+	keyIDs, err := a.openAI.ServiceAccountAPIKeyIDs(ctx, party.OpenAIProjectID, party.OpenAIServiceAccountID)
+	if err != nil {
+		return err
+	}
+	currentFound := false
+	var retirementErrors []error
+	for _, keyID := range keyIDs {
+		if keyID == party.OpenAIAPIKeyID {
+			currentFound = true
+			continue
+		}
+		if err := a.openAI.DeleteProjectAPIKey(ctx, party.OpenAIProjectID, keyID); err != nil {
+			retirementErrors = append(retirementErrors, err)
+		}
+	}
+	if !currentFound {
+		retirementErrors = append(retirementErrors, errors.New("fresh OpenAI key was not present in the active project key list"))
+	}
+	return errors.Join(retirementErrors...)
+}
+
+func (a *App) cleanupUnstoredOpenAIKey(parent context.Context, party model.Party, keyID string) {
+	cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
+	defer cancel()
+	if err := a.openAI.DeleteProjectAPIKey(cleanupContext, party.OpenAIProjectID, keyID); err != nil {
+		a.logger.Warn("clean up unstored party OpenAI key failed", "party_id", party.ID, "error", err)
+	}
 }
 
 func (a *App) phonePresence(ctx context.Context, members []model.Member) (map[string]PresenceView, map[string]PresenceView, string) {
