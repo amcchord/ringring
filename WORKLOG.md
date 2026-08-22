@@ -21,11 +21,12 @@ This is the durable, chronological project record. Add new entries at the top. C
 
 - Focused generator, transactional store, web-flow, accessibility, and executable security-contract tests cover exact lengths and numeric format, nonzero leading digits, rollback/retry for invitation claim, host-added phone and rotation collisions, non-collision error propagation, encrypted association, display grouping, raw copy attributes, and the updated guidance.
 - Disposable in-app browser checks at 1280×900 and 390×844 proved the 6/12-digit raw values match their grouped display, both per-field copies and the complete setup note contain exact unspaced values, visual hints do not pollute copied field names, copy controls remain at least 44px tall, the help box is visible, and neither the page nor setup card overflows horizontally. No console error occurred; the viewport, clipboard, tab, process, and database were cleaned up.
-- `make check`, `make security`, and `make admin-test` pass locally, including formatting, shell/operator fixtures, vet, the complete race-enabled suite, the reachable-vulnerability scan, and exact CSP/SRI agreement for the changed copy helper.
+- `make check`, `make security`, and `make admin-test` pass locally, including formatting, shell/operator fixtures, vet, the complete race-enabled suite, the reachable-vulnerability scan, and exact CSP/SRI agreement for the changed copy helper. GitHub CI run `32599516816` and Security run `32599516785` passed exact candidate `4dbd920317938c172a36b4dc5bfde222d36460eb`.
+- From an isolated server checkout of that exact candidate, the complete SIP gate authenticated a host-added generated 6/12-digit phone alongside the fixed TLS and UDP peers, then passed same-extension routing, the host-triggered ring, mixed-transport calling, `*10`, bidirectional PCMU media, and authenticated `*15` route replacement. The first candidate run stopped at the harness's old 15/24-digit assertion before generated-phone registration; the source-pinned assertion was corrected, the entire gate passed, and every disposable container, network, checkout, and generated state directory was removed.
 
 ### Remaining
 
-- Authenticate a generated 6/12-digit endpoint through the isolated SIP/TLS smoke gate, then deploy through the guarded production upgrade after the current physical-phone setup attempts have settled.
+- Deploy through the guarded production upgrade after the current physical-phone setup attempts have settled; do not interrupt or silently rotate the real phone while it is retrying authentication.
 - Complete the physical ATA, desk-phone, and mobile softphone matrix. Obtain the external child-safety review and OpenAI Zero Data Retention eligibility before opening the AI conversation gate.
 
 ## 2026-08-22 — Machine-checked Zero Data Retention gate
