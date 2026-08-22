@@ -24,6 +24,13 @@ This is the durable, chronological project record. Add new entries at the top. C
 - The host controls passed real-browser desktop and 390×844 checks with no horizontal overflow. Enabling without adult confirmation was rejected; an unavailable party shows a disabled control without a misleading confirmation checkbox.
 - `make check`, shell syntax, whitespace checks, and the Compose model pass locally or on the deployment host as applicable.
 
+### Production
+
+- Took an offline, root-only backup of app state and the previous environment before migrating the live database. The existing one host and one party remained intact, no device was added or changed, and `ai_enabled` migrated to its disabled default.
+- Deployed commit `90b8521` after GitHub Actions passed. The app and Asterisk are healthy, the live readiness and signup pages pass, the new listener is reachable from Asterisk on private port `4574`, and that port has no host publication.
+- Verified the loaded AudioSocket application, channel, support modules, and UUID function. An ephemeral Asterisk plus TCP sink exercised the exact `AudioSocket/<service>/<uuid>/c(slin)` channel syntax and was removed afterward.
+- The production party's OpenAI provisioning state remains ready, but `*14` is off and no AI dialplan route exists until the host explicitly enables it. No model call was made during deployment verification, and app, Asterisk, and Caddy produced no runtime warnings or errors after startup settled.
+
 ### Remaining
 
 - Confirm Zero Data Retention and complete an external child-safety review before enabling `*14` for any caller under 13.
