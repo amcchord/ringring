@@ -350,3 +350,27 @@ func TestHostCanCancelOnlyActiveInvitationsInsideOwnedParty(t *testing.T) {
 		}
 	}
 }
+
+func TestPrivateFirstCallCardStaysInsideSuccessfulMemberSetup(t *testing.T) {
+	app := readRepositoryFile(t, "internal/webapp/app.go")
+	for _, marker := range []string{
+		"type callDirectoryEntry struct", "DisplayName string", "Extension   string",
+		"directoryMembers, err := a.store.ListMembers", "data.CallDirectory = privateCallDirectory(directoryMembers)",
+		"device.RevokedAt == nil", "availableFirstCallLines(party, services, a.cfg.AIChildSafetyApproved)",
+		`services.AIEnabled && voiceReady && childSafetyApproved`,
+	} {
+		if !strings.Contains(app, marker) {
+			t.Errorf("internal/webapp/app.go is missing private first-call boundary %q", marker)
+		}
+	}
+
+	setup := readRepositoryFile(t, "web/templates/setup.html")
+	for _, marker := range []string{
+		`{{if not .SetupForHost}}`, `class="first-call-card"`, `{{range .CallDirectory}}`,
+		`{{.Extension}}`, `{{.DisplayName}}`, `{{range .FirstCallLines}}`, `Private snapshot.`,
+	} {
+		if !strings.Contains(setup, marker) {
+			t.Errorf("web/templates/setup.html is missing private first-call boundary %q", marker)
+		}
+	}
+}

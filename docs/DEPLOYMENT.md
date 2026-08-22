@@ -347,3 +347,7 @@ Adding another phone uses the existing `devices` and `device_provisioning_tokens
 ### Invitation cancellation upgrade and rollback
 
 Counting and canceling active invitations uses the existing `invitations` ownership, expiry, and `used_at` fields. It adds no schema, environment variable, public port, provider request, or background service, and an upgrade does not inspect, consume, or delete an invitation. A host cancellation permanently removes only that party's active unused token hashes; rollback cannot restore a deliberately canceled bearer link, while used/expired invitations and every member/device remain compatible with older releases.
+
+### Private first-call card upgrade and rollback
+
+The claim-only first-call card reads existing `members`, `devices`, `party_services`, and party readiness fields and adds no schema, secret, environment variable, route, public port, provider request, or background service. Upgrading does not inspect an invitation or family directory until a recipient submits a valid claim. Rolling back removes only the rendered setup aid; memberships, credentials, services, generated telephony state, and invitation lifecycle remain compatible and unchanged.

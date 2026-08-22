@@ -54,6 +54,8 @@ Immediately after creating an invitation, the authenticated no-store party page 
 
 The same host page counts active invitations through a party-and-host join without selecting their hashes. Its cancellation transaction first requires that exact host ownership, then deletes only rows for that party whose `used_at` is null and whose expiry has not passed. A concurrent claim and cancellation serialize through SQLite: cancellation removes the token before a claim can load it, or a completed claim sets `used_at` and is preserved. Used invitations, expired audit rows, members, devices, and routes are unchanged.
 
+After an invitation claim commits, its already-private, no-store credential response also renders a first-call snapshot. The application had loaded the invitation's exact party before mutation; from that same party it reduces existing member rows to display label plus extension only when at least one device remains active. It separately reduces current service and party-key state to the short codes that the generated dialplan can actually route, including the operator child-safety gate for `*14`. The invite form never receives the snapshot, and host-created/rotated setup cards and Linphone XML deliberately omit it. It is a setup aid, not a persistent or public directory.
+
 ## NAT and phone compatibility
 
 Most devices will register outbound from home networks. PJSIP endpoints use symmetric RTP, forced response ports, rewritten contacts, server-relayed media, keepalives, and conservative codecs (`ulaw`, `alaw`, and optional `g722`). The setup UI will give exact registrar, username, secret, transport, and extension values instead of exposing Asterisk terminology.

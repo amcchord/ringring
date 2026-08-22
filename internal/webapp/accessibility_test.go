@@ -37,6 +37,8 @@ func TestSharedAccessibilityContract(t *testing.T) {
 		`.add-device-card input { min-height: 48px;`,
 		`.device-line, .member-add-device, .member-remove-link { grid-column: 1 / -1; }`,
 		`.invite-actions summary { min-height: 44px;`,
+		`.call-list li { min-height: 44px;`,
+		`.linphone-card, .first-call-grid { grid-template-columns: 1fr; }`,
 		`.kicker.light { color: var(--white); }`,
 	} {
 		if !strings.Contains(css, want) {
@@ -123,6 +125,10 @@ func TestFormInstructionsAreVisibleAndAssociated(t *testing.T) {
 				`aria-label="Copy password"`,
 				`aria-controls="setup-password setup-copy-status"`,
 				`aria-labelledby="field-translator-title"`,
+				`aria-labelledby="first-call-title"`,
+				`id="call-people-title"`,
+				`id="call-lines-title"`,
+				`Private snapshot.`,
 			},
 		},
 	}

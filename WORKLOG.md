@@ -2,6 +2,32 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — A private first-call card for new members
+
+### Shipped
+
+- Added a bright claim-only setup card that tells a newly joined member which existing party extensions still have an active phone route and which utility/fun numbers are currently routable. A child can finish setup and place a first call without asking the host to transcribe a phonebook or stale service list.
+- Reduced each directory item to display label and extension and included it only when at least one attached phone remains active. Device labels, SIP identities, credentials, readiness, contact state, timestamps, and disconnected-only members never enter the view.
+- Derived `*10`, `*15`, and optional `*11`–`*14` entries from the same party/service readiness rules used by routing. Paused AI-powered lines are omitted, and `*14` still requires the default-closed operator child-safety gate.
+
+### Decisions
+
+- Put the snapshot only on the successful member-claim response. The unclaimed invite page cannot enumerate a party, while host-created/rotated cards sent to a device technician and the Linphone provisioning payload stay free of unrelated family names.
+- Keep it ephemeral rather than create another bearer directory URL. The setup response already carries a one-time SIP credential, is private/no-store/no-referrer/noindex, and tells the member to ask the host for changes made later.
+- Describe only currently dialable destinations. A disconnected-only member or paused service is more confusing than helpful on a first-call card.
+
+### Verification
+
+- Focused web and pure policy tests cover active-versus-disconnected members, an unclaimed invite with no directory, successful claim rendering, reduced fields, child-safety gating, spend-paused service omission, and host setup-card exclusion.
+- A disposable browser claim rendered two existing members and the exact enabled utility lines at 1280×900 and 390×844. The card used two 347px columns on desktop and one 305px column on mobile, had zero horizontal overflow, and kept every call row at least 44px tall. Its viewport override and tab were reset, and the temporary database was moved to Trash.
+- `make check`, `make security`, and `make admin-test` pass locally, including formatting, shell/operator fixtures, vet, the complete race-enabled suite, and the reachable-vulnerability scan. The accepted module advisory remains unreachable from RingRing.
+
+### Remaining
+
+- Complete the exact-candidate SIP gates, guarded production upgrade, and zero-mutation production audit without opening the real invitation or family directory.
+- Complete the physical ATA, desk-phone, and mobile softphone matrix across two real networks.
+- Obtain the external child-safety review and OpenAI Zero Data Retention eligibility before opening the AI conversation gate.
+
 ## 2026-08-22 — Cancel a mis-sent invitation
 
 ### Shipped

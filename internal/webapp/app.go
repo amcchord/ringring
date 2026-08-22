@@ -100,6 +100,20 @@ type PresenceView struct {
 	CSSClass string
 }
 
+// callDirectoryEntry deliberately carries only the two values a newly joined
+// family member needs to place a call. Device identities and credentials never
+// enter the one-time phonebook view.
+type callDirectoryEntry struct {
+	DisplayName string
+	Extension   string
+}
+
+type firstCallLine struct {
+	Number      string
+	Title       string
+	Description string
+}
+
 type PageData struct {
 	BodyClass                string
 	User                     *model.User
@@ -127,6 +141,8 @@ type PageData struct {
 	LinphoneProvisionURL     string
 	LinphoneOpenURL          template.URL
 	LinphoneQR               template.URL
+	CallDirectory            []callDirectoryEntry
+	FirstCallLines           []firstCallLine
 	SetupForHost             bool
 	SetupForNewDevice        bool
 	PartyURL                 string
@@ -1855,6 +1871,16 @@ func (a *App) claimInvitation(w http.ResponseWriter, r *http.Request) {
 			values, invalidFields)
 		return
 	}
+	directoryMembers, err := a.store.ListMembers(r.Context(), invitedParty.ID)
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	services, err := a.store.PartyServices(r.Context(), invitedParty.ID)
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
 	memberID, err := secure.ID("mem")
 	if err != nil {
 		a.internalError(w, r, err)
@@ -1902,10 +1928,50 @@ func (a *App) claimInvitation(w http.ResponseWriter, r *http.Request) {
 	data := a.pageData(nil)
 	data.Claim = model.ClaimedDevice{Party: party, Member: member, Device: device, SIPSecret: sipSecret}
 	data.SIPPublicHost = a.cfg.SIPPublicHost
+	data.CallDirectory = privateCallDirectory(directoryMembers)
+	data.FirstCallLines = availableFirstCallLines(party, services, a.cfg.AIChildSafetyApproved)
 	if err := a.addLinphoneSetup(&data, provisionToken); err != nil {
 		a.logger.Error("prepare claimed Linphone setup", "error_class", observability.ErrorClass(err))
 	}
 	a.render(w, "setup", data)
+}
+
+func privateCallDirectory(members []model.Member) []callDirectoryEntry {
+	directory := make([]callDirectoryEntry, 0, len(members))
+	for _, member := range members {
+		dialable := false
+		for _, device := range member.Devices {
+			if device.RevokedAt == nil {
+				dialable = true
+				break
+			}
+		}
+		if dialable {
+			directory = append(directory, callDirectoryEntry{DisplayName: member.DisplayName, Extension: member.Extension})
+		}
+	}
+	return directory
+}
+
+func availableFirstCallLines(party model.Party, services model.PartyServices, childSafetyApproved bool) []firstCallLine {
+	lines := []firstCallLine{
+		{Number: "*10", Title: "Echo test", Description: "Hear your own voice come back."},
+		{Number: "*15", Title: "Pick another extension", Description: "Choose a new number by phone."},
+	}
+	if services.TimeEnabled {
+		lines = append(lines, firstCallLine{Number: "*11", Title: "The time", Description: "Hear the current date and time."})
+	}
+	voiceReady := party.OpenAIStatus == "ready" && !party.OpenAIUsagePausedForSpendLimit()
+	if services.WeatherEnabled && voiceReady {
+		lines = append(lines, firstCallLine{Number: "*12", Title: "Local weather", Description: "Hear the host's chosen forecast."})
+	}
+	if services.RadioEnabled {
+		lines = append(lines, firstCallLine{Number: "*13", Title: "Internet radio", Description: "Play the host's chosen station."})
+	}
+	if services.AIEnabled && voiceReady && childSafetyApproved {
+		lines = append(lines, firstCallLine{Number: "*14", Title: "RingRing AI", Description: "Talk with a clearly disclosed AI voice."})
+	}
+	return lines
 }
 
 func (a *App) renderJoinForm(w http.ResponseWriter, r *http.Request, party model.Party, csrf string, status int, message string, values joinFormValues, invalidFields []string) {

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/amcchord/ringring/internal/config"
+	"github.com/amcchord/ringring/internal/model"
 	"github.com/amcchord/ringring/internal/openaiadmin"
 	"github.com/amcchord/ringring/internal/secure"
 	"github.com/amcchord/ringring/internal/store"
@@ -161,6 +162,154 @@ func TestParseDollarsUsesExactCents(t *testing.T) {
 		if !test.ok && err == nil {
 			t.Errorf("parseDollars(%q) unexpectedly accepted %d", test.input, got)
 		}
+	}
+}
+
+func TestPrivateCallDirectoryIncludesOnlyMembersWithAnActivePhone(t *testing.T) {
+	revokedAt := time.Date(2026, 8, 22, 1, 0, 0, 0, time.UTC)
+	directory := privateCallDirectory([]model.Member{
+		{DisplayName: "Blue phone", Extension: "101", Devices: []model.Device{{ID: "dev_blue"}}},
+		{DisplayName: "Quiet phone", Extension: "102", Devices: []model.Device{{ID: "dev_quiet", RevokedAt: &revokedAt}}},
+		{DisplayName: "No phone", Extension: "103"},
+	})
+	if len(directory) != 1 || directory[0].DisplayName != "Blue phone" || directory[0].Extension != "101" {
+		t.Fatalf("private call directory = %#v", directory)
+	}
+}
+
+func TestFirstCallLinesMatchCurrentlyDialableServices(t *testing.T) {
+	party := model.Party{OpenAIStatus: "ready", OpenAISpendLimitStatus: "ready"}
+	services := model.PartyServices{TimeEnabled: true, WeatherEnabled: true, RadioEnabled: true, AIEnabled: true}
+	numbers := func(lines []firstCallLine) string {
+		var values []string
+		for _, line := range lines {
+			values = append(values, line.Number)
+		}
+		return strings.Join(values, ",")
+	}
+	if got := numbers(availableFirstCallLines(party, services, false)); got != "*10,*15,*11,*12,*13" {
+		t.Fatalf("closed-gate first-call lines = %q", got)
+	}
+	if got := numbers(availableFirstCallLines(party, services, true)); got != "*10,*15,*11,*12,*13,*14" {
+		t.Fatalf("approved first-call lines = %q", got)
+	}
+	party.OpenAISpendLimitStatus = "update-error"
+	if got := numbers(availableFirstCallLines(party, services, true)); got != "*10,*15,*11,*13" {
+		t.Fatalf("spend-paused first-call lines = %q", got)
+	}
+}
+
+func TestSuccessfulClaimGetsPrivateFirstCallCard(t *testing.T) {
+	database, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	cipher, err := secure.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := t.Context()
+	now := time.Date(2026, 8, 22, 13, 0, 0, 0, time.UTC)
+	host, err := database.UpsertGoogleUser(ctx, store.GoogleProfile{Subject: "directory-host", Email: "host@example.test", Name: "Host"}, now, "usr_directory_host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	party, err := database.CreateParty(ctx, store.NewParty{ID: "pty_directory", Name: "Cousins Club", Slug: "cousins-club", HostUserID: host.ID, CreatedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	partyKey, err := cipher.Encrypt("sk-test-party", []byte(party.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.UpdatePartyOpenAI(ctx, party.ID, "proj_directory", "svc_directory", "key_directory", partyKey, "ready", 500); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.UpdatePartyServices(ctx, party.ID, host.ID, store.ServiceSettingsInput{
+		TimeEnabled: true, WeatherEnabled: true, WeatherQuery: "Portland, Maine", WeatherLabel: "Portland, Maine",
+		RadioEnabled: true, RadioStation: "drone-zone", AIEnabled: true, AIChildSafetyApproved: true, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	seedMember := func(invitationID, token, memberID, displayName, extension, deviceID, deviceLabel, username string, revoke bool) {
+		t.Helper()
+		if err := database.CreateInvitation(ctx, store.NewInvitation{
+			ID: invitationID, PartyID: party.ID, CreatedByUserID: host.ID, TokenHash: secure.Hash(token), ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		ciphertext, err := cipher.Encrypt("seed-secret-"+extension, []byte(deviceID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _, device, err := database.ClaimInvitation(ctx, store.NewClaim{
+			TokenHash: secure.Hash(token), MemberID: memberID, DisplayName: displayName, Extension: extension,
+			DeviceID: deviceID, DeviceLabel: deviceLabel, SIPUsername: username, SIPSecretCiphertext: ciphertext,
+			Provisioning: store.NewProvisioningToken{TokenHash: secure.Hash("provision-" + extension), ExpiresAt: now.Add(time.Hour), CreatedAt: now}, Now: now,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if revoke {
+			if err := database.RevokeDevice(ctx, party.ID, host.ID, device.ID, now); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	seedMember("inv_blue", strings.Repeat("b", 43), "mem_blue", "Blue phone", "101", "dev_blue", "Blue ATA", "rrd_blue_seed", false)
+	seedMember("inv_quiet", strings.Repeat("q", 43), "mem_quiet", "Quiet phone", "102", "dev_quiet", "Quiet ATA", "rrd_quiet_seed", true)
+
+	joinToken := strings.Repeat("j", 43)
+	if err := database.CreateInvitation(ctx, store.NewInvitation{
+		ID: "inv_join_directory", PartyID: party.ID, CreatedByUserID: host.ID, TokenHash: secure.Hash(joinToken), ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewUnstartedServer(nil)
+	cfg := config.Config{
+		Environment: "development", HTTPAddr: ":0", BaseURL: "http://" + server.Listener.Addr().String(),
+		DatabasePath: ":memory:", MasterKey: make([]byte, 32), SessionSecret: make([]byte, 32),
+		SIPPublicHost: "sip.example.test", InviteTTL: time.Hour,
+	}
+	app, err := New(cfg, database, cipher, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.now = func() time.Time { return now }
+	server.Config.Handler = app
+	server.Start()
+	defer server.Close()
+
+	jar, _ := cookiejar.New(nil)
+	client := server.Client()
+	client.Jar = jar
+	joinURL := server.URL + "/join/" + joinToken
+	join := get(t, client, joinURL)
+	joinBody := readBody(t, join)
+	if join.StatusCode != http.StatusOK || strings.Contains(joinBody, "Blue phone") || strings.Contains(joinBody, "Quiet phone") || strings.Contains(joinBody, "first-call-card") {
+		t.Fatalf("unclaimed invitation exposed the private directory: status=%d", join.StatusCode)
+	}
+	csrf := firstMatch(t, joinBody, `name="csrf" value="([^"]+)"`)
+	setup := postForm(t, client, joinURL, url.Values{
+		"csrf": {csrf}, "display_name": {"Green phone"}, "extension": {"103"}, "device_label": {"Desk phone"},
+	})
+	setupBody := readBody(t, setup)
+	if setup.StatusCode != http.StatusOK || setup.Header.Get("Cache-Control") != "no-store" ||
+		!strings.Contains(setupBody, `class="first-call-card"`) || !strings.Contains(setupBody, "Blue phone") || !strings.Contains(setupBody, ">101<") ||
+		strings.Contains(setupBody, "Quiet phone") || strings.Contains(setupBody, "rrd_blue_seed") || strings.Contains(setupBody, "Blue ATA") {
+		t.Fatalf("successful claim directory was incomplete or over-broad: status=%d", setup.StatusCode)
+	}
+	for _, number := range []string{"*10", "*15", "*11", "*12", "*13"} {
+		if !strings.Contains(setupBody, ">"+number+"<") {
+			t.Errorf("successful claim omitted dialable first-call line %s", number)
+		}
+	}
+	if strings.Contains(setupBody, ">*14<") {
+		t.Fatal("successful claim advertised the AI line while the operator child-safety gate was closed")
 	}
 }
 
@@ -625,7 +774,8 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	addedPhoneBody := readBody(t, addedPhone)
 	if addedPhone.StatusCode != http.StatusOK || addedPhone.Header.Get("Cache-Control") != "no-store" ||
 		!strings.Contains(addedPhoneBody, "Another phone ready") || !strings.Contains(addedPhoneBody, "shares extension 101") ||
-		!strings.Contains(addedPhoneBody, "Existing phones stay connected") || !strings.Contains(addedPhoneBody, "Tablet app") {
+		!strings.Contains(addedPhoneBody, "Existing phones stay connected") || !strings.Contains(addedPhoneBody, "Tablet app") ||
+		strings.Contains(addedPhoneBody, "first-call-card") {
 		t.Fatalf("second-phone setup response was not successful: status=%d", addedPhone.StatusCode)
 	}
 	secondUsername := firstMatch(t, addedPhoneBody, `(rrd_[A-Za-z0-9_-]+)`)
@@ -733,7 +883,8 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	}
 	rotated := postForm(t, client, server.URL+"/parties/"+partyID+"/devices/"+deviceID+"/rotate", url.Values{"csrf": {csrf}})
 	rotatedBody := readBody(t, rotated)
-	if rotated.StatusCode != http.StatusOK || !strings.Contains(rotatedBody, "Fresh phone settings") || !strings.Contains(rotatedBody, "old username and password no longer work") {
+	if rotated.StatusCode != http.StatusOK || !strings.Contains(rotatedBody, "Fresh phone settings") ||
+		!strings.Contains(rotatedBody, "old username and password no longer work") || strings.Contains(rotatedBody, "first-call-card") {
 		t.Fatalf("rotation setup response was not successful: status=%d", rotated.StatusCode)
 	}
 	freshUsername := firstMatch(t, rotatedBody, `(rrd_[A-Za-z0-9_-]+)`)

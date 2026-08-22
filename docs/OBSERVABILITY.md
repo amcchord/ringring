@@ -50,3 +50,5 @@ These alerts identify subsystem failure without identifying which family, phone,
 Creating an additional member phone uses the fixed host device-creation route surface. Metrics and application logs do not include its party, member, device label, generated SIP username, extension, provisioning token, or fan-out size.
 
 Canceling unused invitations uses one fixed host route/status surface. Neither the active count nor any party, invitation ID, token hash, bearer link, expiry, or number of removed rows is logged or used as a metric label.
+
+The first-call card is rendered inside the existing successful invitation-claim response. RingRing adds no directory or service-code log event, metric, label, cache, or analytics signal; names, extensions, party identifiers, enabled-service choices, and card size remain absent from observability output.

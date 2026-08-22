@@ -82,6 +82,34 @@
   </section>
   <div class="warning-card"><strong>TLS protects phone sign-in and call setup.</strong><p>RingRing’s voice audio is still server-relayed RTP, not encrypted media. Use UDP only when an older adapter cannot use TLS 1.2 with normal certificate checking.</p></div>
   <div class="warning-card"><strong>Save it before you leave.</strong><p>For safety, RingRing cannot display this password again. If it is lost, the party host can make a fresh one.</p></div>
+  {{if not .SetupForHost}}
+  <section class="first-call-card" aria-labelledby="first-call-title">
+    <div class="first-call-heading">
+      <span class="kicker">Your first calls</span>
+      <h2 id="first-call-title">Pick up and dial.</h2>
+      <p>Once the phone says it is registered, use these short numbers inside {{.Claim.Party.Name}}.</p>
+    </div>
+    <div class="first-call-grid">
+      <section aria-labelledby="call-people-title">
+        <h3 id="call-people-title">People</h3>
+        {{if .CallDirectory}}
+        <ul class="call-list call-directory">
+          {{range .CallDirectory}}<li><span class="service-number">{{.Extension}}</span><strong>{{.DisplayName}}</strong></li>{{end}}
+        </ul>
+        {{else}}
+        <p class="first-phone-note">You’re the first phone here. The next person who joins will be able to dial extension {{.Claim.Member.Extension}}.</p>
+        {{end}}
+      </section>
+      <section aria-labelledby="call-lines-title">
+        <h3 id="call-lines-title">Helpful and fun</h3>
+        <ul class="call-list">
+          {{range .FirstCallLines}}<li><span class="service-number">{{.Number}}</span><span><strong>{{.Title}}</strong><small>{{.Description}}</small></span></li>{{end}}
+        </ul>
+      </section>
+    </div>
+    <p class="directory-privacy"><strong>Private snapshot.</strong> It shows only people with a phone the host has not disconnected. Ask the party host for changes made later.</p>
+  </section>
+  {{end}}
   <div class="phone-test-card">
     <span class="service-number">*10</span>
     <div><strong>Test both directions</strong><p>After the phone says it is registered, dial <strong>*10</strong>. Speak after the beep: hearing your own voice proves its microphone, speaker, and two-way audio all work. Then the host can tap <strong>Ring this phone</strong> on the party page to prove incoming ringing without setting up a second phone first.</p></div>

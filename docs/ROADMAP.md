@@ -21,6 +21,7 @@
 - [x] Device-specific setup guides for ATAs, VoIP phones, and softphones.
 - [x] One-time Linphone QR-assisted softphone setup with official engine import, registration, party-call, and echoed-audio smoke; physical-phone UX remains separately gated.
 - [x] Host member directory and device controls.
+- [x] Claim-only first-call card with active party extensions and currently enabled special lines.
 - [x] Self-service two-way echo test.
 - [x] Host-only live registration and reachability hints.
 - [x] Host-triggered incoming setup ring with a spoken extension and no second phone required.
