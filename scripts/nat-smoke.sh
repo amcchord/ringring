@@ -154,7 +154,9 @@ docker exec ringring-nat-smoke-topology \
 
 ready=0
 for elapsed in $(seq 1 30); do
-  if docker exec ringring-nat-smoke-asterisk asterisk -rx 'core show uptime' >/dev/null 2>&1; then
+  if docker exec ringring-nat-smoke-asterisk \
+    asterisk -rx 'pjsip show endpoint rr_smoke_b' 2>/dev/null | \
+    grep -Eq 'Endpoint:.*rr_smoke_b'; then
     ready=1
     break
   fi
@@ -167,6 +169,26 @@ if test "$ready" -ne 1; then
 fi
 docker exec ringring-nat-smoke-asterisk \
   asterisk -rx 'core set verbose 3' >/dev/null
+
+# Docker can report the container and Asterisk CLI ready before a newly created
+# bridge has completed neighbor discovery for packets forwarded out of the two
+# nested household namespaces. Prove both disposable paths with bounded ICMP
+# probes before SIPp starts its one-shot registration transaction.
+paths_ready=0
+for elapsed in $(seq 1 20); do
+  if docker exec ringring-nat-smoke-topology \
+    ip netns exec home-a ping -c 1 -W 1 172.31.91.20 >/dev/null 2>&1 && \
+    docker exec ringring-nat-smoke-topology \
+      ip netns exec home-b ping -c 1 -W 1 172.31.91.20 >/dev/null 2>&1; then
+    paths_ready=1
+    break
+  fi
+  sleep 1
+done
+if test "$paths_ready" -ne 1; then
+  echo "The isolated household paths did not reach Asterisk." >&2
+  exit 1
+fi
 
 echo "Registering extension 102 through household B's NAT..."
 set +e

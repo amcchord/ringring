@@ -374,3 +374,16 @@ func TestPrivateFirstCallCardStaysInsideSuccessfulMemberSetup(t *testing.T) {
 		}
 	}
 }
+
+func TestNATSmokeWaitsForBothDisposableHouseholdPaths(t *testing.T) {
+	smoke := readRepositoryFile(t, "scripts/nat-smoke.sh")
+	for _, marker := range []string{
+		"pjsip show endpoint rr_smoke_b", "paths_ready=0",
+		"ip netns exec home-a ping", "ip netns exec home-b ping",
+		"The isolated household paths did not reach Asterisk.",
+	} {
+		if !strings.Contains(smoke, marker) {
+			t.Errorf("scripts/nat-smoke.sh is missing readiness boundary %q", marker)
+		}
+	}
+}

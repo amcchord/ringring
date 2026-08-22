@@ -9,18 +9,21 @@ This is the durable, chronological project record. Add new entries at the top. C
 - Added a bright claim-only setup card that tells a newly joined member which existing party extensions still have an active phone route and which utility/fun numbers are currently routable. A child can finish setup and place a first call without asking the host to transcribe a phonebook or stale service list.
 - Reduced each directory item to display label and extension and included it only when at least one attached phone remains active. Device labels, SIP identities, credentials, readiness, contact state, timestamps, and disconnected-only members never enter the view.
 - Derived `*10`, `*15`, and optional `*11`–`*14` entries from the same party/service readiness rules used by routing. Paused AI-powered lines are omitted, and `*14` still requires the default-closed operator child-safety gate.
+- Hardened the isolated two-household NAT gate after its known Docker startup race recurred: it now waits for the exact PJSIP endpoint and successful paths from both nested household namespaces before starting SIPp's one-shot registration.
 
 ### Decisions
 
 - Put the snapshot only on the successful member-claim response. The unclaimed invite page cannot enumerate a party, while host-created/rotated cards sent to a device technician and the Linphone provisioning payload stay free of unrelated family names.
 - Keep it ephemeral rather than create another bearer directory URL. The setup response already carries a one-time SIP credential, is private/no-store/no-referrer/noindex, and tells the member to ask the host for changes made later.
 - Describe only currently dialable destinations. A disconnected-only member or paused service is more confusing than helpful on a first-call card.
+- Treat PBX endpoint loading and nested-network reachability as fixture readiness, while keeping challenged registration, rewritten contacts, the actual call, and bidirectional RTP as the assertions under test.
 
 ### Verification
 
 - Focused web and pure policy tests cover active-versus-disconnected members, an unclaimed invite with no directory, successful claim rendering, reduced fields, child-safety gating, spend-paused service omission, and host setup-card exclusion.
 - A disposable browser claim rendered two existing members and the exact enabled utility lines at 1280×900 and 390×844. The card used two 347px columns on desktop and one 305px column on mobile, had zero horizontal overflow, and kept every call row at least 44px tall. Its viewport override and tab were reset, and the temporary database was moved to Trash.
 - `make check`, `make security`, and `make admin-test` pass locally, including formatting, shell/operator fixtures, vet, the complete race-enabled suite, and the reachable-vulnerability scan. The accepted module advisory remains unreachable from RingRing.
+- The first isolated candidate passed the complete SIP/TLS/multi-phone gate, then hit the recurring NAT pre-registration timeout before receiving a `401` challenge. The harness now has bounded endpoint and two-path readiness prerequisites; its revised exact-candidate evidence is recorded after the rerun below.
 
 ### Remaining
 
