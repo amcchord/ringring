@@ -114,6 +114,32 @@ func TestVerifyStateReadsRequiredSchemaFromLiveWAL(t *testing.T) {
 	}
 }
 
+func TestVerifyStateReadsCheckpointedBackupFromReadOnlyDirectory(t *testing.T) {
+	path, key, _, _ := verificationFixture(t)
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if _, err := os.Stat(path + suffix); !os.IsNotExist(err) {
+			t.Fatalf("checkpointed fixture retained %s sidecar: %v", suffix, err)
+		}
+	}
+	directory := filepath.Dir(path)
+	if err := os.Chmod(directory, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(directory, 0o700); err != nil {
+			t.Errorf("restore fixture directory permissions: %v", err)
+		}
+	})
+
+	report, err := VerifyState(t.Context(), path, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Status != "ok" || report.PhoneChecks != 1 || report.Devices != 1 {
+		t.Fatalf("unexpected immutable backup report: %+v", report)
+	}
+}
+
 func verificationFixture(t *testing.T) (string, []byte, string, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "ringring.db")

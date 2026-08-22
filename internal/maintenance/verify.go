@@ -52,10 +52,19 @@ func VerifyState(ctx context.Context, databasePath string, masterKey []byte) (St
 	}
 	databaseURL := url.URL{Scheme: "file", Path: filepath.ToSlash(absolutePath)}
 	query := databaseURL.Query()
-	// Restored backups have no WAL sidecars, while deployment verification also
-	// invokes this command against the live database. Read-only mode handles
-	// both: unlike immutable mode, it sees a just-migrated schema still in WAL.
 	query.Set("mode", "ro")
+	// A cleanly stopped backup has no WAL sidecars and may be mounted on a
+	// read-only filesystem during verification. SQLite needs immutable mode to
+	// open that WAL-mode database without creating a shared-memory file. A live
+	// deployment has WAL sidecars, so it must use ordinary read-only mode to see
+	// schema and data that have not yet been checkpointed into the main file.
+	liveWAL, err := sqliteSidecarExists(absolutePath)
+	if err != nil {
+		return StateReport{}, err
+	}
+	if !liveWAL {
+		query.Set("immutable", "1")
+	}
 	databaseURL.RawQuery = query.Encode()
 	database, err := sql.Open("sqlite", databaseURL.String())
 	if err != nil {
@@ -161,6 +170,17 @@ func VerifyState(ctx context.Context, databasePath string, masterKey []byte) (St
 		return StateReport{}, errors.New("verify encrypted party credentials")
 	}
 	return report, nil
+}
+
+func sqliteSidecarExists(databasePath string) (bool, error) {
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if _, err := os.Stat(databasePath + suffix); err == nil {
+			return true, nil
+		} else if !os.IsNotExist(err) {
+			return false, fmt.Errorf("inspect database sidecar: %w", err)
+		}
+	}
+	return false, nil
 }
 
 func verifyCiphertexts(ctx context.Context, database *sql.DB, cipher *secure.Cipher, query string) (int, error) {
