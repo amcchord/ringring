@@ -161,69 +161,121 @@
       {{end}}
     </div>
   </div>
-  <div class="directory">
-    <div class="list-heading"><h2>Phone book</h2><span>Dial inside this party</span></div>
+  <div class="directory phonebook" aria-labelledby="phonebook-title">
+    <div class="phonebook-heading">
+      <div>
+        <span class="kicker">Party directory</span>
+        <h2 id="phonebook-title">Phone book</h2>
+        <p>Pick up any party phone and dial one of these extensions.</p>
+      </div>
+      {{if .Members}}
+      <div class="phonebook-count" aria-label="{{len .Members}} {{if eq (len .Members) 1}}member{{else}}members{{end}}">
+        <strong>{{len .Members}}</strong>
+        <span>{{if eq (len .Members) 1}}member{{else}}members{{end}}</span>
+      </div>
+      {{end}}
+    </div>
     {{if .PresenceNotice}}<p class="presence-notice" role="status">{{.PresenceNotice}}</p>{{end}}
     {{if .Members}}
       {{$root := .}}{{$party := .Party}}{{$csrf := .CSRF}}
+      <div class="member-list">
       {{range .Members}}
       {{$member := .}}
-      <article class="member-row">
-        <span class="extension">{{.Extension}}</span>
-        <span class="member-details">
-          <strong>{{.DisplayName}}</strong>
+      {{$memberStatus := index $root.MemberPresence .ID}}
+      <article class="member-card">
+        <header class="member-card-heading">
+          <div class="extension-tile" aria-label="Extension {{.Extension}}">
+            <span>EXT</span>
+            <strong>{{.Extension}}</strong>
+          </div>
+          <div class="member-identity">
+            <span class="member-kicker">Party member</span>
+            <h3>{{.DisplayName}}</h3>
+            <span class="member-status-pill {{$memberStatus.CSSClass}}">
+              <span class="presence-indicator" aria-hidden="true"></span>
+              {{$memberStatus.Label}}
+            </span>
+          </div>
+        </header>
+        <div class="member-phones">
+          <div class="member-section-heading">
+            <h4>Phones</h4>
+            <span>{{len .Devices}} saved {{if eq (len .Devices) 1}}phone{{else}}phones{{end}}</span>
+          </div>
+          <div class="device-list">
           {{range .Devices}}
           {{$phone := index $root.DevicePresence .ID}}
-          <span class="device-line" id="phone-checks-{{.ID}}">
-            <span><small>{{.Label}} · <span class="device-presence {{$phone.CSSClass}}">{{$phone.Label}}</span></small></span>
-            {{if not .RevokedAt}}
-            <form class="device-ring-test" method="post" action="/parties/{{$party.ID}}/devices/{{.ID}}/ring-test">
-              <input type="hidden" name="csrf" value="{{$csrf}}">
-              <button class="text-button" type="submit" aria-describedby="ring-test-help-{{.ID}}" {{if ne $phone.CSSClass "presence-online"}}disabled{{end}}>📳 Ring this phone</button>
-              <small id="ring-test-help-{{.ID}}">{{if eq $phone.CSSClass "presence-online"}}It will say extension {{$member.Extension}} after someone answers.{{else}}Available when live status says online.{{end}}</small>
-            </form>
-            <details class="device-readiness">
-              <summary>Real phone check · {{.Readiness.CompletedCount}} of 3</summary>
-              <form class="device-readiness-card" method="post" action="/parties/{{$party.ID}}/devices/{{.ID}}/readiness">
-                <input type="hidden" name="csrf" value="{{$csrf}}">
-                <p><strong>{{if .Readiness.Complete}}All three checks are host-confirmed.{{else}}Try these after the phone says it is online.{{end}}</strong> Registration above is automatic; these checkmarks are saved only when you confirm them.</p>
-                <label class="readiness-check">
-                  <input type="checkbox" name="echo_tested" value="1" {{if .Readiness.EchoTestedAt}}checked{{end}}>
-                  <span>I dialed <strong>*10</strong> and heard my voice come back.</span>
-                </label>
-                <label class="readiness-check">
-                  <input type="checkbox" name="outgoing_call_tested" value="1" {{if .Readiness.OutgoingCallTestedAt}}checked{{end}}>
-                  <span>This phone called another party phone on a different internet connection; it connected and both people heard each other.</span>
-                </label>
-                <label class="readiness-check">
-                  <input type="checkbox" name="incoming_call_tested" value="1" {{if .Readiness.IncomingCallTestedAt}}checked{{end}}>
-                  <span>I used <strong>Ring this phone</strong> (or called extension <strong>{{$member.Extension}}</strong> from another party phone); this phone rang and played or connected correctly.</span>
-                </label>
-                <p class="readiness-privacy">RingRing saves only when each item was confirmed. It does not save who called, network details, call audio, or a call log.</p>
-                <button class="button button-primary" type="submit">Save phone checks</button>
-              </form>
-            </details>
-            {{end}}
-            <details class="device-actions">
-              <summary>{{if .RevokedAt}}Reconnect{{else}}Manage{{end}}</summary>
-              <div class="device-action-card">
-                <form method="post" action="/parties/{{$party.ID}}/devices/{{.ID}}/rotate">
-                  <input type="hidden" name="csrf" value="{{$csrf}}">
-                  <button class="text-button" type="submit">{{if .RevokedAt}}Reconnect with fresh settings{{else}}Make a fresh password{{end}}</button>
-                </form>
-                {{if not .RevokedAt}}
-                <form method="post" action="/parties/{{$party.ID}}/devices/{{.ID}}/revoke">
-                  <input type="hidden" name="csrf" value="{{$csrf}}">
-                  <button class="text-button danger-button" type="submit">Disconnect this phone</button>
-                </form>
-                {{end}}
-                <small>Fresh settings immediately replace the old username and password.</small>
+          <section class="device-card {{$phone.CSSClass}}" id="phone-checks-{{.ID}}" aria-labelledby="device-title-{{.ID}}">
+            <div class="device-card-heading">
+              <span class="device-icon" aria-hidden="true">☎</span>
+              <div>
+                <h5 id="device-title-{{.ID}}">{{.Label}}</h5>
+                <span class="device-status-pill {{$phone.CSSClass}}">
+                  <span class="presence-indicator" aria-hidden="true"></span>
+                  {{$phone.Label}}
+                </span>
               </div>
-            </details>
-          </span>
+            </div>
+            {{if not .RevokedAt}}
+            <div class="device-ring-row">
+              <form class="device-ring-test" method="post" action="/parties/{{$party.ID}}/devices/{{.ID}}/ring-test">
+                <input type="hidden" name="csrf" value="{{$csrf}}">
+                <button class="button device-ring-button" type="submit" aria-label="Ring {{.Label}}" aria-describedby="ring-test-help-{{.ID}}" {{if ne $phone.CSSClass "presence-online"}}disabled{{end}}><span aria-hidden="true">📳</span> Ring this phone</button>
+              </form>
+              <p id="ring-test-help-{{.ID}}">{{if eq $phone.CSSClass "presence-online"}}It will say extension {{$member.Extension}} after someone answers.{{else}}Available when live status says online.{{end}}</p>
+            </div>
+            {{end}}
+            <div class="device-card-tools">
+              {{if not .RevokedAt}}
+              <details class="device-readiness">
+                <summary aria-label="Setup checklist for {{.Label}}, {{.Readiness.CompletedCount}} of 3 complete">
+                  <span class="tool-summary-copy"><strong>Setup checklist</strong><small>{{.Readiness.CompletedCount}} of 3 complete</small></span>
+                  <span class="readiness-track" aria-hidden="true"><span class="readiness-fill readiness-{{.Readiness.CompletedCount}}"></span></span>
+                </summary>
+                <form class="device-readiness-card" method="post" action="/parties/{{$party.ID}}/devices/{{.ID}}/readiness">
+                  <input type="hidden" name="csrf" value="{{$csrf}}">
+                  <p><strong>{{if .Readiness.Complete}}All three checks are host-confirmed.{{else}}Try these after the phone says it is online.{{end}}</strong> Registration above is automatic; these checkmarks are saved only when you confirm them.</p>
+                  <label class="readiness-check">
+                    <input type="checkbox" name="echo_tested" value="1" {{if .Readiness.EchoTestedAt}}checked{{end}}>
+                    <span>I dialed <strong>*10</strong> and heard my voice come back.</span>
+                  </label>
+                  <label class="readiness-check">
+                    <input type="checkbox" name="outgoing_call_tested" value="1" {{if .Readiness.OutgoingCallTestedAt}}checked{{end}}>
+                    <span>This phone called another party phone on a different internet connection; it connected and both people heard each other.</span>
+                  </label>
+                  <label class="readiness-check">
+                    <input type="checkbox" name="incoming_call_tested" value="1" {{if .Readiness.IncomingCallTestedAt}}checked{{end}}>
+                    <span>I used <strong>Ring this phone</strong> (or called extension <strong>{{$member.Extension}}</strong> from another party phone); this phone rang and played or connected correctly.</span>
+                  </label>
+                  <p class="readiness-privacy">RingRing saves only when each item was confirmed. It does not save who called, network details, call audio, or a call log.</p>
+                  <button class="button button-primary" type="submit">Save phone checks</button>
+                </form>
+              </details>
+              {{end}}
+              <details class="device-actions">
+                <summary aria-label="{{if .RevokedAt}}Reconnect {{.Label}}{{else}}Phone settings for {{.Label}}{{end}}"><span class="tool-summary-copy"><strong>{{if .RevokedAt}}Reconnect phone{{else}}Phone settings{{end}}</strong><small>{{if .RevokedAt}}Get fresh sign-in details{{else}}Password and connection{{end}}</small></span></summary>
+                <div class="device-action-card">
+                  <form method="post" action="/parties/{{$party.ID}}/devices/{{.ID}}/rotate">
+                    <input type="hidden" name="csrf" value="{{$csrf}}">
+                    <button class="text-button" type="submit">{{if .RevokedAt}}Reconnect with fresh settings{{else}}Make a fresh password{{end}}</button>
+                  </form>
+                  {{if not .RevokedAt}}
+                  <form method="post" action="/parties/{{$party.ID}}/devices/{{.ID}}/revoke">
+                    <input type="hidden" name="csrf" value="{{$csrf}}">
+                    <button class="text-button danger-button" type="submit">Disconnect this phone</button>
+                  </form>
+                  {{end}}
+                  <small>Fresh settings immediately replace the old username and password.</small>
+                </div>
+              </details>
+            </div>
+          </section>
           {{end}}
+          </div>
+        </div>
+        <footer class="member-card-footer">
           <details class="device-actions member-add-device">
-            <summary>＋ Add another phone</summary>
+            <summary aria-label="Add another phone for {{$member.DisplayName}} on extension {{$member.Extension}}"><span aria-hidden="true">＋</span> Add another phone</summary>
             <div class="device-action-card add-device-card">
               <p>It will share extension <strong>{{$member.Extension}}</strong>. Every active phone gets its own password, and calls to this extension ring them together.</p>
               <form method="post" action="/parties/{{$party.ID}}/members/{{$member.ID}}/devices">
@@ -235,14 +287,13 @@
               </form>
             </div>
           </details>
-          <a class="member-remove-link" href="/parties/{{$party.ID}}/members/{{.ID}}/delete">Remove this member</a>
-        </span>
-        {{$memberStatus := index $root.MemberPresence .ID}}
-        <span class="status-dot {{$memberStatus.CSSClass}}" role="img" aria-label="{{$memberStatus.Label}}" title="{{$memberStatus.Label}}"></span>
+          <a class="member-remove-link" href="/parties/{{$party.ID}}/members/{{.ID}}/delete" aria-label="Remove {{.DisplayName}} from this party">Remove member</a>
+        </footer>
       </article>
       {{end}}
+      </div>
     {{else}}
-      <div class="empty-state"><span aria-hidden="true">📞</span><p>No phones yet. Make the first invite link!</p></div>
+      <div class="empty-state phonebook-empty"><span aria-hidden="true">📞</span><h3>Your phone book is ready</h3><p>Make the first invite link and someone will appear here.</p></div>
     {{end}}
   </div>
 </section>

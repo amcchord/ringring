@@ -911,12 +911,13 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	presenceCounter.calls = 0
 	hostParty = get(t, client, server.URL+"/parties/"+partyID)
 	hostPartyBody = readBody(t, hostParty)
-	onlineRendered := strings.Contains(hostPartyBody, "presence-online\">online")
-	memberLabelRendered := strings.Contains(hostPartyBody, `aria-label="At least one phone is online"`)
+	onlineRendered := strings.Contains(hostPartyBody, `class="device-card presence-online"`) && strings.Contains(hostPartyBody, `class="device-status-pill presence-online"`)
+	memberLabelRendered := strings.Contains(hostPartyBody, `class="member-status-pill presence-online"`) && strings.Contains(hostPartyBody, "At least one phone is online")
 	unavailableRendered := strings.Contains(hostPartyBody, "Live phone status is temporarily unavailable")
-	readinessRendered := strings.Contains(hostPartyBody, "Real phone check · 0 of 3") && strings.Contains(hostPartyBody, "different internet connection") && strings.Contains(hostPartyBody, "does not save who called, network details, call audio, or a call log")
-	if presenceCounter.calls != 1 || !onlineRendered || !memberLabelRendered || unavailableRendered || !readinessRendered {
-		t.Fatalf("party live presence calls=%d online=%t member_label=%t unavailable=%t", presenceCounter.calls, onlineRendered, memberLabelRendered, unavailableRendered)
+	readinessRendered := strings.Contains(hostPartyBody, "Setup checklist") && strings.Contains(hostPartyBody, "0 of 3 complete") && strings.Contains(hostPartyBody, "different internet connection") && strings.Contains(hostPartyBody, "does not save who called, network details, call audio, or a call log")
+	phonebookHierarchyRendered := strings.Contains(hostPartyBody, `class="phonebook-heading"`) && strings.Contains(hostPartyBody, `class="phonebook-count"`) && strings.Contains(hostPartyBody, `class="member-card"`) && strings.Contains(hostPartyBody, `class="extension-tile"`) && strings.Contains(hostPartyBody, `class="device-ring-row"`) && strings.Contains(hostPartyBody, `class="member-card-footer"`) && !strings.Contains(hostPartyBody, `class="member-row"`)
+	if presenceCounter.calls != 1 || !onlineRendered || !memberLabelRendered || unavailableRendered || !readinessRendered || !phonebookHierarchyRendered {
+		t.Fatalf("party live presence calls=%d online=%t member_label=%t unavailable=%t readiness=%t hierarchy=%t", presenceCounter.calls, onlineRendered, memberLabelRendered, unavailableRendered, readinessRendered, phonebookHierarchyRendered)
 	}
 	memberID := firstMatch(t, hostPartyBody, `/members/([^/]+)/devices`)
 	addDevicePath := server.URL + "/parties/" + partyID + "/members/" + memberID + "/devices"
@@ -1013,7 +1014,7 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	ringer := &fakeDeviceRinger{statuses: map[string]telephony.ContactState{oldUsername: telephony.ContactReachable}}
 	app.ringer = ringer
 	ringPath := server.URL + "/parties/" + partyID + "/devices/" + deviceID + "/ring-test"
-	if !strings.Contains(hostPartyBody, `action="/parties/`+partyID+`/devices/`+deviceID+`/ring-test"`) || !strings.Contains(hostPartyBody, "📳 Ring this phone") || !strings.Contains(hostPartyBody, "It will say extension 101") {
+	if !strings.Contains(hostPartyBody, `action="/parties/`+partyID+`/devices/`+deviceID+`/ring-test"`) || !strings.Contains(hostPartyBody, `class="button device-ring-button"`) || !strings.Contains(hostPartyBody, "Ring this phone") || !strings.Contains(hostPartyBody, "It will say extension 101") {
 		t.Fatal("online phone did not show the incoming ring test")
 	}
 	outsiderRing := postForm(t, outsiderClient, ringPath, url.Values{"csrf": {outsiderCSRF}})
@@ -1051,7 +1052,7 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 		"csrf": {csrf}, "echo_tested": {"1"}, "outgoing_call_tested": {"1"}, "incoming_call_tested": {"1"},
 	})
 	checkedPhoneBody := readBody(t, checkedPhone)
-	if checkedPhone.StatusCode != http.StatusOK || !strings.Contains(checkedPhoneBody, "host-confirmed real-phone checks were saved") || !strings.Contains(checkedPhoneBody, "Real phone check · 3 of 3") || !strings.Contains(checkedPhoneBody, "All three checks are host-confirmed") {
+	if checkedPhone.StatusCode != http.StatusOK || !strings.Contains(checkedPhoneBody, "host-confirmed real-phone checks were saved") || !strings.Contains(checkedPhoneBody, "3 of 3 complete") || !strings.Contains(checkedPhoneBody, "All three checks are host-confirmed") {
 		t.Fatalf("phone readiness response was not successful: status=%d", checkedPhone.StatusCode)
 	}
 	rotated := postForm(t, client, server.URL+"/parties/"+partyID+"/devices/"+deviceID+"/rotate", url.Values{"csrf": {csrf}})
@@ -1075,24 +1076,26 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	}
 	app.presence = fakeContactPresence{statuses: map[string]telephony.ContactState{freshUsername: telephony.ContactReachable}}
 	hostParty = get(t, client, server.URL+"/parties/"+partyID)
-	if !strings.Contains(readBody(t, hostParty), "Real phone check · 0 of 3") {
+	if !strings.Contains(readBody(t, hostParty), "0 of 3 complete") {
 		t.Fatal("credential rotation did not clear host-confirmed phone checks")
 	}
 
 	app.presence = fakeContactPresence{statuses: map[string]telephony.ContactState{freshUsername: telephony.ContactUnreachable}}
 	hostParty = get(t, client, server.URL+"/parties/"+partyID)
 	hostPartyBody = readBody(t, hostParty)
-	if !strings.Contains(hostPartyBody, "presence-trouble\">not reachable") {
+	if !strings.Contains(hostPartyBody, `class="device-status-pill presence-trouble"`) || !strings.Contains(hostPartyBody, "not reachable") {
 		t.Fatal("party page did not distinguish an unreachable registered phone")
 	}
 	app.presence = fakeContactPresence{statuses: map[string]telephony.ContactState{freshUsername: telephony.ContactUnknown}}
 	hostParty = get(t, client, server.URL+"/parties/"+partyID)
-	if !strings.Contains(readBody(t, hostParty), "presence-checking\">checking") {
+	checkingBody := readBody(t, hostParty)
+	if !strings.Contains(checkingBody, `class="device-status-pill presence-checking"`) || !strings.Contains(checkingBody, "checking") {
 		t.Fatal("party page did not distinguish a newly registered phone being checked")
 	}
 	app.presence = fakeContactPresence{statuses: map[string]telephony.ContactState{}}
 	hostParty = get(t, client, server.URL+"/parties/"+partyID)
-	if !strings.Contains(readBody(t, hostParty), "presence-waiting\">not registered") {
+	waitingBody := readBody(t, hostParty)
+	if !strings.Contains(waitingBody, `class="device-status-pill presence-waiting"`) || !strings.Contains(waitingBody, "not registered") {
 		t.Fatal("party page did not identify an unregistered phone")
 	}
 	app.presence = fakeContactPresence{err: errors.New("temporary AMI failure")}
@@ -1105,7 +1108,7 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	revokeDeviceID := firstMatch(t, readBody(t, hostParty), `/devices/([^/]+)/revoke`)
 	revoked := postForm(t, client, server.URL+"/parties/"+partyID+"/devices/"+revokeDeviceID+"/revoke", url.Values{"csrf": {csrf}})
 	revokedBody := readBody(t, revoked)
-	if revoked.StatusCode != http.StatusOK || !strings.Contains(revokedBody, "presence-off\">disconnected") || strings.Contains(revokedBody, "presence-online\">online") {
+	if revoked.StatusCode != http.StatusOK || !strings.Contains(revokedBody, `class="device-status-pill presence-off"`) || !strings.Contains(revokedBody, "disconnected") || strings.Contains(revokedBody, `class="device-status-pill presence-online"`) {
 		t.Fatalf("revocation response was not successful: status=%d", revoked.StatusCode)
 	}
 	if revokedProvision := get(t, client, rotatedProvisionURL); revokedProvision.StatusCode != http.StatusGone || !strings.Contains(readBody(t, revokedProvision), "used, expired, replaced, or disconnected") {

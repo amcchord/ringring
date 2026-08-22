@@ -290,7 +290,7 @@ func TestHostPhoneRingHasFixedScopedBoundaries(t *testing.T) {
 			"ActiveDeviceForHost", `a.phoneRings.allow("device:"+device.ID`,
 			"state != telephony.ContactReachable", "a.ringer.RingDevice",
 		},
-		"web/templates/party.html": {"📳 Ring this phone", "/ring-test"},
+		"web/templates/party.html": {`<span aria-hidden="true">📳</span> Ring this phone`, "/ring-test"},
 		"ringringctl":              {"dialplan show s@rr-phone-check", "fixed incoming phone-check context is unavailable"},
 	}
 	for filename, markers := range required {

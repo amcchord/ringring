@@ -30,12 +30,12 @@ func TestSharedAccessibilityContract(t *testing.T) {
 		`:where(a, button, input, select, summary):focus-visible { outline: 3px solid var(--ink);`,
 		`.site-header nav > a { min-height: 44px;`,
 		`.text-button { min-height: 44px;`,
-		`.device-actions summary { width: fit-content; min-height: 44px;`,
-		`.device-readiness summary { width: fit-content; min-height: 44px;`,
+		`.device-card-tools summary { min-height: 58px;`,
+		`.member-card-footer > .member-add-device > summary { width: fit-content; min-height: 44px;`,
 		`.readiness-check { min-height: 44px;`,
-		`.device-ring-test .text-button:disabled { color: var(--muted);`,
+		`.device-ring-button:disabled { color: #625a77;`,
 		`.add-device-card input { min-height: 48px;`,
-		`.device-line, .member-add-device, .member-remove-link { grid-column: 1 / -1; }`,
+		`.member-card-footer > .member-add-device > summary, .member-remove-link { width: 100%;`,
 		`.invite-actions summary { min-height: 44px;`,
 		`.call-list li { min-height: 44px;`,
 		`.linphone-card, .first-call-grid { grid-template-columns: 1fr; }`,
@@ -108,8 +108,13 @@ func TestFormInstructionsAreVisibleAndAssociated(t *testing.T) {
 				`action="/parties/{{.Party.ID}}/invites/cancel"`,
 				`Used invitations and members are not changed.`,
 				`aria-describedby="openai-spend-help"`,
+				`aria-label="Ring {{.Label}}"`,
 				`aria-describedby="ring-test-help-{{.ID}}"`,
 				`id="ring-test-help-{{.ID}}"`,
+				`aria-label="Setup checklist for {{.Label}}, {{.Readiness.CompletedCount}} of 3 complete"`,
+				`aria-label="{{if .RevokedAt}}Reconnect {{.Label}}{{else}}Phone settings for {{.Label}}{{end}}"`,
+				`aria-label="Add another phone for {{$member.DisplayName}} on extension {{$member.Extension}}"`,
+				`aria-label="Remove {{.DisplayName}} from this party"`,
 				`id="new-device-label-{{$member.ID}}"`,
 				`aria-describedby="new-device-help-{{$member.ID}}"`,
 				`id="new-device-help-{{$member.ID}}"`,
@@ -161,6 +166,24 @@ func TestCorePaletteContrast(t *testing.T) {
 		ratio := contrastRatio(colors[test.foreground], colors[test.background])
 		if ratio < test.minimum {
 			t.Errorf("%s contrast %.2f:1 is below %.1f:1", test.name, ratio, test.minimum)
+		}
+	}
+}
+
+func TestPhonebookStatusPillsMeetTextContrast(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		foreground string
+		background string
+	}{
+		{name: "online", foreground: "#11583e", background: "#dcf8ea"},
+		{name: "checking", foreground: "#155677", background: "#e3f5ff"},
+		{name: "trouble", foreground: "#8a202d", background: "#ffeaeb"},
+		{name: "waiting", foreground: "#6d520a", background: "#fff5c7"},
+		{name: "unknown", foreground: "#565064", background: "#eeebf2"},
+	} {
+		if ratio := contrastRatio(test.foreground, test.background); ratio < 4.5 {
+			t.Errorf("%s phone status contrast %.2f:1 is below 4.5:1", test.name, ratio)
 		}
 	}
 }

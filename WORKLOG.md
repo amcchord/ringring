@@ -2,6 +2,33 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Turn the phone book into a friendly control board
+
+### Shipped
+
+- Replaced the sparse flat member row with a colorful extension-first card. Each member now has a large, labeled extension tile, a readable member-wide status pill, a saved-phone count, and a contained footer for adding a phone or removing the member.
+- Gave every saved phone its own compact card with a phone icon, explicit text-and-dot status, a single prominent incoming-ring action, and short explanatory copy. Multiple phones on the same extension stack cleanly instead of becoming one long unstructured column.
+- Reframed the three host-confirmed hardware checks as a visible setup checklist with a 0–3 progress track. Checklist and phone-settings panels sit side by side on desktop, stack on mobile, and expand to the full card width without displacing unrelated controls.
+- Kept destructive and credential actions secondary inside native disclosure controls. Repeated ring, checklist, settings, add-phone, and remove-member controls now have device- or member-specific accessible names while their visible labels remain short.
+
+### Decisions
+
+- Make the extension the strongest visual landmark because it is the thing family members actually dial. Member name, aggregate reachability, phone identity, and device reachability follow in that order.
+- Use text labels plus color for every state; never ask a host to interpret a lone dot. Keep a real status pill at both the member and phone levels because one extension may ring several independently connected devices.
+- Preserve server-rendered HTML and native `details` interactions. The redesign adds no JavaScript, schema, credential, routing, presence, or telephony behavior and remains fully usable without a client-side bundle.
+
+### Verification
+
+- Focused web-flow tests cover the new directory/member/device hierarchy, visible member and device status treatments, one- and three-step checklist progress, incoming-ring action, same-extension add-phone flow, rotation reset, disconnection state, and every existing authorization boundary.
+- Accessibility contracts pin device-specific accessible names, native disclosure touch targets, mobile full-width actions, visible text status, and WCAG AA contrast for every status-pill palette.
+- Disposable in-app browser review at 1280×900 and 390×844 covered empty, one-phone, two-phone, collapsed, and expanded checklist/settings states. Desktop tool cards align side by side, mobile tools stack, all visible controls are at least 44px tall, the page and directory have no horizontal overflow, and the console is clean. The viewport, tab, process, and temporary database were cleaned up afterward.
+- `make check`, `make security`, and `make admin-test` pass locally, including formatting, shell/operator fixtures, vet, the complete race-enabled suite, the reachable-vulnerability scan, exact security contracts, and administrator tests.
+
+### Remaining
+
+- Publish and deploy through the guarded upgrade after the actively retrying physical phone is briefly disabled; deployment must not rotate any existing family credential.
+- Complete the physical ATA, desk-phone, and mobile softphone matrix. Obtain the external child-safety review and OpenAI Zero Data Retention eligibility before opening the AI conversation gate.
+
 ## 2026-08-22 — Shorter keypad credentials and clearer 401 setup
 
 ### Shipped
