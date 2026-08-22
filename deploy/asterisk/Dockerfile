@@ -31,7 +31,11 @@ RUN apt-get update \
     && useradd --uid 10002 --gid 10001 --home-dir /var/lib/asterisk --shell /usr/sbin/nologin asterisk \
     && install -d -o 10002 -g 10001 /var/lib/asterisk /var/log/asterisk /var/run/asterisk /var/spool/asterisk /etc/asterisk
 
-COPY --from=build /stage/ /
+# Debian's /var/run is a symlink to /run. Copy only the installed Asterisk
+# payload so Docker does not try to replace that symlink with DESTDIR's
+# directory. Runtime state directories are created above and mounted as needed.
+COPY --from=build /stage/usr/ /usr/
+COPY --from=build /stage/var/lib/asterisk/ /var/lib/asterisk/
 COPY config/ /etc/asterisk/
 COPY entrypoint.sh /usr/local/bin/ringring-asterisk-entrypoint
 RUN chmod 0755 /usr/local/bin/ringring-asterisk-entrypoint

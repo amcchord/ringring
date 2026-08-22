@@ -44,7 +44,7 @@ func (l *rateLimiter) allow(key string, limit int, window time.Duration) bool {
 }
 
 func (a *App) rateLimit(next http.Handler) http.Handler {
-	limiter := newRateLimiter(a.now)
+	limiter := newRateLimiter(func() time.Time { return a.now() })
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		category, limit, window := rateCategory(r)
 		if category != "" {
