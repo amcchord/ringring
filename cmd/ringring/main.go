@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/amcchord/ringring/internal/config"
+	"github.com/amcchord/ringring/internal/maintenance"
 	"github.com/amcchord/ringring/internal/openairuntime"
 	"github.com/amcchord/ringring/internal/secure"
 	"github.com/amcchord/ringring/internal/store"
@@ -28,6 +30,22 @@ func main() {
 	if err != nil {
 		logger.Error("load configuration", "error", err)
 		os.Exit(1)
+	}
+	if len(os.Args) > 1 {
+		if len(os.Args) != 2 || os.Args[1] != "verify-state" {
+			logger.Error("unknown command")
+			os.Exit(2)
+		}
+		report, err := maintenance.VerifyState(context.Background(), cfg.DatabasePath, cfg.MasterKey)
+		if err != nil {
+			logger.Error("verify restored state", "error", err)
+			os.Exit(1)
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
+			logger.Error("write verification report", "error", err)
+			os.Exit(1)
+		}
+		return
 	}
 	database, err := store.Open(cfg.DatabasePath)
 	if err != nil {

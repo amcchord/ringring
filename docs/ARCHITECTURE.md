@@ -54,6 +54,12 @@ The database is authoritative. When a device or party setting changes, the app:
 
 On startup, the app regenerates all telephony configuration from the database.
 
+## Recovery boundary
+
+Durable recovery state consists of the complete SQLite app-state directory plus both root-readable deployment environment files. The environment files are part of the recovery boundary because the application master key decrypts SIP and party service credentials; a database copy without that key is intentionally insufficient. Generated Asterisk configuration and synthesized voice cache files are derived state and are regenerated after restore.
+
+The checked-in backup workflow stops the only SQLite writer long enough for a consistent WAL-mode snapshot, restarts it, and verifies the copy without network access. The restore drill runs an extracted copy in a separate network-disabled container with no published ports, no organization admin key, and no AMI secret. It checks database structure, credential decryptability, application readiness, and telephony regeneration without mounting or replacing production state.
+
 ## Host authentication
 
 Native host accounts use a case-insensitive username and an Argon2id password hash with a unique salt. Production signup additionally requires a deployment-level family access code, shared out of band with trusted hosts, so a public splash page cannot be used to create paid OpenAI resources anonymously. Eight random recovery codes are shown once, stored only as hashes, and rotated together after a successful password reset. Recovery invalidates every existing session.

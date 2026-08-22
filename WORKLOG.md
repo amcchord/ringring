@@ -2,6 +2,34 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Verifiable disaster-recovery set
+
+### Shipped
+
+- Added a root-only `make backup` workflow that briefly stops the app for a consistent WAL-mode snapshot, copies the full SQLite state plus both deployment environment files, restarts the app, and seals a checksummed archive with the exact Git commit and a non-sensitive verification report.
+- Added `ringring verify-state`, which opens a cleanly closed copied database as immutable and without migration, then checks SQLite integrity, foreign keys, current schema, aggregate counts, and decryption of every persisted SIP and party credential without printing record identifiers or secret values.
+- Added `make restore-drill BACKUP=...`. It validates the checksum and archive paths, extracts into root-only temporary state, rechecks the sealed report, and starts the restored app in a read-only, capability-dropped, network-disabled container with no host ports, organization admin key, or AMI secret.
+- Documented encrypted off-host handling, derived-state exclusions, the isolated drill boundary, and a recoverable full-host procedure that preserves pre-restore state.
+
+### Decisions
+
+- Treat the application environment as part of durable recovery state. SQLite intentionally cannot recover encrypted SIP and OpenAI credentials without the original master key; the Asterisk environment also carries the matching private AMI secret.
+- Stop only the app for the snapshot instead of copying an active SQLite main file. SQLite documents the WAL as persistent database state and normally checkpoints it when the last connection closes.
+- Exclude generated Asterisk configuration, synthesized voice caches, certificates, images, and the Git checkout. They can be regenerated from the restored database, root secrets, and manifest commit.
+- Keep the automated restore exercise isolated. Replacing live state remains a deliberate maintenance operation with a retained rollback directory, not a side effect of routine verification.
+
+### Verification
+
+- Race-enabled tests cover valid restored counts and encrypted credentials, wrong-master-key rejection without secret disclosure, and corrupt-database rejection.
+- `make check`, shell syntax, ShellCheck, and whitespace checks pass locally.
+- A candidate image verified the existing offline production copy with SQLite integrity, foreign keys, current schema, aggregate counts, and the saved master key's ability to decrypt the party credential.
+- A separate network-disabled Compose project exercised the complete backup command against copied state, including app stop, WAL cleanup, snapshot verification, restart, archive/checksum creation, and the full restore drill. It left the live app healthy and removed every candidate container, extracted copy, and temporary secret archive.
+
+### Remaining
+
+- Push and deploy the verified candidate, create a fresh checked-in production backup, and repeat the drill from `/opt/ringring`.
+- After production verification, retain scheduled off-host encrypted copies and periodically repeat the drill as state changes.
+
 ## 2026-08-22 — First authenticated SIP/RTP loop
 
 ### Shipped

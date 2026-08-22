@@ -102,6 +102,18 @@ fail2ban-client status ringring-sip
 
 Review `docker compose logs --tail=100` after every deployment. Asterisk is compiled from the pinned official source release and its published SHA-256 file is checked during the image build.
 
+## Backup and recovery
+
+Create a root-only, checksummed backup and exercise it without replacing live state:
+
+```sh
+cd /opt/ringring
+make backup
+make restore-drill BACKUP=/root/ringring-backups/ringring-<UTC>-<commit>.tar.gz
+```
+
+The backup includes the SQLite state and both deployment environment files because the application master key is required to recover encrypted SIP and party credentials. It briefly stops only the app for a consistent WAL-mode copy, restarts it, and verifies the copy with a network-disabled container. The restore drill also has no network or host ports and never mounts production state. See [Backup and disaster recovery](RECOVERY.md) for archive handling, drill boundaries, and the recoverable full-host procedure.
+
 ## Isolated SIP and media smoke test
 
 Run the checked-in loop test after telephony renderer or Asterisk changes:
@@ -122,7 +134,7 @@ docker compose build
 docker compose up -d --remove-orphans
 ```
 
-Back up `/opt/ringring/deploy/state/app` before schema-changing upgrades. Generated Asterisk files can be regenerated from the database and do not need separate backups.
+Run `make backup` before schema-changing upgrades. Generated Asterisk files can be regenerated from the database and do not need separate backups.
 
 ### `*14` upgrade and rollback
 

@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-repository=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+repository=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
 network=ringring-sip-smoke
 containers="ringring-sip-smoke-asterisk ringring-sip-smoke-register-a ringring-sip-smoke-register-b ringring-sip-smoke-phone-a ringring-sip-smoke-phone-b"
 

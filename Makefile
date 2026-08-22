@@ -1,4 +1,4 @@
-.PHONY: setup dev test check sip-smoke compose-up compose-down
+.PHONY: setup dev test check backup restore-drill sip-smoke compose-up compose-down
 
 setup:
 	go mod download
@@ -13,6 +13,13 @@ check:
 	test -z "$$(gofmt -l $$(find . -name '*.go' -not -path './vendor/*'))"
 	go vet ./...
 	go test -race ./...
+
+backup:
+	./scripts/backup.sh
+
+restore-drill:
+	test -n "$(BACKUP)"
+	./scripts/restore-drill.sh "$(BACKUP)"
 
 sip-smoke:
 	./scripts/sip-smoke.sh

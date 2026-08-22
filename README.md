@@ -18,7 +18,7 @@ The hosted reference instance is live at [ringring.live](https://ringring.live).
 - Optional dialable services for time, weather, internet radio, and an OpenAI voice companion.
 - A reproducible, self-hosted Docker Compose deployment using Asterisk and Caddy.
 
-See [the architecture](docs/ARCHITECTURE.md), [the security model](docs/SECURITY.md), and [the roadmap](docs/ROADMAP.md).
+See [the architecture](docs/ARCHITECTURE.md), [the security model](docs/SECURITY.md), [backup and recovery](docs/RECOVERY.md), and [the roadmap](docs/ROADMAP.md).
 
 ## Status
 
