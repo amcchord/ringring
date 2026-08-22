@@ -84,6 +84,8 @@ run_and_wait() {
 echo "Building RingRing plus pinned Asterisk and SIPp smoke-test images..."
 docker build --quiet --tag ringring-app-sip-smoke:local \
   --file "$repository/Dockerfile" "$repository" >/dev/null
+docker build --quiet --target build --tag ringring-app-sip-smoke-builder:local \
+  --file "$repository/Dockerfile" "$repository" >/dev/null
 docker build --quiet --tag ringring-asterisk-sip-smoke:22.10.1 \
   --file "$repository/deploy/asterisk/Dockerfile" "$repository/deploy/asterisk" >/dev/null
 docker build --quiet --tag ringring-sipp-smoke:3.7.7 \
@@ -95,7 +97,10 @@ mkdir -p "$work_directory/app" "$work_directory/state" \
   "$work_directory/logs/ringring-sip-smoke-register-b" \
   "$work_directory/logs/ringring-sip-smoke-phone-a" \
   "$work_directory/logs/ringring-sip-smoke-phone-b"
-(cd "$repository" && go run ./scripts/sip-smoke-state "$work_directory/app/ringring.db")
+docker run --rm --network none \
+  --volume "$work_directory:/out" \
+  ringring-app-sip-smoke-builder:local \
+  go run ./scripts/sip-smoke-state /out/app/ringring.db
 chmod -R a+rwX "$work_directory/app" "$work_directory/state"
 
 docker network create --internal --subnet 172.31.89.0/24 "$network" >/dev/null
