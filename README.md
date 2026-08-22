@@ -13,7 +13,7 @@ The hosted reference instance is live at [ringring.live](https://ringring.live).
 
 - Isolated parties with a host and a private extension directory.
 - One-time invite links and device-specific SIP setup cards with a one-time Linphone QR option.
-- Friendly manual setup guidance for common ATAs, VoIP phones, and other softphones.
+- Copy-ready manual setup guidance that translates common ATA, VoIP-phone, and softphone field labels.
 - A bright, mobile-first host dashboard for invitations, members, live phone status, device controls, and optional lines.
 - Always-available `*10` two-way phone testing and `*15` voice-guided extension selection, plus optional time, weather, internet radio, and OpenAI voice lines.
 - A reproducible, self-hosted Docker Compose deployment using Asterisk and Caddy.

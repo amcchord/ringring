@@ -292,6 +292,17 @@ shows the replacement. Take and drill the normal pre-upgrade backup; an older
 binary accepts the replacement on rollback, so no reverse data migration is
 required. Do not manually restore the reserved value.
 
+### Copy-ready setup sheet upgrade and rollback
+
+The copy-ready setup release adds one embedded static JavaScript asset and
+changes Content Security Policy from `script-src 'none'` to the exact SHA-256
+digest of that asset. The base template carries the same Subresource Integrity
+digest, so a partial or modified asset fails closed instead of executing. The
+release adds no schema, stored state, secret, public port, provider call, or
+external script. Deploy the application binary normally; its embedded template
+and asset cannot drift independently. Rolling back restores the script-free
+sheet and needs no data or configuration migration.
+
 ### `*14` upgrade and rollback
 
 The `*14` release adds `party_services.ai_enabled` with a forward-only startup migration. Take the app-state backup while the app is stopped, then restart the old version before beginning the normal update. The column defaults to disabled and older RingRing builds ignore it, so rolling the app image and checkout back leaves the migrated database usable; the four `AI_*` environment variables are also ignored by older builds. Keep the database backup until the upgraded app, private port `4574`, and generated Asterisk dialplan have all been verified. Do not publish port `4574` during either upgrade or rollback.

@@ -105,6 +105,10 @@ func TestFormInstructionsAreVisibleAndAssociated(t *testing.T) {
 				`<dl class="setup-card">`,
 				`<dt>Password</dt>`,
 				`aria-describedby="linphone-provision-help"`,
+				`id="setup-copy-status" class="visually-hidden" role="status" aria-live="polite"`,
+				`aria-label="Copy password"`,
+				`aria-controls="setup-password setup-copy-status"`,
+				`aria-labelledby="field-translator-title"`,
 			},
 		},
 	}

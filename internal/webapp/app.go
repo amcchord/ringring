@@ -44,6 +44,7 @@ const (
 	authCSRFCookie      = "ringring_auth_csrf"
 	recoveryFlashCookie = "ringring_recovery_reveal"
 	provisioningTTL     = 30 * time.Minute
+	setupScriptSHA256   = "sha256-GruKwUKa07KAsqw0xgYnF1qSLOdrt0IH4q0ZDqGAMYA="
 )
 
 var (
@@ -2094,7 +2095,7 @@ func (a *App) secureCookies() bool {
 
 func (a *App) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src '"+setupScriptSHA256+"'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
 		w.Header().Set("Referrer-Policy", "same-origin")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")

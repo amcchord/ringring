@@ -2,6 +2,8 @@ package securitycontract
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -126,6 +128,34 @@ func TestWebProxyCannotReachPrivateMetricsOrControlServices(t *testing.T) {
 	}
 	if strings.Contains(manager, "permit=0.0.0.0") {
 		t.Fatal("AMI permits every source")
+	}
+}
+
+func TestCredentialCopyHelperIsIntegrityPinnedAndLocalOnly(t *testing.T) {
+	javascript := readRepositoryFile(t, "web/static/site.js")
+	digest := sha256.Sum256([]byte(javascript))
+	integrity := "sha256-" + base64.StdEncoding.EncodeToString(digest[:])
+	base := readRepositoryFile(t, "web/templates/base.html")
+	if strings.Count(base, "<script") != 1 || !strings.Contains(base, `src="/static/site.js" integrity="`+integrity+`"`) {
+		t.Fatalf("the only browser helper must be the integrity-pinned local setup script: %s", integrity)
+	}
+	app := readRepositoryFile(t, "internal/webapp/app.go")
+	if !strings.Contains(app, `setupScriptSHA256`) || !strings.Contains(app, `"`+integrity+`"`) || !strings.Contains(app, `script-src '"+setupScriptSHA256+"'`) {
+		t.Fatal("the CSP must permit only the exact setup-script digest")
+	}
+	for _, forbidden := range []string{
+		"fetch(", "XMLHttpRequest", "sendBeacon", "WebSocket", "EventSource",
+		"localStorage", "sessionStorage", "indexedDB", "document.cookie",
+		"window.location", "console.",
+	} {
+		if strings.Contains(javascript, forbidden) {
+			t.Fatalf("the credential copy helper contains transmission or persistence primitive %q", forbidden)
+		}
+	}
+	for _, required := range []string{"navigator.clipboard.writeText", `document.execCommand("copy")`, `helper.remove()`, `data-copy-setup`, `data-setup-field`} {
+		if !strings.Contains(javascript, required) {
+			t.Fatalf("the credential copy helper is missing bounded behavior %q", required)
+		}
 	}
 }
 

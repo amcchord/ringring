@@ -11,8 +11,9 @@
   <h1>Hello, {{.Claim.Member.DisplayName}}!<br><em>You are extension {{.Claim.Member.Extension}}.</em></h1>
   <p>Keep this screen private and finish your phone setup now. The password is only shown once.</p>
   {{end}}
+  <p id="setup-copy-status" class="visually-hidden" role="status" aria-live="polite"></p>
   {{if .LinphoneQR}}
-  <section class="linphone-card" aria-labelledby="linphone-title">
+  <section class="linphone-card" id="linphone-setup" aria-labelledby="linphone-title">
     <div class="linphone-copy">
       <span class="kicker">Fastest softphone setup</span>
       <h2 id="linphone-title">Scan it with <em>Linphone.</em></h2>
@@ -29,7 +30,10 @@
       <details class="provision-details">
         <summary>Configure Linphone by URL instead</summary>
         <label for="linphone-provision-url">Remote provisioning URL</label>
-        <input id="linphone-provision-url" value="{{.LinphoneProvisionURL}}" readonly autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="linphone-provision-help">
+        <div class="provision-copy-field">
+          <input id="linphone-provision-url" value="{{.LinphoneProvisionURL}}" readonly autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="linphone-provision-help">
+          <button class="copy-button" type="button" data-copy-target="linphone-provision-url" data-copy-label="Provisioning URL" aria-label="Copy provisioning URL" aria-controls="linphone-provision-url setup-copy-status" hidden>Copy</button>
+        </div>
         <p id="linphone-provision-help">Copy the whole URL. From Linphone’s home screen, choose <strong>Provisioning Link</strong> and paste it there—not into a web browser.</p>
       </details>
       <p class="one-time-note">The QR contains a one-time RingRing setup URL, not the SIP password itself. It expires after 30 minutes and stops working after the first fetch.</p>
@@ -40,19 +44,36 @@
     </div>
   </section>
   {{end}}
-  <div class="manual-setup-heading">
+  <div class="manual-setup-heading" id="manual-setup">
     <span class="kicker">Works with any SIP phone</span>
     <h2>Manual settings</h2>
-    <p>Use these for an ATA, desk phone, or any softphone that is not Linphone.</p>
+    <p>Use these for an ATA, desk phone, or any softphone that is not Linphone. Copy one value at a time, or make one private setup note.</p>
   </div>
   <dl class="setup-card">
-    <div><dt>SIP server / registrar</dt><dd><strong>{{.SIPPublicHost}}</strong></dd></div>
-    <div><dt>Username / auth ID</dt><dd><strong>{{.Claim.Device.SIPUsername}}</strong></dd></div>
-    <div class="secret-value"><dt>Password</dt><dd><strong>{{.Claim.SIPSecret}}</strong></dd></div>
-    <div><dt>Your extension</dt><dd><strong>{{.Claim.Member.Extension}}</strong></dd></div>
-    <div><dt>Preferred transport</dt><dd><strong>TLS · port 5061</strong></dd></div>
-    <div><dt>Older-device fallback</dt><dd><strong>UDP · port 5060</strong></dd></div>
+    <div data-setup-field><dt>SIP server / registrar</dt><dd class="copy-value"><strong id="setup-server" data-setup-value>{{.SIPPublicHost}}</strong><button class="copy-button" type="button" data-copy-target="setup-server" data-copy-label="SIP server" aria-label="Copy SIP server" aria-controls="setup-server setup-copy-status" hidden>Copy</button></dd></div>
+    <div data-setup-field><dt>Username / auth ID</dt><dd class="copy-value"><strong id="setup-username" data-setup-value>{{.Claim.Device.SIPUsername}}</strong><button class="copy-button" type="button" data-copy-target="setup-username" data-copy-label="Username" aria-label="Copy username" aria-controls="setup-username setup-copy-status" hidden>Copy</button></dd></div>
+    <div class="secret-value" data-setup-field><dt>Password</dt><dd class="copy-value"><strong id="setup-password" data-setup-value>{{.Claim.SIPSecret}}</strong><button class="copy-button" type="button" data-copy-target="setup-password" data-copy-label="Password" aria-label="Copy password" aria-controls="setup-password setup-copy-status" hidden>Copy</button></dd></div>
+    <div data-setup-field><dt>Your extension</dt><dd class="copy-value"><strong id="setup-extension" data-setup-value>{{.Claim.Member.Extension}}</strong><button class="copy-button" type="button" data-copy-target="setup-extension" data-copy-label="Extension" aria-label="Copy extension" aria-controls="setup-extension setup-copy-status" hidden>Copy</button></dd></div>
+    <div data-setup-field><dt>Preferred transport</dt><dd class="copy-value"><strong id="setup-transport" data-setup-value>TLS · port 5061</strong><button class="copy-button" type="button" data-copy-target="setup-transport" data-copy-label="Preferred transport" aria-label="Copy preferred transport" aria-controls="setup-transport setup-copy-status" hidden>Copy</button></dd></div>
+    <div data-setup-field><dt>Older-device fallback</dt><dd class="copy-value"><strong id="setup-fallback" data-setup-value>UDP · port 5060</strong><button class="copy-button" type="button" data-copy-target="setup-fallback" data-copy-label="Fallback transport" aria-label="Copy fallback transport" aria-controls="setup-fallback setup-copy-status" hidden>Copy</button></dd></div>
   </dl>
+  <div class="setup-copy-actions">
+    <button class="button button-quiet" type="button" data-copy-setup aria-controls="setup-copy-status" hidden>Copy all six settings</button>
+    <p><strong>This copies the password too.</strong> Paste it only into the phone or a private message to the person setting it up, then remove that message after the phone is saved.</p>
+  </div>
+  <section class="field-translator" aria-labelledby="field-translator-title">
+    <span aria-hidden="true">🧭</span>
+    <div>
+      <h3 id="field-translator-title">When your phone uses different labels</h3>
+      <dl>
+        <div><dt>Proxy, registrar, SIP server</dt><dd>Use <strong>SIP server / registrar</strong>.</dd></div>
+        <div><dt>SIP user, user ID, authentication ID</dt><dd>Use <strong>Username / auth ID</strong>—not your extension.</dd></div>
+        <div><dt>Display number or extension</dt><dd>Use <strong>Your extension</strong>. A display name can be anything familiar.</dd></div>
+        <div><dt>Domain or realm</dt><dd>If the phone requires one, use the same <strong>SIP server / registrar</strong>.</dd></div>
+        <div><dt>Outbound proxy</dt><dd>Leave it blank. RingRing does not use a telephone-company trunk.</dd></div>
+      </dl>
+    </div>
+  </section>
   <div class="warning-card"><strong>TLS protects phone sign-in and call setup.</strong><p>RingRing’s voice audio is still server-relayed RTP, not encrypted media. Use UDP only when an older adapter cannot use TLS 1.2 with normal certificate checking.</p></div>
   <div class="warning-card"><strong>Save it before you leave.</strong><p>For safety, RingRing cannot display this password again. If it is lost, the party host can make a fresh one.</p></div>
   <div class="phone-test-card">
@@ -70,9 +91,9 @@
       <p>The labels vary by brand, but the six manual settings above are all most devices need.</p>
     </div>
     <div class="guide-grid">
-      <article><span aria-hidden="true">☎️</span><h3>Telephone adapter</h3><ol><li>Plug the telephone into <strong>PHONE 1</strong>, not the wall.</li><li>Open the adapter’s Line 1 or FXS page.</li><li>Use TLS 1.2 with certificate checking when offered; otherwise choose the UDP fallback.</li></ol></article>
-      <article><span aria-hidden="true">📟</span><h3>VoIP desk phone</h3><ol><li>Add a SIP account or line.</li><li>Use the extension as the display number and the username as Auth ID.</li><li>Choose TLS on port 5061 and a 300–600 second registration expiry.</li></ol></article>
-      <article><span aria-hidden="true">📱</span><h3>Softphone app</h3><ol><li>Add an account manually—do not choose a public provider.</li><li>Choose TLS, keep server-certificate verification on, and enter the settings exactly.</li><li>Allow microphone access, then call <strong>*10</strong> to test both directions.</li></ol></article>
+      <article><span aria-hidden="true">☎️</span><h3>Telephone adapter</h3><ol><li>Plug the telephone into <strong>PHONE 1</strong>, not the wall.</li><li>Open the adapter’s Line 1 or FXS page and use the field translator above.</li><li>Use TLS 1.2 with certificate checking when offered; otherwise choose the UDP fallback.</li><li>Keep NAT keep-alive or rport on when offered. Do not forward router ports.</li></ol></article>
+      <article><span aria-hidden="true">📟</span><h3>VoIP desk phone</h3><ol><li>Add a SIP account or line and use the field translator above.</li><li>Use the extension only as the display number; both SIP user and Auth ID get the generated username.</li><li>Choose TLS on port 5061 and a 300–600 second registration expiry.</li><li>Save, wait for Registered, then dial <strong>*10</strong>.</li></ol></article>
+      <article><span aria-hidden="true">📱</span><h3>Other softphone app</h3><ol><li>Add a SIP account manually—do not choose a public phone provider.</li><li>Use the generated username for both SIP user and authentication ID.</li><li>Choose TLS, keep server-certificate verification on, and enter the settings exactly.</li><li>Allow microphone access, then call <strong>*10</strong> to test both directions.</li></ol></article>
     </div>
   </section>
   <div class="emergency-note"><strong>RingRing is a private toy phone network.</strong> It cannot call regular or emergency phone numbers. Keep another way to call emergency services.</div>

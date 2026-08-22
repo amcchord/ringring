@@ -67,6 +67,7 @@ Telephony configuration is derived from SQLite. If an Asterisk regeneration or p
 - Host passwords use salted Argon2id hashes at the [OWASP password-storage minimum](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html). Passwords and the family access code are never logged.
 - Random offline recovery codes follow [OWASP's offline-recovery guidance](https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html): they are stored only as domain-separated hashes, revealed once, and rotated as a set after use. A reset invalidates all sessions.
 - Setup screens reveal a newly issued SIP password only once. Their provisioning URLs appear only on that same no-store reveal; rotated settings cross the redirect in a short-lived encrypted cookie, and token-bearing paths are masked from application logs. A lost or prematurely consumed setup is rotated, not retrieved.
+- Copy buttons on that reveal are optional progressive enhancement. A single integrity-pinned same-origin script reads only the visible setup values after a user gesture and writes them to the operating-system clipboard; it has no network, browser-storage, cookie, navigation, or logging primitive. The page works without it, warns that the complete note includes the password, and reminds the person to remove any private message after configuration. Clipboard lifetime remains controlled by the browser and operating system, not RingRing.
 
 ## Network exposure
 
