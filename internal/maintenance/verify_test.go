@@ -75,6 +75,45 @@ func TestVerifyStateRejectsUnknownRadioStationWithoutEchoingIt(t *testing.T) {
 	}
 }
 
+func TestVerifyStateReadsRequiredSchemaFromLiveWAL(t *testing.T) {
+	path, key, _, _ := verificationFixture(t)
+	database, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if _, err := database.Exec(`PRAGMA wal_autocheckpoint = 0`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`DROP TABLE device_readiness`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		CREATE TABLE device_readiness (
+			device_id TEXT PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
+			echo_tested_at INTEGER CHECK(echo_tested_at IS NULL OR echo_tested_at > 0),
+			outgoing_call_tested_at INTEGER CHECK(outgoing_call_tested_at IS NULL OR outgoing_call_tested_at > 0),
+			incoming_call_tested_at INTEGER CHECK(incoming_call_tested_at IS NULL OR incoming_call_tested_at > 0),
+			updated_at INTEGER NOT NULL CHECK(updated_at > 0)
+		)`); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(path + "-wal"); err != nil || info.Size() == 0 {
+		t.Fatalf("fixture did not retain a live WAL: info=%v error=%v", info, err)
+	}
+
+	report, err := VerifyState(t.Context(), path, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Status != "ok" || report.PhoneChecks != 0 || report.Devices != 1 {
+		t.Fatalf("unexpected WAL-aware verification report: %+v", report)
+	}
+}
+
 func verificationFixture(t *testing.T) (string, []byte, string, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "ringring.db")

@@ -52,9 +52,9 @@ func VerifyState(ctx context.Context, databasePath string, masterKey []byte) (St
 	}
 	databaseURL := url.URL{Scheme: "file", Path: filepath.ToSlash(absolutePath)}
 	query := databaseURL.Query()
-	// Backup creation requires a cleanly closed snapshot with no WAL or SHM
-	// sidecars, so immutable mode is both safe and keeps verification read-only.
-	query.Set("immutable", "1")
+	// Restored backups have no WAL sidecars, while deployment verification also
+	// invokes this command against the live database. Read-only mode handles
+	// both: unlike immutable mode, it sees a just-migrated schema still in WAL.
 	query.Set("mode", "ro")
 	databaseURL.RawQuery = query.Encode()
 	database, err := sql.Open("sqlite", databaseURL.String())
