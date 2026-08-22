@@ -25,6 +25,12 @@ This is the durable, chronological project record. Add new entries at the top. C
 - A disposable real-browser flow covered party creation, one-time invitation, member claim, each deletion confirmation, party removal, account removal, and loss of the deleted session.
 - The confirmation UI passed a phone-sized viewport check with no horizontal overflow and 44–54px primary, cancel, and back targets.
 
+### Production
+
+- GitHub Actions passed commit `5f23a35`. Created a verified root-only recovery archive immediately before deployment and another from the deployed commit; both sealed reports match the existing one-host/one-party state and confirm integrity, foreign keys, and party-key decryption.
+- Deployed from the clean `/opt/ringring` checkout without schema or secret changes. The live family access code remains configured as `fruit-loops`; no deletion form was submitted and no production OpenAI project was archived.
+- App, Asterisk, and Caddy are healthy; public readiness and signup security headers pass; unauthenticated deletion routes return to login; and the `ringring-sip` Fail2Ban jail is active. The first Compose start produced one transient app-to-Asterisk discovery warning while Asterisk was still being recreated; the verified post-deploy app restart reconciled cleanly and settled app logs contain no warnings or errors.
+
 ### Remaining
 
 - Complete a two-way-audio call with two remote physical devices.
