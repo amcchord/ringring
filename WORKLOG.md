@@ -23,9 +23,14 @@ This is the durable, chronological project record. Add new entries at the top. C
 - Authenticated web tests cover every rendered state, explicit AMI failure fallback, revocation overriding a previously online contact, accessible member labels, and denial before any presence query for another signed-in host.
 - `make check` passes with formatting, vet, and the full race-enabled suite. A disposable browser flow created and claimed a phone, then verified the unavailable-state directory at desktop and 390×844 widths with no horizontal overflow; its browser tab and all temporary state were removed.
 
+### Production
+
+- GitHub Actions passed the feature commit and its Asterisk compatibility follow-up. The first aggregate-only production probe proved the manager login and action registry but exposed Asterisk's documented implementation behavior: zero contacts returns an error-shaped “No Contacts found” frame instead of a successful empty list. RingRing now accepts only that exact case as empty; unrelated manager errors still fail closed.
+- Deployed the corrected app without recreating Asterisk or Caddy. The real private AMI probe passes with zero contacts, matching the untouched production registrar and database; app, Asterisk, Caddy, public readiness, SIP transport, and the SIP Fail2Ban jail are healthy, and settled app logs contain no warnings or errors.
+- Created verified root-only backups immediately before and after rollout. Their sealed reports and both deployment environment files match exactly: one user, one party, no members or devices, one unclaimed invitation, one session, eight recovery codes, and one decryptable party key. No access code, family state, credential, or OpenAI project changed.
+
 ### Remaining
 
-- Verify the new AMI action against the production manager account and deploy after GitHub Actions passes.
 - Register real remote hardware so the live dashboard can exercise reachable and unreachable transitions.
 
 ## 2026-08-22 — One-phone two-way audio test
