@@ -27,6 +27,11 @@ type ProvisionedProject struct {
 	APIKey           string
 }
 
+type projectResponse struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+}
+
 func New(adminKey string, spendLimitCents int, httpClient *http.Client) *Client {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
@@ -86,6 +91,43 @@ func (c *Client) Provision(ctx context.Context, partyID, partyName string) (Prov
 	}, nil
 }
 
+// ArchiveProject disables a party's external project before RingRing removes
+// its local encryption key and ownership record. Retrieving first makes retries
+// safe when a previous archive succeeded but the local delete did not.
+func (c *Client) ArchiveProject(ctx context.Context, projectID string) error {
+	if c.adminKey == "" {
+		return errors.New("OpenAI admin key is not configured")
+	}
+	if projectID == "" {
+		return errors.New("OpenAI project ID is required")
+	}
+	path := "/organization/projects/" + url.PathEscape(projectID)
+	var current projectResponse
+	if err := c.get(ctx, path, &current); err != nil {
+		return fmt.Errorf("retrieve OpenAI project: %w", err)
+	}
+	if current.Status == "archived" {
+		return nil
+	}
+	var archived projectResponse
+	if err := c.post(ctx, path+"/archive", map[string]any{}, &archived); err != nil {
+		return fmt.Errorf("archive OpenAI project: %w", err)
+	}
+	if archived.Status != "archived" {
+		return errors.New("archive OpenAI project: response did not confirm archived status")
+	}
+	return nil
+}
+
+func (c *Client) get(ctx context.Context, path string, destination any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(c.baseURL, "/")+path, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	c.setHeaders(req)
+	return c.do(req, destination)
+}
+
 func (c *Client) post(ctx context.Context, path string, body any, destination any) error {
 	encoded, err := json.Marshal(body)
 	if err != nil {
@@ -95,10 +137,17 @@ func (c *Client) post(ctx context.Context, path string, body any, destination an
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.adminKey)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "ringring/0.1")
+	c.setHeaders(req)
+	return c.do(req, destination)
+}
 
+func (c *Client) setHeaders(req *http.Request) {
+	req.Header.Set("Authorization", "Bearer "+c.adminKey)
+	req.Header.Set("User-Agent", "ringring/0.1")
+}
+
+func (c *Client) do(req *http.Request, destination any) error {
 	response, err := c.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("send request: %w", err)

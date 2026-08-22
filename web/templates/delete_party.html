@@ -1,0 +1,20 @@
+{{define "title"}}Delete {{.Party.Name}}{{end}}
+{{define "content"}}
+<section class="confirmation-shell wrap">
+  <a class="back-link" href="/parties/{{.Party.ID}}">← Keep this party</a>
+  <div class="panel destructive-panel">
+    <span class="panel-icon" aria-hidden="true">🎈</span>
+    <span class="eyebrow">Permanent party removal</span>
+    <h1>Delete {{.Party.Name}}?</h1>
+    <p>This deletes {{len .Members}} member{{if ne (len .Members) 1}}s{{end}}, every invitation, every SIP username and password, and every fun-number setting.</p>
+    {{if .Party.OpenAIProjectID}}<p class="external-delete-note">RingRing will first archive this party's OpenAI project so its runtime key can no longer be used. Archived OpenAI projects cannot be restored.</p>{{end}}
+    <form class="stack-form" method="post" action="/parties/{{.Party.ID}}/delete">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <label for="party-confirmation">Type <strong>{{.Party.Name}}</strong> exactly to confirm</label>
+      <input id="party-confirmation" name="confirmation" autocomplete="off" required>
+      <button class="button button-danger" type="submit">{{if .Party.OpenAIProjectID}}Archive project and delete party{{else}}Delete this party{{end}}</button>
+    </form>
+    <a class="cancel-link" href="/parties/{{.Party.ID}}">Cancel and keep everything</a>
+  </div>
+</section>
+{{end}}

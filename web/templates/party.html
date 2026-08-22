@@ -97,6 +97,7 @@
             </details>
           </span>
           {{end}}
+          <a class="member-remove-link" href="/parties/{{$party.ID}}/members/{{.ID}}/delete">Remove this member</a>
         </span>
         <span class="status-dot{{range .Devices}}{{if .RevokedAt}} status-off{{end}}{{end}}" title="Phone status"></span>
       </article>
@@ -105,5 +106,13 @@
       <div class="empty-state"><span>📞</span><p>No phones yet. Make the first invite link!</p></div>
     {{end}}
   </div>
+</section>
+<section class="danger-zone wrap" aria-labelledby="party-danger-title">
+  <div>
+    <span class="eyebrow">Host controls</span>
+    <h2 id="party-danger-title">Retire this party</h2>
+    <p>Deletes every invitation, member, and phone credential after a separate confirmation. Any OpenAI project is archived first.</p>
+  </div>
+  <a class="button button-danger" href="/parties/{{.Party.ID}}/delete">Delete this party</a>
 </section>
 {{end}}

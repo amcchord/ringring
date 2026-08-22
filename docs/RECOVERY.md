@@ -18,6 +18,8 @@ The output is a mode-`0600` `ringring-<UTC>-<commit>.tar.gz` archive and matchin
 > [!CAUTION]
 > The archive contains deployment secrets and private family data. Root-only permissions are a local safeguard, not encryption. Copy backups off the server only into encrypted storage with tightly limited access, and apply an operator-chosen retention policy.
 
+Deleting a member, party, or host account does not rewrite archives that were created earlier. A restore can therefore reintroduce data and credentials that existed at the backup timestamp. After a privacy-driven deletion, expire every affected backup according to the operator's retention policy; if an early purge is required, create and verify a post-deletion archive before securely retiring the older copies.
+
 An optional absolute output directory can be passed directly to `scripts/backup.sh`. The script refuses broad paths, repository-contained destinations, dirty checkouts, loose environment-file permissions, and symlinked environment files.
 
 ## Exercise a restore without touching production

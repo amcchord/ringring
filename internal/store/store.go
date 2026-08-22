@@ -21,6 +21,7 @@ var (
 	ErrExtensionTaken = errors.New("extension is already in use")
 	ErrUsernameTaken  = errors.New("username is already in use")
 	ErrRecoveryCode   = errors.New("invalid recovery code")
+	ErrPartiesRemain  = errors.New("host still owns parties")
 )
 
 type Store struct {
@@ -605,6 +606,105 @@ func (s *Store) ListMembers(ctx context.Context, partyID string) ([]model.Member
 		}
 	}
 	return members, rows.Err()
+}
+
+func (s *Store) MemberForHost(ctx context.Context, partyID, hostUserID, memberID string) (model.Party, model.Member, error) {
+	party, err := s.PartyForHost(ctx, partyID, hostUserID)
+	if err != nil {
+		return model.Party{}, model.Member{}, err
+	}
+	var member model.Member
+	var created int64
+	err = s.db.QueryRowContext(ctx, `
+		SELECT id, party_id, display_name, extension, created_at
+		FROM members WHERE id = ? AND party_id = ?`, memberID, partyID).Scan(
+		&member.ID, &member.PartyID, &member.DisplayName, &member.Extension, &created,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Party{}, model.Member{}, ErrNotFound
+	}
+	if err != nil {
+		return model.Party{}, model.Member{}, fmt.Errorf("load hosted member: %w", err)
+	}
+	member.CreatedAt = fromUnix(created)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, member_id, label, sip_username, created_at, revoked_at
+		FROM devices WHERE member_id = ? ORDER BY created_at`, memberID)
+	if err != nil {
+		return model.Party{}, model.Member{}, fmt.Errorf("list hosted member devices: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var device model.Device
+		var deviceCreated int64
+		var revoked sql.NullInt64
+		if err := rows.Scan(&device.ID, &device.MemberID, &device.Label, &device.SIPUsername, &deviceCreated, &revoked); err != nil {
+			return model.Party{}, model.Member{}, fmt.Errorf("scan hosted member device: %w", err)
+		}
+		device.CreatedAt = fromUnix(deviceCreated)
+		if revoked.Valid {
+			value := fromUnix(revoked.Int64)
+			device.RevokedAt = &value
+		}
+		member.Devices = append(member.Devices, device)
+	}
+	if err := rows.Err(); err != nil {
+		return model.Party{}, model.Member{}, fmt.Errorf("read hosted member devices: %w", err)
+	}
+	return party, member, nil
+}
+
+func (s *Store) DeleteMember(ctx context.Context, partyID, hostUserID, memberID string) error {
+	result, err := s.db.ExecContext(ctx, `
+		DELETE FROM members
+		WHERE id = ? AND party_id = ?
+		AND EXISTS (SELECT 1 FROM parties WHERE id = ? AND host_user_id = ?)`,
+		memberID, partyID, partyID, hostUserID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete hosted member: %w", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) DeleteParty(ctx context.Context, partyID, hostUserID string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM parties WHERE id = ? AND host_user_id = ?`, partyID, hostUserID)
+	if err != nil {
+		return fmt.Errorf("delete hosted party: %w", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) DeleteUserWithoutParties(ctx context.Context, userID string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin user deletion: %w", err)
+	}
+	defer tx.Rollback()
+	var parties int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM parties WHERE host_user_id = ?`, userID).Scan(&parties); err != nil {
+		return fmt.Errorf("count hosted parties: %w", err)
+	}
+	if parties != 0 {
+		return ErrPartiesRemain
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID)
+	if err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit user deletion: %w", err)
+	}
+	return nil
 }
 
 // RotateDevice replaces a device's registration identity and re-enables it if

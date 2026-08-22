@@ -35,6 +35,7 @@
       {{end}}
     </nav>
   </header>
+  {{if .Notice}}<div class="global-notice" role="status"><span aria-hidden="true">✓</span>{{.Notice}}</div>{{end}}
   <main>{{template "content" .}}</main>
   <footer class="site-footer">
     <p><strong>RingRing never calls the regular phone network.</strong> It cannot make emergency calls.</p>

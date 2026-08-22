@@ -2,6 +2,34 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Guarded member, party, and account deletion
+
+### Shipped
+
+- Added host-scoped member deletion with an exact-extension confirmation. Deleting a member cascades through every attached device credential and immediately requests telephony regeneration.
+- Added full-party deletion with an exact-name confirmation. Parties with provisioned OpenAI resources must first archive their external project; archival failure keeps all local party data intact, and an already-archived project makes retry safe.
+- Added host-account deletion with an exact `DELETE` confirmation. A transactional store guard refuses the operation until every hosted party has been retired, then removes sign-in credentials, recovery-code hashes, and sessions.
+- Added no-store mobile confirmation pages, clear completion and delayed-routing notices, destructive-action rate limiting, and 44px-or-larger touch targets.
+- Documented the external archive ordering, telephony-reconciliation recovery path, and the fact that historical backups retain deleted records until operator retention removes them.
+
+### Decisions
+
+- Archive an OpenAI project before discarding its local encrypted key or ownership identifier. This fails closed when the external administrator connection is unavailable and avoids orphaning a usable paid project.
+- Keep deletion authorization in the store query as well as the route. A party host cannot address another host's member or party, even if a handler supplies attacker-controlled identifiers.
+- Make SQLite deletion authoritative and Asterisk configuration derived, matching rotation and revocation. A failed private reload produces an explicit urgent notice and remains recoverable through reconciliation or startup.
+- Require parties to be deleted before a host account. That preserves the external-project cleanup boundary and makes the final account transaction small and unambiguous.
+
+### Verification
+
+- Package tests cover host scoping, foreign-key cascades, session invalidation, exact confirmations, archive failure preserving local state, retry-safe archival, and completion notices.
+- A disposable real-browser flow covered party creation, one-time invitation, member claim, each deletion confirmation, party removal, account removal, and loss of the deleted session.
+- The confirmation UI passed a phone-sized viewport check with no horizontal overflow and 44–54px primary, cancel, and back targets.
+
+### Remaining
+
+- Complete a two-way-audio call with two remote physical devices.
+- Copy verified backups into operator-controlled encrypted off-host storage and apply a retention schedule.
+
 ## 2026-08-22 — Verifiable disaster-recovery set
 
 ### Shipped
@@ -35,7 +63,7 @@ This is the durable, chronological project record. Add new entries at the top. C
 ### Remaining
 
 - Copy verified archives into operator-controlled encrypted off-host storage and apply a retention schedule; periodically repeat the drill as state changes.
-- Complete a two-way-audio call with two remote physical devices and add host/member deletion flows.
+- Complete a two-way-audio call with two remote physical devices.
 
 ## 2026-08-22 — First authenticated SIP/RTP loop
 

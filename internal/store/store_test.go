@@ -189,6 +189,67 @@ func TestPartyServiceSettingsAreHostScopedAndDefaultToTime(t *testing.T) {
 	}
 }
 
+func TestDeletionIsHostScopedAndCascades(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
+	host, _ := s.UpsertGoogleUser(ctx, GoogleProfile{Subject: "delete-host", Email: "host@example.test", Name: "Host"}, now, "usr_delete_host")
+	other, _ := s.UpsertGoogleUser(ctx, GoogleProfile{Subject: "delete-other", Email: "other@example.test", Name: "Other"}, now, "usr_delete_other")
+	sessionHash := secure.Hash("delete-session")
+	if err := s.CreateSession(ctx, sessionHash, host.ID, now.Add(time.Hour), now); err != nil {
+		t.Fatal(err)
+	}
+	party, _ := s.CreateParty(ctx, NewParty{ID: "pty_delete", Name: "Delete Party", Slug: "delete-party", HostUserID: host.ID, CreatedAt: now})
+	if err := s.CreateInvitation(ctx, NewInvitation{
+		ID: "inv_delete", PartyID: party.ID, CreatedByUserID: host.ID,
+		TokenHash: secure.Hash("delete-invite"), ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, member, _, err := s.ClaimInvitation(ctx, NewClaim{
+		TokenHash: secure.Hash("delete-invite"), MemberID: "mem_delete", DisplayName: "Kitchen", Extension: "101",
+		DeviceID: "dev_delete", DeviceLabel: "ATA", SIPUsername: "rrd_delete", SIPSecretCiphertext: "cipher", Now: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.DeleteMember(ctx, party.ID, other.ID, member.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("non-host member deletion error = %v", err)
+	}
+	if err := s.DeleteMember(ctx, party.ID, host.ID, member.ID); err != nil {
+		t.Fatal(err)
+	}
+	if routing, err := s.RoutingDevices(ctx); err != nil || len(routing) != 0 {
+		t.Fatalf("deleted member remained routable: %#v, %v", routing, err)
+	}
+	if _, _, err := s.MemberForHost(ctx, party.ID, host.ID, member.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleted member lookup error = %v", err)
+	}
+	if err := s.DeleteParty(ctx, party.ID, other.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("non-host party deletion error = %v", err)
+	}
+	if err := s.DeleteUserWithoutParties(ctx, host.ID); !errors.Is(err, ErrPartiesRemain) {
+		t.Fatalf("account deletion with party error = %v", err)
+	}
+	if err := s.DeleteParty(ctx, party.ID, host.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PartyForHost(ctx, party.ID, host.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleted party lookup error = %v", err)
+	}
+	if err := s.DeleteUserWithoutParties(ctx, host.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UserBySession(ctx, sessionHash, now); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleted account session lookup error = %v", err)
+	}
+}
+
 func TestOpenAddsAIServiceColumnToLegacyDatabase(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.db")
 	db, err := sql.Open("sqlite", path)

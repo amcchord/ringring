@@ -14,6 +14,15 @@ RingRing is designed for family use and may handle children's voices and names. 
 
 RingRing stores a host name and username, member display labels, extensions, device labels, and operational timestamps. An email address is neither requested nor required by native accounts. It does not record calls. RingRing does not persist AI input audio, output audio, or transcript events. Provider-side API retention is controlled separately by the OpenAI organization's data controls. The default frontend includes no advertising, behavioral analytics, or third-party trackers.
 
+## Deletion lifecycle
+
+- A host can delete a member only after retyping that member's extension. The member record and every attached encrypted SIP credential are removed together, then RingRing regenerates and reloads Asterisk configuration.
+- A host can delete a party only after retyping its full name. If the party owns an OpenAI project, RingRing must first confirm that the project is archived; an archive failure preserves the complete local party. OpenAI project archival is permanent.
+- A host account can be deleted only after all of its parties are gone. Deleting it removes native sign-in data, password and recovery-code hashes, and every active server-side session.
+- Successful deletion clears live application state, not historical backup archives. Operators must expire encrypted backups under their retention policy before removed family data disappears from every recovery copy.
+
+Telephony configuration is derived from SQLite. If an Asterisk regeneration or private reload fails after a local deletion commits, the host sees an operator-retry notice and startup reconciliation remains the recovery path. Operators should treat that notice as urgent because an already-loaded credential can remain accepted until reconciliation succeeds.
+
 ## Secrets
 
 - Deployment secrets live outside Git in a root-readable environment file or secret manager.
@@ -62,4 +71,4 @@ Do not open a public issue for a vulnerability that could expose credentials or 
 
 ## Known preview gaps
 
-HTTPS/TLS, narrow published ports, cross-party configuration isolation, native account recovery, SIP credential rotation/revocation, live authentication blocking, and isolated backup/restore are verified. The service remains a preview until two remote physical devices pass two-way audio and host/member deletion flows exist.
+HTTPS/TLS, narrow published ports, cross-party configuration isolation, native account recovery, SIP credential rotation/revocation, guarded member/party/account deletion, live authentication blocking, and isolated backup/restore are verified. The service remains a preview until two remote physical devices pass two-way audio.

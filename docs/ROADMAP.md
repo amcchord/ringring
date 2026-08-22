@@ -10,6 +10,7 @@
 - [x] Generated Asterisk PJSIP endpoints and party dialplans.
 - [ ] Calls between two remotely registered devices, verified with real hardware.
 - [x] Device revocation and credential rotation.
+- [x] Guarded member, party, and host-account deletion with OpenAI project archival.
 
 ## Milestone 2 — Friendly enough for family
 

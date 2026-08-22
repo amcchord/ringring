@@ -2,6 +2,7 @@ package webapp
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/amcchord/ringring/internal/config"
+	"github.com/amcchord/ringring/internal/openaiadmin"
 	"github.com/amcchord/ringring/internal/secure"
 	"github.com/amcchord/ringring/internal/store"
 	"github.com/amcchord/ringring/internal/weather"
@@ -21,6 +23,25 @@ import (
 
 type fakeWeatherGeocoder struct {
 	query string
+}
+
+type fakeOpenAIProjects struct {
+	archiveAttempts int
+	archived        []string
+	archiveErr      error
+}
+
+func (*fakeOpenAIProjects) Provision(context.Context, string, string) (openaiadmin.ProvisionedProject, error) {
+	return openaiadmin.ProvisionedProject{}, errors.New("not used")
+}
+
+func (f *fakeOpenAIProjects) ArchiveProject(_ context.Context, projectID string) error {
+	f.archiveAttempts++
+	if f.archiveErr != nil {
+		return f.archiveErr
+	}
+	f.archived = append(f.archived, projectID)
+	return nil
 }
 
 func (f *fakeWeatherGeocoder) Geocode(_ context.Context, query string) (weather.Location, error) {
@@ -183,6 +204,72 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	}
 	if len(routing) != 0 {
 		t.Fatalf("revoked device remained routable: %#v", routing)
+	}
+
+	hostParty = get(t, client, server.URL+"/parties/"+partyID)
+	memberDeletePath := firstMatch(t, readBody(t, hostParty), `(/parties/[^/]+/members/[^/]+/delete)`)
+	memberConfirmation := get(t, client, server.URL+memberDeletePath)
+	memberConfirmationBody := readBody(t, memberConfirmation)
+	if memberConfirmation.StatusCode != http.StatusOK || !strings.Contains(memberConfirmationBody, "Delete member and phones") || !strings.Contains(memberConfirmationBody, "extension <strong>101</strong>") {
+		t.Fatalf("member confirmation status=%d", memberConfirmation.StatusCode)
+	}
+	wrongMember := postForm(t, client, server.URL+memberDeletePath, url.Values{"csrf": {csrf}, "confirmation": {"102"}})
+	if wrongMember.StatusCode != http.StatusBadRequest || !strings.Contains(readBody(t, wrongMember), "extension did not match") {
+		t.Fatal("member deletion accepted the wrong extension")
+	}
+	deletedMember := postForm(t, client, server.URL+memberDeletePath, url.Values{"csrf": {csrf}, "confirmation": {"101"}})
+	if deletedMember.StatusCode != http.StatusOK || !strings.Contains(readBody(t, deletedMember), "member and every phone credential") {
+		t.Fatalf("member deletion status=%d", deletedMember.StatusCode)
+	}
+	if members, err := database.ListMembers(t.Context(), partyID); err != nil || len(members) != 0 {
+		t.Fatalf("member deletion left records: %#v, %v", members, err)
+	}
+
+	projects := &fakeOpenAIProjects{archiveErr: errors.New("temporary admin failure")}
+	app.openAI = projects
+	partyDeletePath := "/parties/" + partyID + "/delete"
+	partyConfirmation := get(t, client, server.URL+partyDeletePath)
+	if partyConfirmation.StatusCode != http.StatusOK || !strings.Contains(readBody(t, partyConfirmation), "archive this party's OpenAI project") {
+		t.Fatalf("party confirmation status=%d", partyConfirmation.StatusCode)
+	}
+	failedParty := postForm(t, client, server.URL+partyDeletePath, url.Values{"csrf": {csrf}, "confirmation": {"Cousins Club"}})
+	if failedParty.StatusCode != http.StatusBadGateway || !strings.Contains(readBody(t, failedParty), "all local party data was kept") {
+		t.Fatal("party deletion did not fail closed when project archival failed")
+	}
+	if existing := get(t, client, server.URL+"/parties/"+partyID); existing.StatusCode != http.StatusOK {
+		t.Fatalf("archive failure removed the party: status=%d", existing.StatusCode)
+	} else {
+		_ = readBody(t, existing)
+	}
+	projects.archiveErr = nil
+	wrongParty := postForm(t, client, server.URL+partyDeletePath, url.Values{"csrf": {csrf}, "confirmation": {"Cousins"}})
+	if wrongParty.StatusCode != http.StatusBadRequest || !strings.Contains(readBody(t, wrongParty), "party name did not match") {
+		t.Fatal("party deletion accepted the wrong party name")
+	}
+	deletedParty := postForm(t, client, server.URL+partyDeletePath, url.Values{"csrf": {csrf}, "confirmation": {"Cousins Club"}})
+	if deletedParty.StatusCode != http.StatusOK || deletedParty.Request.URL.Path != "/app" || !strings.Contains(readBody(t, deletedParty), "party, its invites, members, and phone credentials") {
+		t.Fatalf("party deletion ended at %s with %d", deletedParty.Request.URL, deletedParty.StatusCode)
+	}
+	if projects.archiveAttempts != 2 || len(projects.archived) != 1 || projects.archived[0] != "proj_test" {
+		t.Fatalf("unexpected project archival: attempts=%d archived=%#v", projects.archiveAttempts, projects.archived)
+	}
+
+	accountConfirmation := get(t, client, server.URL+"/account/delete")
+	if accountConfirmation.StatusCode != http.StatusOK || !strings.Contains(readBody(t, accountConfirmation), "Delete my host account") {
+		t.Fatalf("account confirmation status=%d", accountConfirmation.StatusCode)
+	}
+	wrongAccount := postForm(t, client, server.URL+"/account/delete", url.Values{"csrf": {csrf}, "confirmation": {"delete"}})
+	if wrongAccount.StatusCode != http.StatusBadRequest || !strings.Contains(readBody(t, wrongAccount), "confirmation did not match") {
+		t.Fatal("account deletion accepted a lowercase confirmation")
+	}
+	deletedAccount := postForm(t, client, server.URL+"/account/delete", url.Values{"csrf": {csrf}, "confirmation": {"DELETE"}})
+	if deletedAccount.StatusCode != http.StatusOK || deletedAccount.Request.URL.Path != "/" || !strings.Contains(readBody(t, deletedAccount), "account and its sign-in data were deleted") {
+		t.Fatalf("account deletion ended at %s with %d", deletedAccount.Request.URL, deletedAccount.StatusCode)
+	}
+	if afterDelete := get(t, client, server.URL+"/app"); afterDelete.Request.URL.Path != "/login" {
+		t.Fatalf("deleted account retained its session: ended at %s", afterDelete.Request.URL)
+	} else {
+		_ = readBody(t, afterDelete)
 	}
 }
 

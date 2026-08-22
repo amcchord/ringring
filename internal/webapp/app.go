@@ -49,7 +49,7 @@ type App struct {
 	cfg       config.Config
 	store     *store.Store
 	cipher    *secure.Cipher
-	openAI    *openaiadmin.Client
+	openAI    openAIProjectManager
 	telephony *telephony.Reconciler
 	weather   weatherGeocoder
 	oauth     *oauth2.Config
@@ -60,6 +60,11 @@ type App struct {
 	authUsers *rateLimiter
 	authSlots chan struct{}
 	dummyHash string
+}
+
+type openAIProjectManager interface {
+	Provision(context.Context, string, string) (openaiadmin.ProvisionedProject, error)
+	ArchiveProject(context.Context, string) error
 }
 
 type weatherGeocoder interface {
@@ -74,6 +79,7 @@ type PageData struct {
 	DevAuth        bool
 	Parties        []model.Party
 	Party          model.Party
+	Member         model.Member
 	Members        []model.Member
 	Services       model.PartyServices
 	InviteURL      string
@@ -97,6 +103,7 @@ type PageData struct {
 	RecoveryText   string
 	RecoveryNext   string
 	RecoveryButton string
+	Notice         string
 }
 
 type authSession struct {
@@ -196,6 +203,12 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 	mux.HandleFunc("GET /parties/{partyID}/setup", app.requireUser(app.rotatedSetup))
 	mux.HandleFunc("POST /parties/{partyID}/devices/{deviceID}/rotate", app.requireUser(app.rotateDevice))
 	mux.HandleFunc("POST /parties/{partyID}/devices/{deviceID}/revoke", app.requireUser(app.revokeDevice))
+	mux.HandleFunc("GET /parties/{partyID}/members/{memberID}/delete", app.requireUser(app.deleteMemberForm))
+	mux.HandleFunc("POST /parties/{partyID}/members/{memberID}/delete", app.requireUser(app.deleteMember))
+	mux.HandleFunc("GET /parties/{partyID}/delete", app.requireUser(app.deletePartyForm))
+	mux.HandleFunc("POST /parties/{partyID}/delete", app.requireUser(app.deleteParty))
+	mux.HandleFunc("GET /account/delete", app.requireUser(app.deleteAccountForm))
+	mux.HandleFunc("POST /account/delete", app.requireUser(app.deleteAccount))
 	mux.HandleFunc("GET /join/{token}", app.join)
 	mux.HandleFunc("POST /join/{token}", app.claimInvitation)
 	mux.HandleFunc("GET /", app.home)
@@ -222,6 +235,9 @@ func (a *App) home(w http.ResponseWriter, r *http.Request) {
 	}
 	session, _ := a.currentSession(r)
 	data := a.pageData(session)
+	if r.URL.Query().Get("deleted") == "account" {
+		data.Notice = "Your RingRing account and its sign-in data were deleted."
+	}
 	data.BodyClass = "home-page"
 	a.render(w, "home", data)
 }
@@ -699,6 +715,12 @@ func (a *App) dashboard(w http.ResponseWriter, r *http.Request, session authSess
 	data := a.pageData(&session)
 	data.BodyClass = "app-page"
 	data.Parties = parties
+	if r.URL.Query().Get("deleted") == "party" {
+		data.Notice = "The party, its invites, members, and phone credentials were deleted."
+		if r.URL.Query().Get("phones") == "delayed" {
+			data.Notice += " Phone routing cleanup needs an operator retry."
+		}
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	a.render(w, "dashboard", data)
 }
@@ -774,6 +796,12 @@ func (a *App) party(w http.ResponseWriter, r *http.Request, session authSession)
 	data.Members = members
 	data.Services = services
 	data.InviteURL = a.readInviteFlash(w, r, party.ID)
+	if r.URL.Query().Get("deleted") == "member" {
+		data.Notice = "The member and every phone credential attached to that extension were deleted."
+		if r.URL.Query().Get("phones") == "delayed" {
+			data.Notice += " Phone routing cleanup needs an operator retry."
+		}
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	a.render(w, "party", data)
 }
@@ -930,6 +958,167 @@ func (a *App) revokeDevice(w http.ResponseWriter, r *http.Request, session authS
 		a.logger.Error("telephony reconcile after device revocation", "party_id", partyID, "device_id", r.PathValue("deviceID"), "error", err)
 	}
 	http.Redirect(w, r, "/parties/"+url.PathEscape(partyID), http.StatusSeeOther)
+}
+
+func (a *App) deleteMemberForm(w http.ResponseWriter, r *http.Request, session authSession) {
+	party, member, err := a.store.MemberForHost(r.Context(), r.PathValue("partyID"), session.User.ID, r.PathValue("memberID"))
+	if errors.Is(err, store.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	data := a.pageData(&session)
+	data.BodyClass = "app-page"
+	data.Party = party
+	data.Member = member
+	a.renderNoStore(w, "delete_member", data)
+}
+
+func (a *App) deleteMember(w http.ResponseWriter, r *http.Request, session authSession) {
+	if !a.validCSRF(r, session) {
+		http.Error(w, "invalid request", http.StatusForbidden)
+		return
+	}
+	partyID := r.PathValue("partyID")
+	memberID := r.PathValue("memberID")
+	_, member, err := a.store.MemberForHost(r.Context(), partyID, session.User.ID, memberID)
+	if errors.Is(err, store.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	if strings.TrimSpace(r.FormValue("confirmation")) != member.Extension {
+		a.errorPage(w, http.StatusBadRequest, "The extension did not match", "Type the member's extension exactly before deleting their phones.", r.URL.Path, "Back to confirmation")
+		return
+	}
+	if err := a.store.DeleteMember(r.Context(), partyID, session.User.ID, memberID); errors.Is(err, store.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	} else if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	destination := "/parties/" + url.PathEscape(partyID) + "?deleted=member"
+	if err := a.ReconcileTelephony(r.Context()); err != nil {
+		a.logger.Error("telephony reconcile after member deletion", "party_id", partyID, "member_id", memberID, "error", err)
+		destination += "&phones=delayed"
+	}
+	http.Redirect(w, r, destination, http.StatusSeeOther)
+}
+
+func (a *App) deletePartyForm(w http.ResponseWriter, r *http.Request, session authSession) {
+	party, err := a.store.PartyForHost(r.Context(), r.PathValue("partyID"), session.User.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	members, err := a.store.ListMembers(r.Context(), party.ID)
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	data := a.pageData(&session)
+	data.BodyClass = "app-page"
+	data.Party = party
+	data.Members = members
+	a.renderNoStore(w, "delete_party", data)
+}
+
+func (a *App) deleteParty(w http.ResponseWriter, r *http.Request, session authSession) {
+	if !a.validCSRF(r, session) {
+		http.Error(w, "invalid request", http.StatusForbidden)
+		return
+	}
+	partyID := r.PathValue("partyID")
+	party, err := a.store.PartyForHost(r.Context(), partyID, session.User.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	if strings.TrimSpace(r.FormValue("confirmation")) != party.Name {
+		a.errorPage(w, http.StatusBadRequest, "The party name did not match", "Type the full party name exactly before deleting it.", r.URL.Path, "Back to confirmation")
+		return
+	}
+	if party.OpenAIProjectID != "" {
+		if a.openAI == nil {
+			a.errorPage(w, http.StatusConflict, "The party cannot be safely deleted yet", "The OpenAI administrator connection is unavailable, so RingRing kept the party and its project intact.", r.URL.Path, "Back to confirmation")
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+		err = a.openAI.ArchiveProject(ctx, party.OpenAIProjectID)
+		cancel()
+		if err != nil {
+			a.logger.Warn("party OpenAI archive failed", "party_id", partyID, "error", err)
+			a.errorPage(w, http.StatusBadGateway, "The party was not deleted", "RingRing could not archive its OpenAI project, so all local party data was kept. Please try again.", r.URL.Path, "Back to confirmation")
+			return
+		}
+	}
+	if err := a.store.DeleteParty(r.Context(), partyID, session.User.ID); errors.Is(err, store.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	} else if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	destination := "/app?deleted=party"
+	if err := a.ReconcileTelephony(r.Context()); err != nil {
+		a.logger.Error("telephony reconcile after party deletion", "party_id", partyID, "error", err)
+		destination += "&phones=delayed"
+	}
+	http.Redirect(w, r, destination, http.StatusSeeOther)
+}
+
+func (a *App) deleteAccountForm(w http.ResponseWriter, r *http.Request, session authSession) {
+	parties, err := a.store.ListPartiesByHost(r.Context(), session.User.ID)
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	if len(parties) != 0 {
+		a.errorPage(w, http.StatusConflict, "Delete your parties first", "Each party must archive its OpenAI project and remove its phones before the host account can be deleted.", "/app", "Back to my parties")
+		return
+	}
+	data := a.pageData(&session)
+	data.BodyClass = "app-page"
+	a.renderNoStore(w, "delete_account", data)
+}
+
+func (a *App) deleteAccount(w http.ResponseWriter, r *http.Request, session authSession) {
+	if !a.validCSRF(r, session) {
+		http.Error(w, "invalid request", http.StatusForbidden)
+		return
+	}
+	if strings.TrimSpace(r.FormValue("confirmation")) != "DELETE" {
+		a.errorPage(w, http.StatusBadRequest, "The confirmation did not match", "Type DELETE exactly before removing the host account.", "/account/delete", "Back to confirmation")
+		return
+	}
+	if err := a.store.DeleteUserWithoutParties(r.Context(), session.User.ID); errors.Is(err, store.ErrPartiesRemain) {
+		a.errorPage(w, http.StatusConflict, "Delete your parties first", "RingRing kept the host account because it still owns a party.", "/app", "Back to my parties")
+		return
+	} else if errors.Is(err, store.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	} else if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	a.clearCookie(w, sessionCookie, "/")
+	a.clearCookie(w, recoveryFlashCookie, "/account/recovery-codes")
+	http.Redirect(w, r, "/?deleted=account", http.StatusSeeOther)
 }
 
 func (a *App) rotatedSetup(w http.ResponseWriter, r *http.Request, session authSession) {

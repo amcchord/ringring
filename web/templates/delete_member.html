@@ -1,0 +1,19 @@
+{{define "title"}}Remove {{.Member.DisplayName}}{{end}}
+{{define "content"}}
+<section class="confirmation-shell wrap">
+  <a class="back-link" href="/parties/{{.Party.ID}}">← Keep this member</a>
+  <div class="panel destructive-panel">
+    <span class="panel-icon" aria-hidden="true">☎</span>
+    <span class="eyebrow">Permanent member removal</span>
+    <h1>Remove {{.Member.DisplayName}}?</h1>
+    <p>Extension <strong>{{.Member.Extension}}</strong> and {{len .Member.Devices}} attached phone credential{{if ne (len .Member.Devices) 1}}s{{end}} will be deleted. Those phones will stop registering and the extension becomes available again.</p>
+    <form class="stack-form" method="post" action="/parties/{{.Party.ID}}/members/{{.Member.ID}}/delete">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <label for="member-confirmation">Type extension <strong>{{.Member.Extension}}</strong> to confirm</label>
+      <input id="member-confirmation" name="confirmation" inputmode="numeric" autocomplete="off" required>
+      <button class="button button-danger" type="submit">Delete member and phones</button>
+    </form>
+    <a class="cancel-link" href="/parties/{{.Party.ID}}">Cancel and keep everything</a>
+  </div>
+</section>
+{{end}}

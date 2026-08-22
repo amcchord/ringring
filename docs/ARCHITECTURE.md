@@ -54,6 +54,10 @@ The database is authoritative. When a device or party setting changes, the app:
 
 On startup, the app regenerates all telephony configuration from the database.
 
+Deletion follows the same source-of-truth rule. Removing a member cascades through its devices; removing a party cascades through invitations, services, members, devices, and encrypted party credentials. The app then reconciles the smaller desired configuration with Asterisk. If the private reload fails, the deletion remains authoritative in SQLite, the host receives an operator-retry warning, and the next successful reconciliation or app startup removes the stale generated route.
+
+A party with an OpenAI project has an additional external boundary: the app retrieves and archives that project before deleting local party state. An archived response is accepted on retry, so a completed external archive followed by a failed local delete can safely be retried. An archive error fails closed and leaves the party, its members, and encrypted runtime key intact. A host account is deleted only after a transaction confirms that it owns no parties.
+
 ## Recovery boundary
 
 Durable recovery state consists of the complete SQLite app-state directory plus both root-readable deployment environment files. The environment files are part of the recovery boundary because the application master key decrypts SIP and party service credentials; a database copy without that key is intentionally insufficient. Generated Asterisk configuration and synthesized voice cache files are derived state and are regenerated after restore.
@@ -75,6 +79,8 @@ Weather audio is cached by party and settings timestamp, and disabling the line 
 ## OpenAI isolation
 
 When `OPENAI_ADMIN_KEY` is configured, party creation provisions an OpenAI project, sets a monthly hard spend limit, creates a service account, encrypts the returned key once, and discards it from logs and responses. Runtime calls use that party key. The organization admin key is never used for model calls.
+
+Party deletion uses that administrator connection only to archive the party's project. Archival occurs before the local encrypted key and project identifiers are removed, and a local delete is refused if archival cannot be confirmed.
 
 For `*14`, FastAGI validates the party setting and issues a short-lived, one-use ticket keyed by a random call UUID. Asterisk then opens an [AudioSocket](https://docs.asterisk.org/Configuration/Channel-Drivers/AudioSocket/) connection containing that UUID. The app claims the ticket, rechecks the party, decrypts only that party's key, converts Asterisk's 8 kHz signed-linear audio to G.711 μ-law, and bridges it to OpenAI's server-side [Realtime WebSocket](https://developers.openai.com/api/docs/guides/realtime-websocket). The connection sends a stable privacy-preserving safety identifier but no member name, SIP username, or extension. Neither the organization admin key nor another party's key enters the call path.
 

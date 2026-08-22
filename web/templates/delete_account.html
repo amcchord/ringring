@@ -1,0 +1,19 @@
+{{define "title"}}Delete host account{{end}}
+{{define "content"}}
+<section class="confirmation-shell wrap">
+  <a class="back-link" href="/app">← Keep my account</a>
+  <div class="panel destructive-panel">
+    <span class="panel-icon" aria-hidden="true">👋</span>
+    <span class="eyebrow">Permanent account removal</span>
+    <h1>Delete your host account?</h1>
+    <p>Your sign-in, password hash, recovery codes, and every active session will be deleted. RingRing only allows this after all hosted parties and their external projects are gone.</p>
+    <form class="stack-form" method="post" action="/account/delete">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <label for="account-confirmation">Type <strong>DELETE</strong> to confirm</label>
+      <input id="account-confirmation" name="confirmation" autocomplete="off" autocapitalize="characters" required>
+      <button class="button button-danger" type="submit">Delete my host account</button>
+    </form>
+    <a class="cancel-link" href="/app">Cancel and keep my account</a>
+  </div>
+</section>
+{{end}}

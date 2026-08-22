@@ -53,3 +53,40 @@ func TestProvision(t *testing.T) {
 		t.Fatalf("paths = %#v", paths)
 	}
 }
+
+func TestArchiveProjectIsRetrySafe(t *testing.T) {
+	status := "active"
+	archives := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer sk-admin-test" {
+			t.Error("missing authorization header")
+		}
+		if r.URL.Path != "/organization/projects/proj_test" && r.URL.Path != "/organization/projects/proj_test/archive" {
+			http.NotFound(w, r)
+			return
+		}
+		switch r.Method + " " + r.URL.Path {
+		case "GET /organization/projects/proj_test":
+			_, _ = w.Write([]byte(`{"id":"proj_test","status":"` + status + `"}`))
+		case "POST /organization/projects/proj_test/archive":
+			archives++
+			status = "archived"
+			_, _ = w.Write([]byte(`{"id":"proj_test","status":"archived"}`))
+		default:
+			http.Error(w, "wrong method", http.StatusMethodNotAllowed)
+		}
+	}))
+	defer server.Close()
+
+	client := New("sk-admin-test", 1000, server.Client())
+	client.baseURL = server.URL
+	if err := client.ArchiveProject(context.Background(), "proj_test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.ArchiveProject(context.Background(), "proj_test"); err != nil {
+		t.Fatal(err)
+	}
+	if archives != 1 {
+		t.Fatalf("archive requests = %d, want 1", archives)
+	}
+}
