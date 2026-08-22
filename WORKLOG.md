@@ -25,6 +25,13 @@ This is the durable, chronological project record. Add new entries at the top. C
 - A disposable real-browser flow claimed and rotated a phone, rendered the page at 1280×900 and 390×844, and found no horizontal overflow. The QR remained crisp, controls measured 44–54px, and the mobile order was corrected so the scanner warning appears before the code.
 - macOS Vision decoded exactly one QR and its payload digest matched the setup page's provisioning URL. The browser tab, explicit viewport, temporary QR artifacts, app process, and disposable database were closed or removed; no production family state was touched.
 
+### Production
+
+- GitHub Actions passed commit `0c60d7e`. Before deployment, created `/root/ringring-backups/ringring-20260822T061218Z-9d58bae.tar.gz` and passed its checksum, credential-decryption, readiness, and telephony restore drill with the pre-upgrade image.
+- Built the exact feature commit in a temporary server checkout and started it against an extracted copy of that backup with no network, admin key, Google credentials, AMI secret, or public ports. The additive migration, license notices, app readiness, telephony regeneration, integrity, foreign keys, one decryptable party key, and unchanged one-host/one-party counts passed; the candidate container, image, checkout, and extracted state were removed automatically.
+- Deployed only the rebuilt app container. Assertions confirmed that Asterisk and Caddy were not recreated and both root-readable deployment environment files were unchanged. Live readiness, private AMI access, masked/error-free app logs, the SIP Fail2Ban jail, the Linphone stylesheet, non-consuming provisioning `HEAD`, generic unknown-token `GET`, and every provisioning privacy header pass.
+- Created `/root/ringring-backups/ringring-20260822T061607Z-0c60d7e.tar.gz` after deployment and passed its full isolated restore drill. Its sealed report confirms integrity, foreign keys, one user, one party, no members or devices, one invitation, one session, eight recovery codes, no outstanding provisioning tokens, one decryptable party key, and no device secret; both environment files match the pre-deploy archive exactly.
+
 ### Remaining
 
 - Import a live production setup into current Linphone on a real phone and verify registration, foreground ringing, and the operating system's background-call behavior.
