@@ -191,6 +191,8 @@ if test "$ready" -ne 1; then
 fi
 docker exec ringring-sip-smoke-asterisk asterisk -rx 'core set verbose 3' >/dev/null
 docker exec ringring-sip-smoke-asterisk \
+  asterisk -rx 'logger add channel ringring-smoke verbose,notice,warning,error' >/dev/null
+docker exec ringring-sip-smoke-asterisk \
   asterisk -rx 'pjsip show transport transport-tls' | grep -q 'transport-tls'
 tls_report=$(docker exec ringring-sip-smoke-asterisk sh -c \
   "openssl s_client -brief -tls1_2 -verify_return_error \
@@ -311,7 +313,8 @@ if ! grep -R -q 'RingRing setup' "$work_directory/logs/ringring-sip-smoke-phone-
   echo "The incoming ring-test INVITE did not carry the fixed caller label." >&2
   exit 1
 fi
-if ! docker logs ringring-sip-smoke-asterisk 2>&1 | grep -q "Playing 'hello\."; then
+if ! docker exec ringring-sip-smoke-asterisk \
+  grep -q "Playing 'hello\." /var/log/asterisk/ringring-smoke; then
   echo "Asterisk did not play the first bundled ring-test prompt." >&2
   exit 1
 fi
