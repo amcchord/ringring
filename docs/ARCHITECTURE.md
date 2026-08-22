@@ -36,7 +36,7 @@ The app also owns a distinct loopback-only metrics listener on `127.0.0.1:9090`.
 
 ## Call isolation
 
-Every registered endpoint has a globally unique, random SIP username and an Asterisk endpoint context derived from its party ID. New credentials use a nonzero 15-digit username (about 49.7 bits of identity space) and a nonzero 24-digit password (about 79.6 bits of secret entropy), generated uniformly from the operating system CSPRNG. Numeric-only fields avoid keypad input-mode changes without weakening the password into a human-chosen PIN. The generated dialplan emits only that party's members and enabled service extensions into the context. There is no route from party contexts to trunks or a global outbound context.
+Every registered endpoint has a globally unique, random SIP username and an Asterisk endpoint context derived from its party ID. New credentials use a nonzero 6-digit username and a nonzero 12-digit password (about 39.7 bits of secret entropy), generated uniformly from the operating system CSPRNG. SQLite rejects a duplicate username and the application makes a bounded retry, so the shorter 900,000-value identity space cannot silently alias another phone. Numeric-only fields avoid keypad input-mode changes and the password remains machine-generated rather than a user-chosen PIN. The generated dialplan emits only that party's members and enabled service extensions into the context. There is no route from party contexts to trunks or a global outbound context.
 
 Extension `101` can therefore exist in many parties without collision. A device cannot choose its context or construct a cross-party endpoint name.
 

@@ -11,12 +11,13 @@ import (
 )
 
 const (
-	// UsernameDigits gives a globally unique identity a space of 9×10^14
-	// values (about 49.7 bits) without a leading zero that a phone might drop.
-	UsernameDigits = 15
-	// PasswordDigits gives the SIP secret about 79.6 bits of entropy across
-	// 9×10^23 values, including against guessing of a captured digest.
-	PasswordDigits = 24
+	// UsernameDigits gives each phone a short keypad-friendly identity. The
+	// database's unique constraint and bounded retry handle the 900,000-value
+	// space without allowing two phones to share an identity.
+	UsernameDigits = 6
+	// PasswordDigits gives each phone about 39.7 bits of random secret entropy
+	// across 9×10^11 values while remaining practical to enter by keypad.
+	PasswordDigits = 12
 )
 
 type Pair struct {

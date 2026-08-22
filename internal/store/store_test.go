@@ -78,6 +78,64 @@ func TestInvitationCanOnlyBeClaimedOnce(t *testing.T) {
 	}
 }
 
+func TestSIPUsernameConflictsAreRetryableWithoutPartialWrites(t *testing.T) {
+	ctx := t.Context()
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	now := time.Date(2026, 8, 22, 22, 0, 0, 0, time.UTC)
+	host, _ := s.UpsertGoogleUser(ctx, GoogleProfile{Subject: "sip-collision-host", Email: "host@example.test", Name: "Host"}, now, "usr_sip_collision")
+	party, _ := s.CreateParty(ctx, NewParty{ID: "pty_sip_collision", Name: "Party", Slug: "sip-collision", HostUserID: host.ID, CreatedAt: now})
+	claim := func(invitationID, token, memberID, deviceID, extension, username string) error {
+		t.Helper()
+		if err := s.CreateInvitation(ctx, NewInvitation{
+			ID: invitationID, PartyID: party.ID, CreatedByUserID: host.ID,
+			TokenHash: secure.Hash(token), ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		_, _, _, err := s.ClaimInvitation(ctx, NewClaim{
+			TokenHash: secure.Hash(token), MemberID: memberID, DisplayName: memberID, Extension: extension,
+			DeviceID: deviceID, DeviceLabel: "Phone", SIPUsername: username, SIPSecretCiphertext: "cipher-" + deviceID,
+			Provisioning: testProvisioning("provision-"+deviceID, now), Now: now,
+		})
+		return err
+	}
+
+	if err := claim("inv_sip_collision_a", "sip-collision-a", "mem_sip_collision_a", "dev_sip_collision_a", "101", "123456"); err != nil {
+		t.Fatal(err)
+	}
+	if err := claim("inv_sip_collision_b", "sip-collision-b", "mem_sip_collision_b", "dev_sip_collision_b", "102", "123456"); !errors.Is(err, ErrSIPUsernameTaken) {
+		t.Fatalf("invitation collision error = %v", err)
+	}
+	_, secondMember, secondDevice, err := s.ClaimInvitation(ctx, NewClaim{
+		TokenHash: secure.Hash("sip-collision-b"), MemberID: "mem_sip_collision_b", DisplayName: "Second", Extension: "102",
+		DeviceID: "dev_sip_collision_b", DeviceLabel: "Phone", SIPUsername: "234567", SIPSecretCiphertext: "cipher-b",
+		Provisioning: testProvisioning("provision-b-retry", now), Now: now,
+	})
+	if err != nil {
+		t.Fatalf("retry invitation claim: %v", err)
+	}
+
+	if _, err := s.AddDeviceForHost(ctx, NewHostedDevice{
+		PartyID: party.ID, HostUserID: host.ID, MemberID: secondMember.ID,
+		DeviceID: "dev_sip_collision_c", DeviceLabel: "Tablet", SIPUsername: "123456", SIPSecretCiphertext: "cipher-c",
+		Provisioning: testProvisioning("provision-c", now), Now: now,
+	}); !errors.Is(err, ErrSIPUsernameTaken) {
+		t.Fatalf("host-added phone collision error = %v", err)
+	}
+	if _, err := s.RotateDevice(ctx, party.ID, host.ID, secondDevice.ID, "123456", "rotated-cipher", testProvisioning("rotated-provision", now)); !errors.Is(err, ErrSIPUsernameTaken) {
+		t.Fatalf("rotation collision error = %v", err)
+	}
+	_, unchanged, err := s.ActiveDeviceForHost(ctx, party.ID, host.ID, secondDevice.ID)
+	if err != nil || unchanged.SIPUsername != "234567" {
+		t.Fatalf("failed rotation changed the phone: username=%q error=%v", unchanged.SIPUsername, err)
+	}
+}
+
 func TestHostCanCountAndCancelOnlyActiveInvitations(t *testing.T) {
 	ctx := t.Context()
 	s, err := Open(":memory:")

@@ -119,7 +119,7 @@ func TestFormInstructionsAreVisibleAndAssociated(t *testing.T) {
 			path: "templates/setup.html",
 			wants: []string{
 				`<dl class="setup-card">`,
-				`<dt>Password</dt>`,
+				`<dt>Password{{if .SimpleSIPCredentials}}<span class="credential-format">12 digits · no spaces</span>{{end}}</dt>`,
 				`aria-describedby="linphone-provision-help"`,
 				`id="setup-copy-status" class="visually-hidden" role="status" aria-live="polite"`,
 				`aria-label="Copy password"`,

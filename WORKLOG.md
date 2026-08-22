@@ -2,6 +2,32 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Shorter keypad credentials and clearer 401 setup
+
+### Shipped
+
+- Shortened credentials for newly claimed, host-added, or deliberately rotated phones to a 6-digit SIP username and 12-digit numeric password. Existing phone identities and encrypted secrets remain byte-for-byte unchanged until their host explicitly requests fresh settings.
+- Kept the short username globally unique with SQLite's existing `devices.sip_username` constraint, a specific retryable store error on claim/add/rotation, and 16 bounded CSPRNG regeneration attempts. A collision rolls back the complete transaction, including invitation and provisioning state, before retrying.
+- Put explicit `6 digits · no spaces` and `12 digits · no spaces` hints beside the one-time values. A prominent help box distinguishes the normal first SIP `401` challenge from a registration that repeatedly fails and tells people to use the generated auth ID—not the extension—for both SIP User ID and Authentication ID.
+- Kept the visual grouping out of every credential boundary. Individual copy, the private six-field setup note, encrypted storage, Asterisk rendering, and Linphone provisioning use the exact unspaced digits; the note builder now removes the visual length hint from its field label.
+
+### Decisions
+
+- Optimize for real ATA and desk-phone keypads. Six and twelve digits are short enough to enter without changing input mode, while the password remains a machine-generated secret with about 39.7 bits of entropy rather than a user-chosen PIN.
+- Record the security tradeoff directly: a captured digest has a smaller offline search space than the former 24-digit password. Prefer TLS; retain progressive UDP/TLS Fail2Ban limits; do not weaken the per-device isolation, rotation, or revocation boundaries.
+- Preserve all existing credentials on upgrade. The new format applies only when RingRing actually issues fresh settings, so publishing or deploying this release cannot disconnect the phone currently being configured.
+
+### Verification
+
+- Focused generator, transactional store, web-flow, accessibility, and executable security-contract tests cover exact lengths and numeric format, nonzero leading digits, rollback/retry for invitation claim, host-added phone and rotation collisions, non-collision error propagation, encrypted association, display grouping, raw copy attributes, and the updated guidance.
+- Disposable in-app browser checks at 1280×900 and 390×844 proved the 6/12-digit raw values match their grouped display, both per-field copies and the complete setup note contain exact unspaced values, visual hints do not pollute copied field names, copy controls remain at least 44px tall, the help box is visible, and neither the page nor setup card overflows horizontally. No console error occurred; the viewport, clipboard, tab, process, and database were cleaned up.
+- `make check`, `make security`, and `make admin-test` pass locally, including formatting, shell/operator fixtures, vet, the complete race-enabled suite, the reachable-vulnerability scan, and exact CSP/SRI agreement for the changed copy helper.
+
+### Remaining
+
+- Authenticate a generated 6/12-digit endpoint through the isolated SIP/TLS smoke gate, then deploy through the guarded production upgrade after the current physical-phone setup attempts have settled.
+- Complete the physical ATA, desk-phone, and mobile softphone matrix. Obtain the external child-safety review and OpenAI Zero Data Retention eligibility before opening the AI conversation gate.
+
 ## 2026-08-22 — Machine-checked Zero Data Retention gate
 
 ### Shipped

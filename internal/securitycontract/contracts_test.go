@@ -166,22 +166,33 @@ func TestCredentialCopyHelperIsIntegrityPinnedAndLocalOnly(t *testing.T) {
 	}
 }
 
-func TestGeneratedSIPCredentialsStayKeypadFriendlyAndStrong(t *testing.T) {
+func TestGeneratedSIPCredentialsStayKeypadFriendlyAndCollisionSafe(t *testing.T) {
 	credentials := readRepositoryFile(t, "internal/sipcredentials/credentials.go")
 	for _, required := range []string{
-		"crypto/rand", "UsernameDigits = 15", "PasswordDigits = 24",
-		"about 49.7 bits", "about 79.6 bits", "rand.Int(reader, span)",
+		"crypto/rand", "UsernameDigits = 6", "PasswordDigits = 12",
+		"about 39.7 bits", "rand.Int(reader, span)",
 	} {
 		if !strings.Contains(credentials, required) {
 			t.Fatalf("the generated SIP credential policy is missing %q", required)
 		}
 	}
 	app := readRepositoryFile(t, "internal/webapp/app.go")
-	if !strings.Contains(app, "sipcredentials.Generate()") || strings.Contains(app, `return "rrd_" + suffix`) {
+	for _, required := range []string{"sipcredentials.Generate()", "sipCredentialAttempts = 16", "store.ErrSIPUsernameTaken", "saveWithNewSIPCredentials"} {
+		if !strings.Contains(app, required) {
+			t.Fatalf("the web credential path is missing collision-safe behavior %q", required)
+		}
+	}
+	if strings.Contains(app, `return "rrd_" + suffix`) {
 		t.Fatal("the web credential path is not using the digits-only generator")
 	}
+	storeSource := readRepositoryFile(t, "internal/store/store.go")
+	for _, required := range []string{"ErrSIPUsernameTaken", "isSIPUsernameConflict", "devices.sip_username"} {
+		if !strings.Contains(storeSource, required) {
+			t.Fatalf("the SIP username uniqueness boundary is missing %q", required)
+		}
+	}
 	setup := readRepositoryFile(t, "web/templates/setup.html")
-	for _, required := range []string{`data-setup-value="{{.Claim.Device.SIPUsername}}"`, `data-setup-value="{{.Claim.SIPSecret}}"`, "Digits only", "Leave the spaces out"} {
+	for _, required := range []string{`data-setup-value="{{.Claim.Device.SIPUsername}}"`, `data-setup-value="{{.Claim.SIPSecret}}"`, "6 digits · no spaces", "12 digits · no spaces", "Digits only—no spaces", "The first 401 is the normal sign-in challenge", "for both SIP User ID and Authentication ID"} {
 		if !strings.Contains(setup, required) {
 			t.Fatalf("the one-time setup card is missing exact-value guidance %q", required)
 		}

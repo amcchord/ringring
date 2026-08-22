@@ -22,6 +22,7 @@ var (
 	ErrInviteExpired    = errors.New("invitation has expired")
 	ErrInvalidExtension = errors.New("extension must contain 2 to 5 digits and not be a reserved public safety number")
 	ErrExtensionTaken   = errors.New("extension is already in use")
+	ErrSIPUsernameTaken = errors.New("SIP username is already in use")
 	ErrUsernameTaken    = errors.New("username is already in use")
 	ErrRecoveryCode     = errors.New("invalid recovery code")
 	ErrPartiesRemain    = errors.New("host still owns parties")
@@ -954,6 +955,9 @@ func (s *Store) ClaimInvitation(ctx context.Context, input NewClaim) (model.Part
 		VALUES (?, ?, ?, ?, ?, ?)`, input.DeviceID, input.MemberID, input.DeviceLabel,
 		input.SIPUsername, input.SIPSecretCiphertext, unix(input.Now))
 	if err != nil {
+		if isSIPUsernameConflict(err) {
+			return model.Party{}, model.Member{}, model.Device{}, ErrSIPUsernameTaken
+		}
 		return model.Party{}, model.Member{}, model.Device{}, fmt.Errorf("create device: %w", err)
 	}
 	if err := replaceProvisioningTokenTx(ctx, tx, input.DeviceID, input.Provisioning); err != nil {
@@ -1302,6 +1306,9 @@ func (s *Store) AddDeviceForHost(ctx context.Context, input NewHostedDevice) (Cr
 		VALUES (?, ?, ?, ?, ?, ?)`, input.DeviceID, input.MemberID, input.DeviceLabel,
 		input.SIPUsername, input.SIPSecretCiphertext, unix(input.Now))
 	if err != nil {
+		if isSIPUsernameConflict(err) {
+			return CreatedDevice{}, ErrSIPUsernameTaken
+		}
 		return CreatedDevice{}, fmt.Errorf("create hosted member device: %w", err)
 	}
 	if err := replaceProvisioningTokenTx(ctx, tx, input.DeviceID, input.Provisioning); err != nil {
@@ -1337,6 +1344,9 @@ func (s *Store) RotateDevice(ctx context.Context, partyID, hostUserID, deviceID,
 		SET sip_username = ?, sip_secret_ciphertext = ?, revoked_at = NULL
 		WHERE id = ?`, sipUsername, secretCiphertext, deviceID)
 	if err != nil {
+		if isSIPUsernameConflict(err) {
+			return RotatedDevice{}, ErrSIPUsernameTaken
+		}
 		return RotatedDevice{}, fmt.Errorf("rotate device credentials: %w", err)
 	}
 	if rows, _ := result.RowsAffected(); rows != 1 {
@@ -1585,6 +1595,11 @@ func deviceForHostTx(ctx context.Context, tx *sql.Tx, partyID, hostUserID, devic
 		device.RevokedAt = &value
 	}
 	return party, member, device, nil
+}
+
+func isSIPUsernameConflict(err error) bool {
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "unique") && strings.Contains(message, "devices.sip_username")
 }
 
 func unix(value time.Time) int64     { return value.UTC().Unix() }

@@ -10,7 +10,7 @@ accepted preview risks are tracked in the [RingRing threat model](THREAT_MODEL.m
 - A party is both a tenant boundary and a call-routing boundary.
 - Hosts authenticate with a RingRing username/password account and may administer only parties they host. Google OpenID Connect is optional.
 - Invitees receive the narrow right to claim one membership/device; they do not receive host access.
-- SIP devices authenticate with unique CSPRNG-generated credentials and enter a server-selected party context. New 15-digit identities have about 49.7 bits of global name space; new 24-digit passwords have about 79.6 bits of entropy and are not user-chosen PINs.
+- SIP devices authenticate with unique CSPRNG-generated credentials and enter a server-selected party context. New identities use six digits; the database rejects collisions and the app retries with another random value. New 12-digit passwords have about 39.7 bits of entropy, are not user-chosen PINs, and are paired with progressive Fail2Ban limits; TLS remains the preferred transport because UDP exposes a digest exchange to an on-path observer.
 - OpenAI, weather, and radio integrations are outbound services. None may receive credentials for another integration or party.
 
 ## Data minimization

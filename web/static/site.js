@@ -53,7 +53,9 @@
       const label = row.querySelector("dt");
       const value = row.querySelector("[data-setup-value]");
       if (label && value) {
-        lines.push(`${label.textContent.trim()}: ${exactValue(value)}`);
+        const plainLabel = label.cloneNode(true);
+        plainLabel.querySelectorAll(".credential-format").forEach((hint) => hint.remove());
+        lines.push(`${plainLabel.textContent.trim()}: ${exactValue(value)}`);
       }
     });
     lines.push("", "Private family network only — no regular or emergency calls.");

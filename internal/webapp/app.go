@@ -37,15 +37,16 @@ import (
 )
 
 const (
-	sessionCookie       = "ringring_session"
-	oauthStateCookie    = "ringring_oauth_state"
-	oauthVerifierCookie = "ringring_oauth_verifier"
-	inviteFlashCookie   = "ringring_invite_reveal"
-	joinCSRFCookie      = "ringring_join_csrf"
-	authCSRFCookie      = "ringring_auth_csrf"
-	recoveryFlashCookie = "ringring_recovery_reveal"
-	provisioningTTL     = 30 * time.Minute
-	setupScriptSHA256   = "sha256-ca1mTVpmoCW0lQiAqGS537dHQEQsJcQIAEJgz2dcMsE="
+	sessionCookie         = "ringring_session"
+	oauthStateCookie      = "ringring_oauth_state"
+	oauthVerifierCookie   = "ringring_oauth_verifier"
+	inviteFlashCookie     = "ringring_invite_reveal"
+	joinCSRFCookie        = "ringring_join_csrf"
+	authCSRFCookie        = "ringring_auth_csrf"
+	recoveryFlashCookie   = "ringring_recovery_reveal"
+	provisioningTTL       = 30 * time.Minute
+	sipCredentialAttempts = 16
+	setupScriptSHA256     = "sha256-8gLmI9PKLpVAM0X5XeS4PN75VxjzYo+DvRFDZmr9IhE="
 )
 
 var (
@@ -1469,21 +1470,20 @@ func (a *App) addMemberDevice(w http.ResponseWriter, r *http.Request, session au
 		a.internalError(w, r, err)
 		return
 	}
-	sipUsername, sipSecret, ciphertext, err := a.newSIPCredentials(deviceID)
-	if err != nil {
-		a.internalError(w, r, err)
-		return
-	}
 	now := a.now()
 	provisionToken, provisionRecord, err := newProvisioningToken(now)
 	if err != nil {
 		a.internalError(w, r, err)
 		return
 	}
-	created, err := a.store.AddDeviceForHost(r.Context(), store.NewHostedDevice{
-		PartyID: partyID, HostUserID: session.User.ID, MemberID: memberID,
-		DeviceID: deviceID, DeviceLabel: deviceLabel, SIPUsername: sipUsername,
-		SIPSecretCiphertext: ciphertext, Provisioning: provisionRecord, Now: now,
+	var created store.CreatedDevice
+	sipUsername, sipSecret, err := a.saveWithNewSIPCredentials(deviceID, func(username, ciphertext string) error {
+		created, err = a.store.AddDeviceForHost(r.Context(), store.NewHostedDevice{
+			PartyID: partyID, HostUserID: session.User.ID, MemberID: memberID,
+			DeviceID: deviceID, DeviceLabel: deviceLabel, SIPUsername: username,
+			SIPSecretCiphertext: ciphertext, Provisioning: provisionRecord, Now: now,
+		})
+		return err
 	})
 	if errors.Is(err, store.ErrNotFound) {
 		http.NotFound(w, r)
@@ -1587,18 +1587,17 @@ func (a *App) rotateDevice(w http.ResponseWriter, r *http.Request, session authS
 	}
 	partyID := r.PathValue("partyID")
 	deviceID := r.PathValue("deviceID")
-	sipUsername, sipSecret, ciphertext, err := a.newSIPCredentials(deviceID)
-	if err != nil {
-		a.internalError(w, r, err)
-		return
-	}
 	now := a.now()
 	provisionToken, provisionRecord, err := newProvisioningToken(now)
 	if err != nil {
 		a.internalError(w, r, err)
 		return
 	}
-	rotated, err := a.store.RotateDevice(r.Context(), partyID, session.User.ID, deviceID, sipUsername, ciphertext, provisionRecord)
+	var rotated store.RotatedDevice
+	sipUsername, sipSecret, err := a.saveWithNewSIPCredentials(deviceID, func(username, ciphertext string) error {
+		rotated, err = a.store.RotateDevice(r.Context(), partyID, session.User.ID, deviceID, username, ciphertext, provisionRecord)
+		return err
+	})
 	if errors.Is(err, store.ErrNotFound) {
 		http.NotFound(w, r)
 		return
@@ -1916,21 +1915,22 @@ func (a *App) claimInvitation(w http.ResponseWriter, r *http.Request) {
 		a.internalError(w, r, err)
 		return
 	}
-	sipUsername, sipSecret, ciphertext, err := a.newSIPCredentials(deviceID)
-	if err != nil {
-		a.internalError(w, r, err)
-		return
-	}
 	now := a.now()
 	provisionToken, provisionRecord, err := newProvisioningToken(now)
 	if err != nil {
 		a.internalError(w, r, err)
 		return
 	}
-	party, member, device, err := a.store.ClaimInvitation(r.Context(), store.NewClaim{
-		TokenHash: secure.Hash(token), MemberID: memberID, DisplayName: displayName, Extension: extensionValue,
-		DeviceID: deviceID, DeviceLabel: deviceLabel, SIPUsername: sipUsername,
-		SIPSecretCiphertext: ciphertext, Provisioning: provisionRecord, Now: now,
+	var party model.Party
+	var member model.Member
+	var device model.Device
+	_, sipSecret, err := a.saveWithNewSIPCredentials(deviceID, func(username, ciphertext string) error {
+		party, member, device, err = a.store.ClaimInvitation(r.Context(), store.NewClaim{
+			TokenHash: secure.Hash(token), MemberID: memberID, DisplayName: displayName, Extension: extensionValue,
+			DeviceID: deviceID, DeviceLabel: deviceLabel, SIPUsername: username,
+			SIPSecretCiphertext: ciphertext, Provisioning: provisionRecord, Now: now,
+		})
+		return err
 	})
 	if errors.Is(err, store.ErrExtensionTaken) {
 		values.Extension = ""
@@ -2090,6 +2090,21 @@ func (a *App) newSIPCredentials(deviceID string) (string, string, string, error)
 		return "", "", "", err
 	}
 	return credentials.Username, credentials.Password, ciphertext, nil
+}
+
+func (a *App) saveWithNewSIPCredentials(deviceID string, save func(username, ciphertext string) error) (string, string, error) {
+	for attempt := 0; attempt < sipCredentialAttempts; attempt++ {
+		username, password, ciphertext, err := a.newSIPCredentials(deviceID)
+		if err != nil {
+			return "", "", err
+		}
+		if err := save(username, ciphertext); err == nil {
+			return username, password, nil
+		} else if !errors.Is(err, store.ErrSIPUsernameTaken) {
+			return "", "", err
+		}
+	}
+	return "", "", fmt.Errorf("allocate a unique SIP username after %d attempts", sipCredentialAttempts)
 }
 
 func newProvisioningToken(now time.Time) (string, store.NewProvisioningToken, error) {

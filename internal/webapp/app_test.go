@@ -209,11 +209,42 @@ func TestNewSIPCredentialsAreNumericGroupedAndEncrypted(t *testing.T) {
 	if err != nil || decrypted != password {
 		t.Fatalf("generated password was not encrypted with the device boundary: match=%t error=%v", decrypted == password, err)
 	}
-	if grouped := groupSetupDigits(username, 3); len(strings.Fields(grouped)) != 5 || strings.ReplaceAll(grouped, " ", "") != username {
+	if grouped := groupSetupDigits(username, 3); len(strings.Fields(grouped)) != 2 || strings.ReplaceAll(grouped, " ", "") != username {
 		t.Fatalf("username grouping changed the credential: %q", grouped)
 	}
-	if grouped := groupSetupDigits(password, 4); len(strings.Fields(grouped)) != 6 || strings.ReplaceAll(grouped, " ", "") != password {
+	if grouped := groupSetupDigits(password, 4); len(strings.Fields(grouped)) != 3 || strings.ReplaceAll(grouped, " ", "") != password {
 		t.Fatalf("password grouping changed the credential: %q", grouped)
+	}
+}
+
+func TestSavingSIPCredentialsRetriesOnlyUsernameCollisions(t *testing.T) {
+	cipher, err := secure.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := &App{cipher: cipher}
+	attempts := 0
+	username, password, err := app.saveWithNewSIPCredentials("dev_collision", func(candidate, ciphertext string) error {
+		attempts++
+		if candidate == "" || ciphertext == "" {
+			t.Fatal("retry received an empty credential")
+		}
+		if attempts < 4 {
+			return store.ErrSIPUsernameTaken
+		}
+		return nil
+	})
+	if err != nil || attempts != 4 || !sipcredentials.ValidUsername(username) || !sipcredentials.ValidPassword(password) {
+		t.Fatalf("collision retry result: attempts=%d username_valid=%t password_valid=%t error=%v", attempts, sipcredentials.ValidUsername(username), sipcredentials.ValidPassword(password), err)
+	}
+
+	attempts = 0
+	_, _, err = app.saveWithNewSIPCredentials("dev_store_error", func(string, string) error {
+		attempts++
+		return store.ErrNotFound
+	})
+	if !errors.Is(err, store.ErrNotFound) || attempts != 1 {
+		t.Fatalf("non-collision error was retried: attempts=%d error=%v", attempts, err)
 	}
 }
 
@@ -726,8 +757,13 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if setup.StatusCode != http.StatusOK || !strings.Contains(setupBody, "You are extension 101") || !strings.Contains(setupBody, "sip.example.test") || !strings.Contains(setupBody, "Scan it with <em>Linphone.</em>") || !strings.Contains(setupBody, "data:image/png;base64,") || !strings.Contains(setupBody, "href=\"sip-linphone:?linphone-fetch-config=http%3A%2F%2F") || strings.Contains(setupBody, "#ZgotmplZ") || !strings.Contains(setupBody, "Use Linphone’s scanner—not the regular Camera app") || !strings.Contains(setupBody, "TLS · port 5061") || !strings.Contains(setupBody, "UDP · port 5060") || !strings.Contains(setupBody, "TLS protects phone sign-in and call setup") || !strings.Contains(setupBody, "voice audio is still server-relayed RTP, not encrypted media") || !strings.Contains(setupBody, "Test both directions") || !strings.Contains(setupBody, "dial <strong>*10</strong>") || !strings.Contains(setupBody, "Pick a different extension by phone") || !strings.Contains(setupBody, "Dial <strong>*15</strong>") || !strings.Contains(setupBody, "press <strong>1</strong> to save") || !strings.Contains(setupBody, `data-copy-setup`) || !strings.Contains(setupBody, `data-copy-target="setup-password"`) || !strings.Contains(setupBody, "This copies the password too") || !strings.Contains(setupBody, "SIP user, user ID, authentication ID") || !strings.Contains(setupBody, "Do not forward router ports") || !strings.Contains(setupBody, "Digits only") || !strings.Contains(setupBody, "Copy uses the exact unspaced value") {
 		t.Fatalf("setup response was not successful: status=%d", setup.StatusCode)
 	}
-	oldUsername := firstMatch(t, setupBody, `id="setup-username" data-setup-value="([1-9][0-9]{14})"`)
-	oldPassword := firstMatch(t, setupBody, `id="setup-password" data-setup-value="([1-9][0-9]{23})"`)
+	oldUsername := firstMatch(t, setupBody, `id="setup-username" data-setup-value="([1-9][0-9]{5})"`)
+	oldPassword := firstMatch(t, setupBody, `id="setup-password" data-setup-value="([1-9][0-9]{11})"`)
+	for _, guidance := range []string{"6 digits · no spaces", "12 digits · no spaces", "Phone keeps showing 401?", "The first 401 is the normal sign-in challenge", "for both SIP User ID and Authentication ID", "Use your extension only as the display number"} {
+		if !strings.Contains(setupBody, guidance) {
+			t.Errorf("setup card omitted authentication guidance %q", guidance)
+		}
+	}
 	if !strings.Contains(setupBody, ">"+groupSetupDigits(oldUsername, 3)+"</strong>") || !strings.Contains(setupBody, ">"+groupSetupDigits(oldPassword, 4)+"</strong>") {
 		t.Fatal("setup did not visually group the exact numeric credentials")
 	}
@@ -915,7 +951,7 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 		strings.Contains(addedPhoneBody, "first-call-card") {
 		t.Fatalf("second-phone setup response was not successful: status=%d", addedPhone.StatusCode)
 	}
-	secondUsername := firstMatch(t, addedPhoneBody, `id="setup-username" data-setup-value="([1-9][0-9]{14})"`)
+	secondUsername := firstMatch(t, addedPhoneBody, `id="setup-username" data-setup-value="([1-9][0-9]{5})"`)
 	if secondUsername == oldUsername {
 		t.Fatal("second phone reused the first phone's SIP username")
 	}
@@ -1024,7 +1060,7 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 		!strings.Contains(rotatedBody, "old username and password no longer work") || strings.Contains(rotatedBody, "first-call-card") {
 		t.Fatalf("rotation setup response was not successful: status=%d", rotated.StatusCode)
 	}
-	freshUsername := firstMatch(t, rotatedBody, `id="setup-username" data-setup-value="([1-9][0-9]{14})"`)
+	freshUsername := firstMatch(t, rotatedBody, `id="setup-username" data-setup-value="([1-9][0-9]{5})"`)
 	if freshUsername == oldUsername {
 		t.Fatal("rotation did not replace the SIP username")
 	}
