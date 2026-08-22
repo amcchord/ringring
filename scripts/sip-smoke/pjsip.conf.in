@@ -1,0 +1,18 @@
+[global]
+type=global
+user_agent=RingRing SIP smoke test
+endpoint_identifier_order=auth_username,username,ip,anonymous
+unidentified_request_count=5
+unidentified_request_period=5
+unidentified_request_prune_interval=30
+
+[transport-udp]
+type=transport
+protocol=udp
+bind=0.0.0.0:5060
+local_net=172.31.89.0/24
+external_signaling_address=172.31.89.20
+external_media_address=172.31.89.20
+allow_reload=yes
+
+#include /var/lib/ringring/asterisk/pjsip.conf

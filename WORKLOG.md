@@ -2,6 +2,31 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — First authenticated SIP/RTP loop
+
+### Shipped
+
+- Added a repeatable `make sip-smoke` harness that renders two disposable devices through RingRing's real telephony renderer, performs challenged SIP registrations, calls extension `102` from extension `101`, and requires bidirectional PCMU RTP through Asterisk.
+- Corrected generated PJSIP AOR object names to match each device's SIP username. Asterisk's dynamic registrar resolves the REGISTER `To` user as the AOR name; the former suffixed AOR name caused a correctly authenticated registration to return `404 Not Found`.
+- Pinned the official SIPp 3.7.7 static release and checksum. The harness uses an internal Docker network, smoke-only credentials, no production environment or database, and no published ports, then removes its exact containers, network, and generated state on exit.
+
+### Decisions
+
+- Exercise the production renderer instead of keeping a parallel hand-written endpoint fixture. This lets the loop catch registration and party-routing mistakes in the configuration RingRing actually emits.
+- Keep `direct_media=no` in the test so successful RTP proves that audio traversed Asterisk rather than taking a synthetic phone-to-phone shortcut.
+- Treat the software loop as a deployment gate, not a substitute for remote physical-device testing across household NATs and real adapters.
+
+### Verification
+
+- The isolated harness passed on the reference deployment host with two authenticated contacts, the party-scoped `101` to `102` call, and a bidirectional PCMU pattern returned through Asterisk.
+- The harness exposed and then regression-tested the AOR-name requirement. It also verifies the generated party context, extension route, and server-mediated media setting before starting Asterisk.
+- The candidate run left no smoke-test container, Docker network, generated state, host port, or production data change behind.
+
+### Remaining
+
+- Run the same checked-in harness from the production checkout after deployment and verify service health.
+- Complete a two-way-audio call with two remote physical devices, then exercise backup/restore and add host/member deletion flows.
+
 ## 2026-08-21 — Disclosed, bounded RingRing AI calls
 
 ### Shipped

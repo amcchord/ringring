@@ -24,6 +24,9 @@ func TestRenderIsolatesPartyDialplans(t *testing.T) {
 	if !strings.Contains(pjsip, "context=rr-party-pty-blue") || !strings.Contains(pjsip, "context=rr-party-pty-gold") {
 		t.Fatalf("missing party endpoint context:\n%s", pjsip)
 	}
+	if !strings.Contains(pjsip, "[rrd_blue_a]\ntype=aor") || !strings.Contains(pjsip, "aors=rrd_blue_a\n") || strings.Contains(pjsip, "[rrd_blue_a-aor]") {
+		t.Fatalf("registrar AOR must match the SIP username:\n%s", pjsip)
+	}
 	blueStart := strings.Index(dialplan, "[rr-party-pty-blue]")
 	goldStart := strings.Index(dialplan, "[rr-party-pty-gold]")
 	if blueStart < 0 || goldStart < 0 {

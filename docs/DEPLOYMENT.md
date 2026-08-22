@@ -102,6 +102,17 @@ fail2ban-client status ringring-sip
 
 Review `docker compose logs --tail=100` after every deployment. Asterisk is compiled from the pinned official source release and its published SHA-256 file is checked during the image build.
 
+## Isolated SIP and media smoke test
+
+Run the checked-in loop test after telephony renderer or Asterisk changes:
+
+```sh
+cd /opt/ringring
+make sip-smoke
+```
+
+The test renders two disposable devices through the production telephony code, authenticates both with SIPp, calls extension `102` from extension `101`, and requires bidirectional PCMU RTP through Asterisk. It uses a dedicated internal Docker network, fixed smoke-only credentials, no production environment or database, and no published host ports. Exact-name collision checks prevent it from disturbing an already-running smoke test; its containers, network, and generated state are removed on exit. Passing this software loop does not replace a call between remote physical devices across real NATs.
+
 ## Update
 
 ```sh

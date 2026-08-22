@@ -67,13 +67,15 @@ func Render(devices []DialDevice, services []model.RoutingServices) (Configurati
 		pjsip.WriteString("type=auth\nauth_type=userpass\n")
 		fmt.Fprintf(&pjsip, "username=%s\npassword=%s\n\n", device.SIPUsername, device.SIPSecret)
 
-		fmt.Fprintf(&pjsip, "[%s-aor]\n", device.SIPUsername)
+		// Asterisk's registrar resolves the REGISTER To user directly to an
+		// AOR object name, so the AOR must match the phone's SIP username.
+		fmt.Fprintf(&pjsip, "[%s]\n", device.SIPUsername)
 		pjsip.WriteString("type=aor\nmax_contacts=1\nremove_existing=yes\nqualify_frequency=60\n\n")
 
 		fmt.Fprintf(&pjsip, "[%s]\n", device.SIPUsername)
 		pjsip.WriteString("type=endpoint\ndisallow=all\nallow=ulaw,alaw,g722\ndirect_media=no\n")
 		pjsip.WriteString("rtp_symmetric=yes\nforce_rport=yes\nrewrite_contact=yes\n")
-		fmt.Fprintf(&pjsip, "context=%s\nauth=%s-auth\naors=%s-aor\ncallerid=RingRing %s <%s>\n\n",
+		fmt.Fprintf(&pjsip, "context=%s\nauth=%s-auth\naors=%s\ncallerid=RingRing %s <%s>\n\n",
 			contextName, device.SIPUsername, device.SIPUsername, device.Extension, device.Extension)
 	}
 	serviceByParty := make(map[string]model.RoutingServices, len(services))

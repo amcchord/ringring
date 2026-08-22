@@ -1,4 +1,4 @@
-.PHONY: setup dev test check compose-up compose-down
+.PHONY: setup dev test check sip-smoke compose-up compose-down
 
 setup:
 	go mod download
@@ -13,6 +13,9 @@ check:
 	test -z "$$(gofmt -l $$(find . -name '*.go' -not -path './vendor/*'))"
 	go vet ./...
 	go test -race ./...
+
+sip-smoke:
+	./scripts/sip-smoke.sh
 
 compose-up:
 	docker compose up --build
