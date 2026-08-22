@@ -313,8 +313,8 @@ added_sip_username=$(printf '%s\n' "$added_phone_setup" | \
   sed -n 's/.*id="setup-username" data-setup-value="\([^"]*\)".*/\1/p' | head -n 1)
 added_sip_password=$(printf '%s\n' "$added_phone_setup" | \
   sed -n 's/.*id="setup-password" data-setup-value="\([^"]*\)".*/\1/p' | head -n 1)
-printf '%s\n' "$added_sip_username" | grep -Eq '^[1-9][0-9]{14}$'
-printf '%s\n' "$added_sip_password" | grep -Eq '^[1-9][0-9]{23}$'
+printf '%s\n' "$added_sip_username" | grep -Eq '^[1-9][0-9]{5}$'
+printf '%s\n' "$added_sip_password" | grep -Eq '^[1-9][0-9]{11}$'
 grep -Fq "[$added_sip_username-auth]" "$work_directory/state/pjsip.conf"
 shared_extension=$(docker exec ringring-sip-smoke-asterisk asterisk -rx 'dialplan show 102@rr-party-pty_smoke')
 printf '%s\n' "$shared_extension" | grep -q 'PJSIP/rr_smoke_b'

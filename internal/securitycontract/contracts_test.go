@@ -197,6 +197,12 @@ func TestGeneratedSIPCredentialsStayKeypadFriendlyAndCollisionSafe(t *testing.T)
 			t.Fatalf("the one-time setup card is missing exact-value guidance %q", required)
 		}
 	}
+	smoke := readRepositoryFile(t, "scripts/sip-smoke.sh")
+	for _, required := range []string{`grep -Eq '^[1-9][0-9]{5}$'`, `grep -Eq '^[1-9][0-9]{11}$'`} {
+		if !strings.Contains(smoke, required) {
+			t.Fatalf("the SIP gate is not authenticating the current numeric format %q", required)
+		}
+	}
 }
 
 func TestAsteriskHasNoPSTNOrGlobalOutboundRoute(t *testing.T) {
