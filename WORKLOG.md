@@ -2,6 +2,40 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Privacy-preserving internal observability
+
+### Shipped
+
+- Added a Prometheus-compatible metrics document on a distinct app listener fixed to container loopback `127.0.0.1:9090` in production. Compose neither exposes nor publishes the port, Caddy has no route to it, and the public app intentionally returns `404` for `/metrics`.
+- Added live aggregate database and AMI health, four normalized SIP-contact counts, process start time, coarse web request counts/duration histograms, telephony-reconciliation outcomes, bounded voice-service outcomes, and active AI bridge count. Metrics live only in process memory and reset on restart; RingRing installs no scraper, remote-write target, dashboard, or retention store.
+- Restricted every metric label through code allowlists. HTTP uses only a coarse surface, bounded method, and status class; voice uses only fixed service/result values. No party, host, member, device, SIP username, extension, token, address, user-agent, place, station, prompt, error, caller, per-call timestamp/duration, audio, or transcript can become a metric label.
+- Replaced application request paths with route templates and normalized unknown methods. Removed explicit party/member/device identifiers and raw origin/panic values from subsystem logs; potentially value-bearing operational failures now use fixed error classes while the event name retains the failed operation. Documented Asterisk's separate source-address security log as restricted, short-retention Fail2Ban data rather than application telemetry.
+- Extended guided install, upgrade, and doctor verification to require private SQLite/AMI gauges and reject any public `/metrics` response other than `404`. Fresh installs explicitly set the loopback address, existing deployments safely inherit the same default, and both the production app and operator command reject a non-loopback override.
+
+### Decisions
+
+- Keep useful aggregate failure and saturation signals without creating a second family activity database. A scrape may show that a subsystem or coarse surface is busy, but cannot identify which party, phone, extension, caller, or conversation caused it.
+- Query private AMI during each scrape, immediately reduce endpoint states to four counts, and discard the endpoint-keyed map. Do not export raw AMI frames, contact URIs, source addresses, ports, call IDs, or user agents.
+- Make loopback structural in production rather than relying only on the absence of a Compose port mapping. A future collector needs a deliberate protected host-side design, authenticated dashboards, and an explicit short retention policy.
+
+### Verification
+
+- Registry tests cover deterministic Prometheus output, duration buckets, fixed-label fallback, negative counts, concurrent updates, narrow method/path handling, no-store headers, and safe error classes. Web tests prove aggregate AMI reduction, route-template logging, unknown-method normalization, public metrics absence, and injected party/token/path/device values absent from both logs and scrapes. Voice tests cover extension outcomes, AI active release, and a provider error containing a private party value that remains absent from logs/metrics.
+- Guided-operation fixtures cover fresh address rendering, legacy environments without the new optional line, rejection of a wildcard production listener, private metric health, public non-exposure, doctor, exact upgrade resume, and existing secret-safety invariants. `make check` passes formatting, POSIX syntax/operator fixtures, vet, and the complete race-enabled Go suite. GitHub Actions passed exact feature commit `5e2e60a` in run `32579045982`.
+- A disposable local process used four isolated loopback ports and a temporary database. Public readiness returned `200`, public metrics returned `404`, private SQLite health returned `1`, unconfigured AMI returned `0`, and injected party/token/path/method values appeared only as safe templates/classes in logs and nowhere in metrics. The process stopped, all listeners closed, and the database directory moved to Trash.
+
+### Production
+
+- Verified pre-upgrade backup `/root/ringring-backups/ringring-20260822T143425Z-8db1a79.tar.gz` and post-upgrade backup `/root/ringring-backups/ringring-20260822T143606Z-5e2e60a.tar.gz` both passed checksum, safe extraction, SQLite integrity/foreign keys, credential decryption, isolated readiness, and telephony-regeneration drills.
+- Production is clean at exact runtime commit `5e2e60ae483d1a244c6ee03ea706b03d33a21a6c` with no pending upgrade. The new doctor passes. Internal metrics report database/AMI up, zero contacts in every state, zero active AI calls, and observed coarse HTTP traffic; `/proc/net/tcp` confirms only the container-loopback `9090` listener, Docker publishes no mapping, and external HTTPS returns `404` at `/metrics` while `/readyz` remains healthy.
+- The sealed aggregate remains one user, one party, one invitation, one session, eight recovery codes, one decryptable party key, and zero members, devices, provisioning tokens, readiness records, contacts, channels, or calls. Both root environment hashes and both generated-routing hashes are unchanged. The reconciled app, Asterisk, and Caddy identities are `e26b82184752d97b441754e4b943a336ff5938c2967c33d671fa6a48284dd7c0`, `ea51fcfc2103320423f8fff36ea3d1dfa95938a3569f9727e69ef629f4fdf186`, and `cd15f92dbe6ce2ea78327293f81b580352173198fb48e463ea913ef5c64bbd08`. Both SIP jails remain active, application logs contain no family record identifiers, and no family/OpenAI control was submitted.
+
+### Remaining
+
+- Complete the physical ATA, desk-phone, and mobile softphone matrix across two real networks, including incoming/outgoing audio, certificate behavior, background ringing, and Wi-Fi/cellular transitions.
+- Complete the external child-safety and OpenAI Zero Data Retention gate before enabling AI for callers under 13.
+- Finish the broader security review/threat-model test matrix and optional PostgreSQL/multi-node migration path.
+
 ## 2026-08-22 — Host-confirmed real-phone readiness
 
 ### Shipped
