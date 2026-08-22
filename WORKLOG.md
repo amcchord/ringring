@@ -2,6 +2,41 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Host-confirmed real-phone readiness
+
+### Shipped
+
+- Added an optional host-only **Real phone check** to every active device. It records three deliberately plain acceptance checks: the phone heard the `*10` echo service, completed an outgoing party call to a phone on another internet connection with two-way audio, and received that remote call with ringing and two-way audio.
+- Kept automatic AMI registration presence visually and semantically separate from human confirmation. RingRing reports what Asterisk currently sees, while the checklist records only what the host says they tested; neither is presented as an independent synthetic proof of a physical device or network path.
+- Added a forward-only `device_readiness` table with only the first confirmation timestamp for each check and one update timestamp. Clearing every check deletes the row, credential rotation clears the old connection's evidence, and device/member deletion cascades. No peer identity, number dialed, call content, call log, IP address, network, or user-agent is stored.
+- Scoped updates transactionally to the party host and an active device, returned the same generic not-found response outside that boundary, and allowed each individual check to be reset. Older application code safely ignores the additive table; rollback must not drop it until the newer acceptance data is intentionally discarded.
+- Made the checklist occupy the full device row on narrow screens and retained RingRing's 44px touch target, visible focus, semantic label, and no-JavaScript form conventions. Updated the architecture, security, deployment/migration, and roadmap documentation.
+
+### Decisions
+
+- Treat readiness as a privacy-preserving acceptance record, not monitoring or surveillance. RingRing does not retain a detailed call history merely to help a host remember which physical checks are complete.
+- Invalidate confirmations when SIP credentials rotate because that operation represents a new phone connection even when the member and extension stay the same.
+- Verify SQLite differently in the two supported operational contexts: ordinary read-only mode when a live WAL/SHM sidecar exists, so just-migrated state is visible; immutable read-only mode for a cleanly stopped backup with no sidecars, so verification also works from a read-only mount.
+
+### Verification
+
+- Store, web, maintenance, migration, and template tests cover host scope, outsider denial, revoked devices, resettable checks, empty-row deletion, cascades, credential-rotation reset, legacy database creation, schema verification, and the authenticated form flow. Two verifier regressions separately retain a required table only in a live WAL and mount a checkpointed fixture directory read-only.
+- `make check` passes formatting, POSIX/operator fixtures, vet, and the complete race-enabled suite. GitHub Actions passed the feature in run `32576737350`, the live-WAL verifier follow-up in `32577072442`, and the corrected live/offline verifier in `32577412073`.
+- A disposable browser party/member/device passed at 320×568, 390×844, and 1280×900 with no horizontal overflow and no target below 44px. Saving all three checks rendered `3/3`; clearing one rendered `2/3`. The test app/database were stopped and moved to Trash, and the tab/viewport override was removed. No production family record or physical phone was used.
+
+### Production
+
+- The exact feature deploy used verified pre-upgrade backup `/root/ringring-backups/ringring-20260822T134754Z-9e6dfd1.tar.gz` and post-upgrade backup `/root/ringring-backups/ringring-20260822T135121Z-d92919b.tar.gz`. Its first verification correctly stopped before completion when the old immutable verifier could not see the newly migrated table still in the live WAL. A clean app restart checkpointed the schema, direct verification passed, and the retained exact upgrade resumed without replacing its recovery point.
+- The first WAL-aware follow-up then exposed the inverse offline case during its post-deploy backup: a clean WAL-mode database with no sidecars cannot be opened from a read-only mount without immutable mode. The recovery marker and `/root/ringring-backups/ringring-20260822T135458Z-d92919b.tar.gz` were retained. The corrected descendant verifier passed that sealed archive's isolated drill, completed the intermediate checkpoint with `/root/ringring-backups/ringring-20260822T140321Z-b9db361.tar.gz`, and was removed after the final guarded upgrade.
+- Production is at exact runtime commit `8db1a792f42e377e39eeef2982f376a148a8b86c`. Final pre/post backups `/root/ringring-backups/ringring-20260822T140340Z-b9db361.tar.gz` and `/root/ringring-backups/ringring-20260822T140523Z-8db1a79.tar.gz` passed checksum, safe extraction, SQLite integrity/foreign keys, credential decryption, isolated readiness, and telephony-regeneration checks. The upgrade marker is absent, the checkout is clean, doctor and public readiness pass, both SIP jails are active, and there are zero contacts, channels, or calls.
+- The sealed aggregate remains one user, one party, one invitation, one session, eight recovery codes, one decryptable party key, and zero members, devices, provisioning tokens, or readiness records. Both root environment hashes and both empty generated-routing hashes are unchanged. The final app, Asterisk, and Caddy identities are `d64989a75cf4f1339c852fe20e96d71fbacfbb714fab9ed7c8ab1bc506dbaf5e`, `028000ce18d211c3559ccaed58822f5c41f662c5c78b773ce6809dff75bcf665`, and `7e9e8b6eafe32f480353a1d28b516db88ad56a1d675db8c02382c9c66ff3d60e`. No real family member/device/check, SIP credential, generated route, OpenAI resource, or family access phrase changed.
+
+### Remaining
+
+- Configure named physical ATAs, desk phones, and mobile softphones; complete the three checks across two real remote networks; and record device/firmware/transport results in the compatibility matrix.
+- Verify Linphone foreground and push/background ringing plus Wi-Fi/cellular transitions on family phones.
+- Complete the external child-safety and OpenAI Zero Data Retention gate before enabling AI for callers under 13, plus privacy-preserving observability, further threat-model tests, and the optional PostgreSQL path.
+
 ## 2026-08-22 — Trusted SIP TLS and compatibility evidence
 
 ### Shipped
