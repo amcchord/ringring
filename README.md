@@ -18,7 +18,7 @@ The hosted reference instance is live at [ringring.live](https://ringring.live).
 - Always-available `*10` two-way phone testing and `*15` voice-guided extension selection, plus optional time, weather, internet radio, and OpenAI voice lines.
 - A reproducible, self-hosted Docker Compose deployment using Asterisk and Caddy.
 
-See [the architecture](docs/ARCHITECTURE.md), [the security model](docs/SECURITY.md), [SIP TLS compatibility](docs/SIP_TLS_COMPATIBILITY.md), [backup and recovery](docs/RECOVERY.md), and [the roadmap](docs/ROADMAP.md).
+See [the architecture](docs/ARCHITECTURE.md), [the security model](docs/SECURITY.md), [privacy-preserving observability](docs/OBSERVABILITY.md), [SIP TLS compatibility](docs/SIP_TLS_COMPATIBILITY.md), [backup and recovery](docs/RECOVERY.md), and [the roadmap](docs/ROADMAP.md).
 
 ## Self-hosting
 
@@ -32,7 +32,7 @@ The core private-phone flow is live: hosts can create and safely retire parties,
 
 Every party has a private `*10` echo test that lets one phone prove its microphone, speaker, and two-way media path. Dialing `*15` lets the authenticated phone enter a new 2–5 digit extension, hear it repeated, and press `1` to save without changing SIP credentials. Party-scoped `*11` time, `*12` weather, host-selected `*13` internet radio, and opt-in `*14` RingRing AI lines are deployed alongside automated per-party OpenAI key provisioning. Radio choices come from a small code-controlled SomaFM catalog; arbitrary URLs never enter the database or Asterisk dialplan. The AI line uses a clearly disclosed voice, a party key, privacy-preserving safety identifiers, child-appropriate instructions, no tools, bounded calls, and no RingRing audio or transcript storage. Party deletion archives its external OpenAI project before local credentials are removed. Isolated smoke tests verify authenticated SIP TLS 1.2 and compatibility-UDP registration, mixed-transport party calling, `*10` echo, bidirectional PCMU media, authenticated `*15` DTMF selection and live route replacement, the complete radio catalog in the production Asterisk image, two private phone networks with distinct NAT identities, official Linphone-engine provisioning with certificate and hostname verification, checksummed backup/restore with credential decryption, and guarded member/party/account deletion. The reference instance remains a preview until two remote physical devices pass a real two-way-audio call.
 
-The public repository intentionally contains no deployment credentials or family data. The QR configures the SIP account only; mobile background ringing still depends on Linphone, the operating system, and push-service compatibility and has not yet been verified on family hardware.
+The public repository intentionally contains no deployment credentials or family data. Internal aggregate metrics contain no family/device/caller labels or call content, reset with the app, and are not published through Caddy. The QR configures the SIP account only; mobile background ringing still depends on Linphone, the operating system, and push-service compatibility and has not yet been verified on family hardware.
 
 ## Development
 

@@ -375,6 +375,7 @@ write_install_configuration() {
     printf 'APP_ENV=production\n'
     printf 'APP_BASE_URL=https://%s\n' "$domain"
     printf 'HTTP_ADDR=:8080\n'
+    printf 'METRICS_ADDR=127.0.0.1:9090\n'
     printf 'DATABASE_PATH=/data/ringring.db\n'
     printf 'RINGRING_MASTER_KEY=%s\n' "$master_key"
     printf 'SESSION_SECRET=%s\n' "$session_secret"
@@ -434,6 +435,8 @@ validate_installed_configuration() {
   test -n "$app_ami" && test "$app_ami" = "$asterisk_ami" || die "The AMI secrets do not match."
   test -n "$(env_value "$config_dir/app.env" RINGRING_MASTER_KEY)" || die "The application master key is empty."
   test -n "$(env_value "$config_dir/app.env" SESSION_SECRET)" || die "The session secret is empty."
+  metrics_address=$(optional_env_value "$config_dir/app.env" METRICS_ADDR)
+  test -z "$metrics_address" || test "$metrics_address" = 127.0.0.1:9090 || die "METRICS_ADDR must remain on 127.0.0.1:9090."
 }
 
 wait_for_health() {
@@ -466,6 +469,10 @@ check_public_ready() {
     sleep 2
   done
   test "$ready" -eq 1 || die "Public HTTPS readiness failed for https://$domain/readyz. The install/upgrade marker was kept for a safe retry."
+  if ! public_metrics_status=$(curl --silent --show-error --max-time 10 --output /dev/null --write-out '%{http_code}' "https://$domain/metrics"); then
+    die "The public metrics non-exposure check failed. The install/upgrade marker was kept for a safe retry."
+  fi
+  test "$public_metrics_status" = 404 || die "The internal metrics path is exposed through public HTTPS. The install/upgrade marker was kept for a safe retry."
 }
 
 check_sip_tls() {
@@ -493,6 +500,11 @@ verify_deployment() {
   wait_for_health asterisk
   docker compose exec -T app ringring verify-state </dev/null
   docker compose exec -T app ringring verify-ami </dev/null
+  if ! internal_metrics=$(docker compose exec -T app curl --fail --silent --show-error --max-time 6 http://127.0.0.1:9090/metrics </dev/null); then
+    die "The internal metrics endpoint is unavailable."
+  fi
+  printf '%s\n' "$internal_metrics" | grep -qx 'ringring_database_up 1' || die "The internal metrics endpoint reports that SQLite is unavailable."
+  printf '%s\n' "$internal_metrics" | grep -qx 'ringring_asterisk_ami_up 1' || die "The internal metrics endpoint reports that Asterisk AMI is unavailable."
   fail2ban-client status ringring-sip >/dev/null
   fail2ban-client status ringring-sip-tls >/dev/null
   check_public_ready "$domain" "$skip_public"

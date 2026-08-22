@@ -41,6 +41,7 @@ if test "$1" = compose; then
       case "$*" in
         *verify-state*) printf '{"status":"ok","users":0}\n' ;;
         *verify-ami*) printf '{"status":"ok","contact_count":0}\n' ;;
+        *127.0.0.1:9090/metrics*) printf 'ringring_database_up 1\nringring_asterisk_ami_up 1\n' ;;
         *"pjsip show transport transport-tls"*) printf 'Transport: transport-tls TLS 0.0.0.0:5061\n' ;;
       esac
       exit 0
@@ -63,7 +64,10 @@ EOF
 #!/bin/sh
 set -eu
 printf 'curl %s\n' "$*" >>"$RINGRING_TEST_LOG"
-printf '{"status":"ok"}\n'
+case "$*" in
+  *"%{http_code}"*) printf '404' ;;
+  *) printf '{"status":"ok"}\n' ;;
+esac
 EOF
   cat >"$fake_bin/fail2ban-client" <<'EOF'
 #!/bin/sh
@@ -182,6 +186,7 @@ assert_successful_install() {
     assert_private "$path"
   done
   grep -qx 'APP_BASE_URL=https://phone.example.test' "$config/app.env" || fail 'base URL was not rendered'
+  grep -qx 'METRICS_ADDR=127.0.0.1:9090' "$config/app.env" || fail 'private metrics address was not rendered'
   grep -qx 'HOST_SIGNUP_CODE=rainbow-42' "$config/app.env" || fail 'signup code was not rendered'
   grep -qx 'OPENAI_ADMIN_KEY=sk-admin-abcdefghijklmnop' "$config/app.env" || fail 'OpenAI key was not rendered'
   grep -qx 'OPENAI_PARTY_SPEND_LIMIT_CENTS=2500' "$config/app.env" || fail 'spend ceiling was not rendered'
@@ -208,8 +213,20 @@ assert_successful_install() {
   grep -q '^tls sync .* required$' "$log" || fail 'install did not require initial trusted SIP TLS synchronization'
   grep -q '^tls-probe phone.example.test$' "$log" || fail 'install did not verify the public SIP TLS endpoint'
   grep -q '^curl .*https://phone.example.test/readyz' "$log" || fail 'install did not verify public readiness'
+  grep -q '^curl .*https://phone.example.test/metrics' "$log" || fail 'install did not reject public metrics exposure'
+  grep -q '^docker compose exec -T app curl .*127.0.0.1:9090/metrics' "$log" || fail 'install did not verify private metrics'
   test -z "$(git -C "$checkout" status --porcelain)" || fail 'install dirtied the checkout'
   doctor_output=$(run_ctl doctor 2>&1) || fail "doctor rejected the installed fixture: $doctor_output"
+  sed 's/^METRICS_ADDR=.*/METRICS_ADDR=0.0.0.0:9090/' "$config/app.env" >"$fixture/app.invalid-metrics.env"
+  chmod 0600 "$fixture/app.invalid-metrics.env"
+  mv "$fixture/app.invalid-metrics.env" "$config/app.env"
+  if run_ctl doctor >/dev/null 2>&1; then
+    fail 'doctor accepted a non-loopback production metrics listener'
+  fi
+  sed '/^METRICS_ADDR=/d' "$config/app.env" >"$fixture/app.legacy.env"
+  chmod 0600 "$fixture/app.legacy.env"
+  mv "$fixture/app.legacy.env" "$config/app.env"
+  legacy_doctor_output=$(run_ctl doctor 2>&1) || fail "doctor rejected a legacy environment that uses the safe default: $legacy_doctor_output"
   if RINGRING_TEST_UNEXPECTED_APP_WARNING=1 run_ctl doctor >/dev/null 2>&1; then
     fail 'doctor accepted an unexpected application warning'
   fi

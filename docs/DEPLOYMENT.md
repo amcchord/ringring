@@ -64,6 +64,7 @@ Create `/etc/ringring/app.env` with mode `0600`:
 APP_ENV=production
 APP_BASE_URL=https://ringring.live
 HTTP_ADDR=:8080
+METRICS_ADDR=127.0.0.1:9090
 DATABASE_PATH=/data/ringring.db
 RINGRING_MASTER_KEY=<base64 32-byte key>
 SESSION_SECRET=<base64 32-byte key>
@@ -110,7 +111,7 @@ Party OpenAI key replacement adds a nullable `parties.openai_api_key_id` column 
 
 Host-set spend limits add three forward-only `parties` columns for the last confirmed amount, one pending amount, and its reconciliation state. Existing parties migrate to an honest `unknown` local state without changing their provider project or interrupting current routing; the host's first save verifies or replaces the chosen amount. A new update also mirrors its pause into the older `openai_status` column, so rollback keeps AI routes unavailable rather than ignoring an uncertain provider result. Do not roll back or edit the pending amount mid-update. Return to this release and choose **Finish spend limit update**, which safely repeats that exact amount until OpenAI confirms active enforcement. Do not submit the production form as a deployment probe because it deliberately changes the party's provider limit.
 
-`AI_AUDIO_ADDR` is private container traffic and must not be published on the host. The reference limits `*14` calls to three minutes and two concurrent sessions in addition to each party project's hard monthly spend limit. Before a party enables the line for anyone under 13, confirm that the OpenAI organization has Zero Data Retention as required by the official [Under 18 API Guidance](https://developers.openai.com/api/docs/guides/safety-checks/under-18-api-guidance).
+`METRICS_ADDR` and `AI_AUDIO_ADDR` are private container traffic and must not be published on the host. The metrics listener exports only bounded aggregate health/activity and Caddy does not proxy it; see [Privacy-preserving observability](OBSERVABILITY.md). The reference limits `*14` calls to three minutes and two concurrent sessions in addition to each party project's hard monthly spend limit. Before a party enables the line for anyone under 13, confirm that the OpenAI organization has Zero Data Retention as required by the official [Under 18 API Guidance](https://developers.openai.com/api/docs/guides/safety-checks/under-18-api-guidance).
 
 ## SIP authentication firewall
 
@@ -152,6 +153,8 @@ docker compose build
 docker compose up -d
 docker compose ps
 curl --fail https://ringring.live/readyz
+test "$(curl --silent --output /dev/null --write-out '%{http_code}' https://ringring.live/metrics)" = 404
+docker compose exec -T app curl --fail --silent http://127.0.0.1:9090/metrics
 docker compose exec asterisk asterisk -rx 'pjsip show transports'
 docker compose exec -T app ringring verify-ami
 fail2ban-client status ringring-sip
@@ -160,7 +163,7 @@ systemctl is-active ringring-sip-tls-sync.timer
 openssl s_client -connect ringring.live:5061 -servername ringring.live -verify_hostname ringring.live -verify_return_error -tls1_2 </dev/null
 ```
 
-`verify-ami` exercises the private manager login and complete PJSIP contact-list action, then prints only an `ok` status and aggregate contact count. It never prints endpoint names, contact URIs, addresses, user agents, or credentials. Review `docker compose logs --tail=100` after every deployment. Asterisk is compiled from the pinned official source release and its published SHA-256 file is checked during the image build.
+`verify-ami` exercises the private manager login and complete PJSIP contact-list action, then prints only an `ok` status and aggregate contact count. It never prints endpoint names, contact URIs, addresses, user agents, or credentials. The private metrics scrape repeats that aggregate AMI/database health boundary and must remain unreachable through public HTTPS. `ringringctl install`, `upgrade`, and `doctor` check both invariants. Review identifier-free application logs with `docker compose logs --tail=100 app`; treat the separate Asterisk authentication security log as restricted, short-retention abuse data. Asterisk is compiled from the pinned official source release and its published SHA-256 file is checked during the image build.
 
 To verify the Linphone path without touching a family phone, use a disposable party/invitation in an isolated development database. Confirm that the QR decodes to the setup page's provisioning URL, the first `GET` returns `application/xml` with `Cache-Control: no-store`, and the second returns `410`. Never print the URL, XML, or setup-screen credentials into deployment logs.
 

@@ -95,6 +95,21 @@ func main() {
 		logger.Error("create application", "error", err)
 		os.Exit(1)
 	}
+	metricsListener, err := net.Listen("tcp", cfg.MetricsAddr)
+	if err != nil {
+		logger.Error("listen for internal metrics", "address", cfg.MetricsAddr, "error", err)
+		os.Exit(1)
+	}
+	defer metricsListener.Close()
+	metricsServer := &http.Server{
+		Handler: app.MetricsHandler(), ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second,
+	}
+	go func() {
+		if err := metricsServer.Serve(metricsListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("internal metrics server stopped", "error", err)
+		}
+	}()
 	if err := app.ReconcileTelephony(context.Background()); err != nil {
 		logger.Warn("initial telephony reconcile", "error", err)
 	}
@@ -115,6 +130,7 @@ func main() {
 		Cipher: cipher, Weather: weather.New(nil), Speech: openairuntime.New(nil),
 		AudioDir: cfg.VoiceAudioDir, PlaybackDir: cfg.VoicePlaybackDir, Logger: logger,
 		AIModel: cfg.AIRealtimeModel, AICallMaxDuration: cfg.AICallMaxDuration, AIMaxConcurrent: cfg.AIMaxConcurrent,
+		Metrics: app.Metrics(),
 	}
 	go func() {
 		if err := voiceServer.Serve(voiceListener); err != nil {
@@ -141,12 +157,15 @@ func main() {
 		_ = aiListener.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		if err := metricsServer.Shutdown(ctx); err != nil {
+			logger.Error("internal metrics shutdown", "error", err)
+		}
 		if err := server.Shutdown(ctx); err != nil {
 			logger.Error("graceful shutdown", "error", err)
 		}
 	}()
 
-	logger.Info("RingRing listening", "address", cfg.HTTPAddr, "fastagi_address", cfg.FastAGIAddr, "ai_audio_address", cfg.AIAudioAddr, "environment", cfg.Environment)
+	logger.Info("RingRing listening", "address", cfg.HTTPAddr, "metrics_address", cfg.MetricsAddr, "fastagi_address", cfg.FastAGIAddr, "ai_audio_address", cfg.AIAudioAddr, "environment", cfg.Environment)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Error("HTTP server stopped", "error", err)
 		os.Exit(1)

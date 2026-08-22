@@ -22,6 +22,8 @@ The `*10` phone test is an in-memory Asterisk media loop inside the caller's par
 
 The authenticated host may save three real-phone setup confirmations: successful `*10` echo, an outgoing party call to a phone on a different internet connection, and an incoming call from that remote phone. These are explicitly host-confirmed observations, not automatic call records. RingRing stores only one nullable timestamp per completed check plus an update timestamp; it stores no peer identity, dialed number, contact address, network detail, user-agent, call time/duration, audio, or transcript. Unchecking an item removes that timestamp, and clearing all three removes the row. SIP credential rotation clears all three because the connection under test has changed, and device deletion cascades through the record.
 
+The private metrics listener keeps process-lifetime aggregate counters only. HTTP labels are coarse surfaces rather than paths; voice labels are a fixed service/result vocabulary; SIP presence is reduced immediately to four state counts. Metrics contain no party, host, member, device, SIP username, extension, token, address, user-agent, place, prompt, error, per-call timestamp/duration, audio, or transcript, and RingRing does not persist or remote-write them. Application logs use route templates and omit record identifiers and caller-controlled values. Asterisk's root-restricted authentication security log retains source addresses only for Fail2Ban and needs a short operator-chosen rotation/retention policy. See [Privacy-preserving observability](OBSERVABILITY.md).
+
 The `*15` extension chooser trusts only Asterisk's authenticated PJSIP endpoint identity, not caller ID or a user-entered identity. Its database update requires an active device mapped to the supplied party and accepts only 2–5 ASCII digits; uniqueness is enforced inside that party. It changes only the member extension, sends no data outside the private app/PBX network, and records no prompt audio or DTMF. Invalid, occupied, revoked, unknown, and cross-party attempts receive generic phone prompts.
 
 ## Deletion lifecycle
@@ -62,7 +64,7 @@ Expected public ports are:
 
 SIP TLS encrypts registration credentials and call-setup signaling between a capable phone and Asterisk. RingRing's RTP is currently unencrypted and server-relayed, so TLS does not protect voice media from the server or an observer on the RTP path. UDP SIP remains an explicit fallback for clients that cannot use TLS; it does not protect the signaling credential in transit. Setup guidance prefers TLS and does not recommend disabling certificate verification.
 
-The database, AMI, metrics, debug endpoints, and container APIs are never public.
+The database, AMI, metrics, debug endpoints, and container APIs are never public. Metrics use a distinct loopback-only app listener; Compose does not expose or publish it, Caddy does not route it, the public handler returns `404` at `/metrics`, and guided operations verify those conditions.
 
 ## Abuse controls
 

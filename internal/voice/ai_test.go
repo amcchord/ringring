@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/amcchord/ringring/internal/model"
+	"github.com/amcchord/ringring/internal/observability"
 	"github.com/amcchord/ringring/internal/secure"
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
@@ -32,6 +33,7 @@ func TestPrepareAICallDisclosesAIAndIssuesOneUseTicket(t *testing.T) {
 	}
 	speech := &fakeSpeech{}
 	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	metrics := observability.New()
 	server := &Server{
 		Source: fakePartySource{
 			party: model.Party{ID: "pty_ai", OpenAIStatus: "ready", OpenAIKeyCiphertext: ciphertext},
@@ -40,7 +42,7 @@ func TestPrepareAICallDisclosesAIAndIssuesOneUseTicket(t *testing.T) {
 			},
 		},
 		Cipher: cipher, Speech: speech, AudioDir: t.TempDir(), PlaybackDir: "/voice",
-		Now: func() time.Time { return now }, AIMaxConcurrent: 1,
+		Now: func() time.Time { return now }, AIMaxConcurrent: 1, Metrics: metrics,
 	}
 	callID := uuid.NewString()
 	path, canonicalID, err := server.prepareAICall(t.Context(), "pty_ai", callID, "101")
@@ -63,7 +65,17 @@ func TestPrepareAICallDisclosesAIAndIssuesOneUseTicket(t *testing.T) {
 	if _, ok := server.claimAITicket(callID); ok {
 		t.Fatal("AI ticket could be claimed twice")
 	}
+	active := httptest.NewRecorder()
+	metrics.Handler(nil).ServeHTTP(active, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(active.Body.String(), "ringring_ai_calls_active 1") {
+		t.Fatalf("active AI bridge was not observed:\n%s", active.Body.String())
+	}
 	server.releaseAICall()
+	released := httptest.NewRecorder()
+	metrics.Handler(nil).ServeHTTP(released, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(released.Body.String(), "ringring_ai_calls_active 0") {
+		t.Fatalf("released AI bridge remained active:\n%s", released.Body.String())
+	}
 }
 
 func TestSpendLimitReconciliationDoesNotUseCachedAIDisclosure(t *testing.T) {

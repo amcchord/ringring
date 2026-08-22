@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/amcchord/ringring/internal/model"
+	"github.com/amcchord/ringring/internal/observability"
 	"github.com/amcchord/ringring/internal/openairuntime"
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
@@ -42,6 +43,8 @@ type aiTicket struct {
 }
 
 func (s *Server) handleAIAuthorize(reader *bufio.Reader, writer *bufio.Writer, environment map[string]string) {
+	result := "error"
+	defer func() { s.Metrics.ObserveVoice("ai_authorize", result) }()
 	_ = agiCommand(reader, writer, "SET VARIABLE RINGRING_AI_READY 0")
 	_ = agiCommand(reader, writer, "EXEC Playback one-moment-please")
 	partyID := environment["agi_arg_1"]
@@ -51,7 +54,7 @@ func (s *Server) handleAIAuthorize(reader *bufio.Reader, writer *bufio.Writer, e
 	defer cancel()
 	path, canonicalCallID, err := s.prepareAICall(ctx, partyID, callID, callerID)
 	if err != nil {
-		s.logger().Warn("prepare AI line", "party_id", partyID, "error", err)
+		s.logger().Warn("prepare AI line", "error_class", observability.ErrorClass(err))
 		_ = agiCommand(reader, writer, "EXEC Playback ss-noservice")
 		return
 	}
@@ -61,7 +64,9 @@ func (s *Server) handleAIAuthorize(reader *bufio.Reader, writer *bufio.Writer, e
 	}
 	if err := agiCommand(reader, writer, "SET VARIABLE RINGRING_AI_READY 1"); err != nil {
 		s.removeAITicket(canonicalCallID)
+		return
 	}
+	result = "ready"
 }
 
 func (s *Server) prepareAICall(ctx context.Context, partyID, callID, callerID string) (string, string, error) {
@@ -169,16 +174,20 @@ func (s *Server) reserveAITicket(callID string, ticket aiTicket) error {
 
 func (s *Server) claimAITicket(callID string) (aiTicket, bool) {
 	s.aiMu.Lock()
-	defer s.aiMu.Unlock()
 	ticket, ok := s.aiTickets[callID]
 	if !ok {
+		s.aiMu.Unlock()
 		return aiTicket{}, false
 	}
 	delete(s.aiTickets, callID)
 	if !ticket.ExpiresAt.After(s.clock()) {
+		s.aiMu.Unlock()
 		return aiTicket{}, false
 	}
 	s.aiActive++
+	active := s.aiActive
+	s.aiMu.Unlock()
+	s.Metrics.SetAIActive(active)
 	return ticket, true
 }
 
@@ -193,7 +202,9 @@ func (s *Server) releaseAICall() {
 	if s.aiActive > 0 {
 		s.aiActive--
 	}
+	active := s.aiActive
 	s.aiMu.Unlock()
+	s.Metrics.SetAIActive(active)
 }
 
 func (s *Server) clock() time.Time {
@@ -235,6 +246,8 @@ func (s *Server) handleAudioSocket(connection net.Conn) {
 		return
 	}
 	defer s.releaseAICall()
+	result := "error"
+	defer func() { s.Metrics.ObserveVoice("ai_bridge", result) }()
 	duration := s.AICallMaxDuration
 	if duration <= 0 {
 		duration = 3 * time.Minute
@@ -247,8 +260,10 @@ func (s *Server) handleAudioSocket(connection net.Conn) {
 		return
 	}
 	if err := s.bridgeRealtime(ctx, connection, apiKey, ticket.SafetyID); err != nil {
-		s.logger().Warn("AI call ended with bridge error", "party_id", ticket.PartyID, "error", err)
+		s.logger().Warn("AI call ended with bridge error", "error_class", observability.ErrorClass(err))
+		return
 	}
+	result = "completed"
 }
 
 func (s *Server) bridgeRealtime(ctx context.Context, phone net.Conn, apiKey, safetyID string) error {

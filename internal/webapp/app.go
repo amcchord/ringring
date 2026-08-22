@@ -21,6 +21,7 @@ import (
 	"github.com/amcchord/ringring/internal/config"
 	"github.com/amcchord/ringring/internal/localauth"
 	"github.com/amcchord/ringring/internal/model"
+	"github.com/amcchord/ringring/internal/observability"
 	"github.com/amcchord/ringring/internal/openaiadmin"
 	"github.com/amcchord/ringring/internal/provisioning"
 	"github.com/amcchord/ringring/internal/radio"
@@ -60,6 +61,7 @@ type App struct {
 	weather   weatherGeocoder
 	oauth     *oauth2.Config
 	logger    *slog.Logger
+	metrics   *observability.Registry
 	handler   http.Handler
 	static    http.Handler
 	now       func() time.Time
@@ -190,6 +192,7 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 		store:     database,
 		cipher:    cipher,
 		logger:    logger,
+		metrics:   observability.New(),
 		now:       time.Now,
 		static:    http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))),
 		weather:   weather.New(nil),
@@ -255,7 +258,7 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 	mux.HandleFunc("GET /provision/linphone/{token}", app.linphoneProvision)
 	mux.HandleFunc("GET /", app.home)
 
-	app.handler = app.securityHeaders(app.recoverPanic(app.requestLog(app.rateLimit(mux))))
+	app.handler = app.securityHeaders(app.requestLog(app.recoverPanic(app.rateLimit(mux))))
 	return app, nil
 }
 
@@ -267,7 +270,40 @@ func (a *App) ReconcileTelephony(ctx context.Context) error {
 	if a.telephony == nil {
 		return nil
 	}
-	return a.telephony.Reconcile(ctx)
+	err := a.telephony.Reconcile(ctx)
+	a.metrics.ObserveReconciliation(err == nil)
+	return err
+}
+
+func (a *App) Metrics() *observability.Registry {
+	return a.metrics
+}
+
+func (a *App) MetricsHandler() http.Handler {
+	return a.metrics.Handler(func(ctx context.Context) observability.HealthSnapshot {
+		snapshot := observability.HealthSnapshot{DatabaseUp: a.store.Ping(ctx) == nil}
+		if a.presence == nil {
+			return snapshot
+		}
+		statuses, err := a.presence.ContactStatuses(ctx)
+		if err != nil {
+			return snapshot
+		}
+		snapshot.AsteriskAMIUp = true
+		for _, state := range statuses {
+			switch state {
+			case telephony.ContactReachable:
+				snapshot.ReachableContacts++
+			case telephony.ContactUnreachable:
+				snapshot.UnreachableContacts++
+			case telephony.ContactNonQualified:
+				snapshot.NonQualifiedContacts++
+			default:
+				snapshot.UnknownContacts++
+			}
+		}
+		return snapshot
+	})
 }
 
 func (a *App) home(w http.ResponseWriter, r *http.Request) {
@@ -387,7 +423,7 @@ func (a *App) signup(w http.ResponseWriter, r *http.Request) {
 	a.clearCookie(w, authCSRFCookie, "/")
 	flash := recoveryFlash{Kind: "signup", Username: username, Codes: codes}
 	if err := a.setRecoveryFlash(w, flash); err != nil {
-		a.logger.Error("set signup recovery reveal", "error", err)
+		a.logger.Error("set signup recovery reveal", "error_class", observability.ErrorClass(err))
 		a.renderRecoveryCodes(w, r, flash)
 		return
 	}
@@ -437,7 +473,7 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 	}
 	valid, verifyErr := localauth.VerifyPassword(encoded, password)
 	if verifyErr != nil {
-		a.logger.Error("verify local password", "error", verifyErr)
+		a.logger.Error("verify local password", "error_class", observability.ErrorClass(verifyErr))
 		valid = false
 	}
 	if err != nil || !valid {
@@ -504,7 +540,7 @@ func (a *App) recover(w http.ResponseWriter, r *http.Request) {
 	a.clearCookie(w, authCSRFCookie, "/")
 	flash := recoveryFlash{Kind: "reset", Username: username, Codes: codes}
 	if err := a.setRecoveryFlash(w, flash); err != nil {
-		a.logger.Error("set reset recovery reveal", "error", err)
+		a.logger.Error("set reset recovery reveal", "error_class", observability.ErrorClass(err))
 		a.renderRecoveryCodes(w, r, flash)
 		return
 	}
@@ -543,7 +579,7 @@ func (a *App) renderRecoveryCodes(w http.ResponseWriter, r *http.Request, flash 
 func (a *App) authPageData(w http.ResponseWriter, r *http.Request) PageData {
 	token, err := secure.Token(24)
 	if err != nil {
-		a.logger.Error("create authentication CSRF token", "error", err)
+		a.logger.Error("create authentication CSRF token", "error_class", observability.ErrorClass(err))
 		return a.pageData(nil)
 	}
 	http.SetCookie(w, &http.Cookie{
@@ -667,13 +703,13 @@ func (a *App) googleCallback(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	token, err := a.oauth.Exchange(ctx, r.URL.Query().Get("code"), oauth2.VerifierOption(verifierCookie.Value))
 	if err != nil {
-		a.logger.Warn("Google OAuth exchange failed", "error", err)
+		a.logger.Warn("Google OAuth exchange failed", "error_class", observability.ErrorClass(err))
 		a.errorPage(w, http.StatusBadGateway, "Google did not answer", "Please try signing in again.", "/auth/google", "Try again")
 		return
 	}
 	profile, err := googleProfile(ctx, a.oauth.Client(ctx, token))
 	if err != nil {
-		a.logger.Warn("Google profile request failed", "error", err)
+		a.logger.Warn("Google profile request failed", "error_class", observability.ErrorClass(err))
 		a.errorPage(w, http.StatusBadGateway, "We could not read your profile", "Please try signing in again.", "/auth/google", "Try again")
 		return
 	}
@@ -746,7 +782,7 @@ func (a *App) logout(w http.ResponseWriter, r *http.Request, session authSession
 		return
 	}
 	if err := a.store.DeleteSession(r.Context(), secure.Hash(session.Token)); err != nil {
-		a.logger.Warn("delete session", "error", err)
+		a.logger.Warn("delete session", "error_class", observability.ErrorClass(err))
 	}
 	a.clearCookie(w, sessionCookie, "/")
 	http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -795,7 +831,7 @@ func (a *App) createParty(w http.ResponseWriter, r *http.Request, session authSe
 		return
 	}
 	if err := a.provisionOpenAI(r.Context(), party); err != nil {
-		a.logger.Warn("party OpenAI provisioning failed", "party_id", party.ID, "error", err)
+		a.logger.Warn("party OpenAI provisioning failed", "error_class", observability.ErrorClass(err))
 		_ = a.store.UpdatePartyOpenAI(r.Context(), party.ID, "", "", "", "", "error", 0)
 	}
 	http.Redirect(w, r, "/parties/"+url.PathEscape(party.ID), http.StatusSeeOther)
@@ -916,15 +952,15 @@ func (a *App) updatePartyOpenAISpendLimit(w http.ResponseWriter, r *http.Request
 	// The database state and runtime authorization now fail closed. Regenerating
 	// the dialplan is defense in depth and may be retried by normal reconciliation.
 	if err := a.ReconcileTelephony(r.Context()); err != nil {
-		a.logger.Error("telephony reconcile before OpenAI spend limit update", "party_id", partyID, "error", err)
+		a.logger.Error("telephony reconcile before OpenAI spend limit update", "error_class", observability.ErrorClass(err))
 	}
 	apiContext, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
 	if _, err := a.openAI.UpdateProjectSpendLimit(apiContext, party.OpenAIProjectID, cents); err != nil {
 		if statusErr := a.store.SetPartyOpenAISpendLimitError(r.Context(), party.ID, session.User.ID, party.OpenAIProjectID, cents); statusErr != nil {
-			a.logger.Error("record OpenAI spend limit failure", "party_id", partyID, "error", statusErr)
+			a.logger.Error("record OpenAI spend limit failure", "error_class", observability.ErrorClass(statusErr))
 		}
-		a.logger.Warn("update party OpenAI spend limit failed", "party_id", partyID, "error", err)
+		a.logger.Warn("update party OpenAI spend limit failed", "error_class", observability.ErrorClass(err))
 		a.errorPage(w, http.StatusBadGateway, "The limit needs one more try", "AI-powered lines are paused because OpenAI did not confirm the exact enforcing amount. Return to the party and choose Finish spend limit update.", backURL, "Back to the party")
 		return
 	}
@@ -933,7 +969,7 @@ func (a *App) updatePartyOpenAISpendLimit(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err := a.ReconcileTelephony(r.Context()); err != nil {
-		a.logger.Error("telephony reconcile after OpenAI spend limit update", "party_id", partyID, "error", err)
+		a.logger.Error("telephony reconcile after OpenAI spend limit update", "error_class", observability.ErrorClass(err))
 	}
 	http.Redirect(w, r, backURL+"?ai-spend=updated", http.StatusSeeOther)
 }
@@ -1022,7 +1058,7 @@ func (a *App) rotatePartyOpenAIKey(w http.ResponseWriter, r *http.Request, sessi
 	if party.OpenAIStatus == "ready" {
 		fresh, createErr := a.openAI.CreateServiceAccountAPIKey(apiContext, party.OpenAIProjectID, party.OpenAIServiceAccountID)
 		if createErr != nil {
-			a.logger.Warn("create replacement party OpenAI key failed", "party_id", partyID, "error", createErr)
+			a.logger.Warn("create replacement party OpenAI key failed", "error_class", observability.ErrorClass(createErr))
 			a.errorPage(w, http.StatusBadGateway, "The key was not replaced", "RingRing could not create a fresh key, so the current encrypted key and AI lines were left unchanged. Please try again.", backURL, "Back to the party")
 			return
 		}
@@ -1054,9 +1090,9 @@ func (a *App) rotatePartyOpenAIKey(w http.ResponseWriter, r *http.Request, sessi
 
 	if err := a.retireOtherOpenAIKeys(apiContext, party); err != nil {
 		if statusErr := a.store.SetPartyOpenAIKeyRotationStatus(r.Context(), party.ID, session.User.ID, party.OpenAIAPIKeyID, "rotation-error"); statusErr != nil {
-			a.logger.Error("record party OpenAI key rotation failure", "party_id", partyID, "error", statusErr)
+			a.logger.Error("record party OpenAI key rotation failure", "error_class", observability.ErrorClass(statusErr))
 		}
-		a.logger.Warn("retire previous party OpenAI keys failed", "party_id", partyID, "error", err)
+		a.logger.Warn("retire previous party OpenAI keys failed", "error_class", observability.ErrorClass(err))
 		a.errorPage(w, http.StatusBadGateway, "Key replacement needs one more try", "The fresh encrypted key is installed and AI lines are paused, but RingRing could not yet confirm every older key was revoked. Return to the party and choose Finish key replacement.", backURL, "Back to the party")
 		return
 	}
@@ -1093,7 +1129,7 @@ func (a *App) cleanupUnstoredOpenAIKey(parent context.Context, party model.Party
 	cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
 	defer cancel()
 	if err := a.openAI.DeleteProjectAPIKey(cleanupContext, party.OpenAIProjectID, keyID); err != nil {
-		a.logger.Warn("clean up unstored party OpenAI key failed", "party_id", party.ID, "error", err)
+		a.logger.Warn("clean up unstored party OpenAI key failed", "error_class", observability.ErrorClass(err))
 	}
 }
 
@@ -1120,7 +1156,7 @@ func (a *App) phonePresence(ctx context.Context, members []model.Member) (map[st
 		var err error
 		statuses, err = a.presence.ContactStatuses(queryContext)
 		if err != nil {
-			a.logger.Warn("load live phone status", "error", err)
+			a.logger.Warn("load live phone status", "error_class", observability.ErrorClass(err))
 		} else {
 			available = true
 		}
@@ -1239,7 +1275,7 @@ func (a *App) updateServices(w http.ResponseWriter, r *http.Request, session aut
 		defer cancel()
 		location, err = a.weather.Geocode(ctx, query)
 		if err != nil {
-			a.logger.Warn("weather location lookup failed", "party_id", partyID, "error", err)
+			a.logger.Warn("weather location lookup failed", "error_class", observability.ErrorClass(err))
 			a.errorPage(w, http.StatusBadRequest, "We could not find that place", "Try a city with its state or country, or use a postal code.", "/parties/"+url.PathEscape(partyID), "Back to the party")
 			return
 		}
@@ -1255,7 +1291,7 @@ func (a *App) updateServices(w http.ResponseWriter, r *http.Request, session aut
 		return
 	}
 	if err := a.ReconcileTelephony(r.Context()); err != nil {
-		a.logger.Error("telephony reconcile after service update", "party_id", partyID, "error", err)
+		a.logger.Error("telephony reconcile after service update", "error_class", observability.ErrorClass(err))
 	}
 	http.Redirect(w, r, "/parties/"+url.PathEscape(partyID), http.StatusSeeOther)
 }
@@ -1348,7 +1384,7 @@ func (a *App) rotateDevice(w http.ResponseWriter, r *http.Request, session authS
 		return
 	}
 	if err := a.ReconcileTelephony(r.Context()); err != nil {
-		a.logger.Error("telephony reconcile after device rotation", "party_id", partyID, "device_id", deviceID, "error", err)
+		a.logger.Error("telephony reconcile after device rotation", "error_class", observability.ErrorClass(err))
 	}
 	a.setSetupFlash(w, setupFlash{
 		PartyID: partyID, MemberID: rotated.Member.ID, MemberName: rotated.Member.DisplayName,
@@ -1372,7 +1408,7 @@ func (a *App) revokeDevice(w http.ResponseWriter, r *http.Request, session authS
 		return
 	}
 	if err := a.ReconcileTelephony(r.Context()); err != nil {
-		a.logger.Error("telephony reconcile after device revocation", "party_id", partyID, "device_id", r.PathValue("deviceID"), "error", err)
+		a.logger.Error("telephony reconcile after device revocation", "error_class", observability.ErrorClass(err))
 	}
 	http.Redirect(w, r, "/parties/"+url.PathEscape(partyID), http.StatusSeeOther)
 }
@@ -1423,7 +1459,7 @@ func (a *App) deleteMember(w http.ResponseWriter, r *http.Request, session authS
 	}
 	destination := "/parties/" + url.PathEscape(partyID) + "?deleted=member"
 	if err := a.ReconcileTelephony(r.Context()); err != nil {
-		a.logger.Error("telephony reconcile after member deletion", "party_id", partyID, "member_id", memberID, "error", err)
+		a.logger.Error("telephony reconcile after member deletion", "error_class", observability.ErrorClass(err))
 		destination += "&phones=delayed"
 	}
 	http.Redirect(w, r, destination, http.StatusSeeOther)
@@ -1479,7 +1515,7 @@ func (a *App) deleteParty(w http.ResponseWriter, r *http.Request, session authSe
 		err = a.openAI.ArchiveProject(ctx, party.OpenAIProjectID)
 		cancel()
 		if err != nil {
-			a.logger.Warn("party OpenAI archive failed", "party_id", partyID, "error", err)
+			a.logger.Warn("party OpenAI archive failed", "error_class", observability.ErrorClass(err))
 			a.errorPage(w, http.StatusBadGateway, "The party was not deleted", "RingRing could not archive its OpenAI project, so all local party data was kept. Please try again.", r.URL.Path, "Back to confirmation")
 			return
 		}
@@ -1493,7 +1529,7 @@ func (a *App) deleteParty(w http.ResponseWriter, r *http.Request, session authSe
 	}
 	destination := "/app?deleted=party"
 	if err := a.ReconcileTelephony(r.Context()); err != nil {
-		a.logger.Error("telephony reconcile after party deletion", "party_id", partyID, "error", err)
+		a.logger.Error("telephony reconcile after party deletion", "error_class", observability.ErrorClass(err))
 		destination += "&phones=delayed"
 	}
 	http.Redirect(w, r, destination, http.StatusSeeOther)
@@ -1568,7 +1604,7 @@ func (a *App) rotatedSetup(w http.ResponseWriter, r *http.Request, session authS
 		SIPSecret: flash.SIPSecret,
 	}
 	if err := a.addLinphoneSetup(&data, flash.ProvisioningToken); err != nil {
-		a.logger.Error("prepare rotated Linphone setup", "error", err)
+		a.logger.Error("prepare rotated Linphone setup", "error_class", observability.ErrorClass(err))
 	}
 	a.render(w, "setup", data)
 }
@@ -1603,7 +1639,7 @@ func (a *App) claimInvitation(w http.ResponseWriter, r *http.Request) {
 	csrfValue := r.FormValue("csrf")
 	originOK := a.sameOrigin(r)
 	if err != nil || !secure.Equal(csrfCookie.Value, csrfValue) || !originOK {
-		a.logger.Warn("rejected invitation claim", "csrf_cookie_present", err == nil, "csrf_form_present", csrfValue != "", "origin_ok", originOK, "origin", r.Header.Get("Origin"))
+		a.logger.Warn("rejected invitation claim", "csrf_cookie_present", err == nil, "csrf_form_present", csrfValue != "", "origin_ok", originOK, "origin_present", r.Header.Get("Origin") != "")
 		http.Error(w, "invalid request", http.StatusForbidden)
 		return
 	}
@@ -1655,7 +1691,7 @@ func (a *App) claimInvitation(w http.ResponseWriter, r *http.Request) {
 	}
 	a.clearCookie(w, joinCSRFCookie, r.URL.Path)
 	if err := a.ReconcileTelephony(r.Context()); err != nil {
-		a.logger.Error("telephony reconcile after invitation claim", "party_id", party.ID, "device_id", device.ID, "error", err)
+		a.logger.Error("telephony reconcile after invitation claim", "error_class", observability.ErrorClass(err))
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
@@ -1664,7 +1700,7 @@ func (a *App) claimInvitation(w http.ResponseWriter, r *http.Request) {
 	data.Claim = model.ClaimedDevice{Party: party, Member: member, Device: device, SIPSecret: sipSecret}
 	data.SIPPublicHost = a.cfg.SIPPublicHost
 	if err := a.addLinphoneSetup(&data, provisionToken); err != nil {
-		a.logger.Error("prepare claimed Linphone setup", "error", err)
+		a.logger.Error("prepare claimed Linphone setup", "error_class", observability.ErrorClass(err))
 	}
 	a.render(w, "setup", data)
 }
@@ -1697,7 +1733,7 @@ func (a *App) linphoneProvision(w http.ResponseWriter, r *http.Request) {
 	}
 	password, err := a.cipher.Decrypt(device.SIPSecretCiphertext, []byte(device.DeviceID))
 	if err != nil {
-		a.logger.Error("decrypt one-time provisioning credential", "error", err)
+		a.logger.Error("decrypt one-time provisioning credential", "error_class", observability.ErrorClass(err))
 		a.errorPage(w, http.StatusInternalServerError, "The setup line went quiet", "Ask the party host to rotate this phone and make fresh settings.", "/", "Back home")
 		return
 	}
@@ -1705,14 +1741,14 @@ func (a *App) linphoneProvision(w http.ResponseWriter, r *http.Request) {
 		Server: a.cfg.SIPPublicHost, Username: device.SIPUsername, Password: password, Extension: device.Extension,
 	})
 	if err != nil {
-		a.logger.Error("build one-time Linphone provisioning", "error", err)
+		a.logger.Error("build one-time Linphone provisioning", "error_class", observability.ErrorClass(err))
 		a.errorPage(w, http.StatusInternalServerError, "The setup line went quiet", "Ask the party host to rotate this phone and make fresh settings.", "/", "Back home")
 		return
 	}
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	w.Header().Set("Content-Disposition", `inline; filename="ringring-linphone.xml"`)
 	if _, err := w.Write(document); err != nil {
-		a.logger.Error("write one-time Linphone provisioning", "error", err)
+		a.logger.Error("write one-time Linphone provisioning", "error_class", observability.ErrorClass(err))
 	}
 }
 
@@ -1834,13 +1870,13 @@ func (a *App) renderNoStore(w http.ResponseWriter, page string, data PageData) {
 func (a *App) render(w http.ResponseWriter, page string, data PageData) {
 	parsed, err := template.ParseFS(webassets.Files, "templates/base.html", "templates/"+page+".html")
 	if err != nil {
-		a.logger.Error("parse templates", "page", page, "error", err)
+		a.logger.Error("parse templates", "page", page, "error_class", observability.ErrorClass(err))
 		http.Error(w, "template error", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := parsed.ExecuteTemplate(w, "base", data); err != nil {
-		a.logger.Error("render template", "page", page, "error", err)
+		a.logger.Error("render template", "page", page, "error_class", observability.ErrorClass(err))
 	}
 }
 
@@ -1862,20 +1898,20 @@ func (a *App) invitationError(w http.ResponseWriter, err error) {
 	case errors.Is(err, store.ErrNotFound):
 		a.errorPage(w, http.StatusNotFound, "That invitation is not in service", "Check the whole link or ask the party host for a new one.", "/", "Back home")
 	default:
-		a.logger.Error("invitation operation", "error", err)
+		a.logger.Error("invitation operation", "error_class", observability.ErrorClass(err))
 		a.errorPage(w, http.StatusInternalServerError, "The line went quiet", "RingRing hit a temporary problem. Please try again.", "/", "Back home")
 	}
 }
 
 func (a *App) internalError(w http.ResponseWriter, r *http.Request, err error) {
-	a.logger.Error("request failed", "method", r.Method, "path", safePath(r.URL.Path), "error", err)
+	a.logger.Error("request failed", "method", safeMethod(r.Method), "route", safeRoute(r), "error_class", observability.ErrorClass(err))
 	a.errorPage(w, http.StatusInternalServerError, "The line went quiet", "RingRing hit a temporary problem. Please try again.", "/", "Back home")
 }
 
 func (a *App) setInviteFlash(w http.ResponseWriter, partyID, token string) {
 	value, err := a.cipher.Encrypt(partyID+"\n"+token, []byte("invite-flash"))
 	if err != nil {
-		a.logger.Error("encrypt invitation flash", "error", err)
+		a.logger.Error("encrypt invitation flash", "error_class", observability.ErrorClass(err))
 		return
 	}
 	http.SetCookie(w, &http.Cookie{
@@ -1904,12 +1940,12 @@ func (a *App) readInviteFlash(w http.ResponseWriter, r *http.Request, partyID st
 func (a *App) setSetupFlash(w http.ResponseWriter, flash setupFlash) {
 	encoded, err := json.Marshal(flash)
 	if err != nil {
-		a.logger.Error("encode setup flash", "error", err)
+		a.logger.Error("encode setup flash", "error_class", observability.ErrorClass(err))
 		return
 	}
 	value, err := a.cipher.Encrypt(string(encoded), []byte("setup-flash"))
 	if err != nil {
-		a.logger.Error("encrypt setup flash", "error", err)
+		a.logger.Error("encrypt setup flash", "error_class", observability.ErrorClass(err))
 		return
 	}
 	path := "/parties/" + flash.PartyID + "/setup"
@@ -2016,9 +2052,12 @@ func (a *App) securityHeaders(next http.Handler) http.Handler {
 func (a *App) requestLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
+		a.metrics.HTTPStarted()
 		writer := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(writer, r)
-		a.logger.Info("request", "method", r.Method, "path", safePath(r.URL.Path), "status", writer.status, "duration_ms", time.Since(started).Milliseconds())
+		duration := time.Since(started)
+		a.metrics.HTTPFinished(requestSurface(r), r.Method, writer.status, duration)
+		a.logger.Info("request", "method", safeMethod(r.Method), "route", safeRoute(r), "status", writer.status, "duration_ms", duration.Milliseconds())
 	})
 }
 
@@ -2026,7 +2065,7 @@ func (a *App) recoverPanic(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				a.logger.Error("request panic", "path", safePath(r.URL.Path), "panic", recovered)
+				a.logger.Error("request panic", "route", safeRoute(r), "panic_type", fmt.Sprintf("%T", recovered))
 				http.Error(w, "internal server error", http.StatusInternalServerError)
 			}
 		}()
@@ -2034,14 +2073,47 @@ func (a *App) recoverPanic(next http.Handler) http.Handler {
 	})
 }
 
-func safePath(path string) string {
-	if strings.HasPrefix(path, "/join/") {
-		return "/join/:token"
+func safeRoute(request *http.Request) string {
+	pattern := request.Pattern
+	if pattern == "" {
+		return "unmatched"
 	}
-	if strings.HasPrefix(path, "/provision/") {
-		return "/provision/:kind/:token"
+	if _, route, found := strings.Cut(pattern, " "); found {
+		return route
 	}
-	return path
+	return pattern
+}
+
+func safeMethod(method string) string {
+	switch method {
+	case http.MethodGet, http.MethodPost, http.MethodHead:
+		return method
+	default:
+		return "OTHER"
+	}
+}
+
+func requestSurface(request *http.Request) string {
+	route := safeRoute(request)
+	switch {
+	case route == "/healthz" || route == "/readyz":
+		return "health"
+	case strings.HasPrefix(route, "/static/"):
+		return "static"
+	case route == "/signup" || route == "/login" || route == "/recover" ||
+		strings.HasPrefix(route, "/auth/") || strings.HasPrefix(route, "/account/recovery-codes"):
+		return "authentication"
+	case route == "/app" || strings.HasPrefix(route, "/parties") || strings.HasPrefix(route, "/account/delete"):
+		return "host"
+	case strings.HasPrefix(route, "/join/"):
+		return "invitation"
+	case strings.HasPrefix(route, "/provision/"):
+		return "provisioning"
+	case route == "/":
+		return "public"
+	default:
+		return "other"
+	}
 }
 
 func slugify(value string) string {

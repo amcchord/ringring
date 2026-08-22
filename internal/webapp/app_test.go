@@ -1,6 +1,7 @@
 package webapp
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -637,16 +638,92 @@ func TestProductionRejectsNullOrigin(t *testing.T) {
 }
 
 func TestSecretPathsAreMaskedAndProvisioningIsRateLimited(t *testing.T) {
-	if got := safePath("/join/invitation-secret"); got != "/join/:token" {
-		t.Fatalf("safe invitation path = %q", got)
+	invitation := httptest.NewRequest(http.MethodGet, "/join/invitation-secret", nil)
+	invitation.Pattern = "GET /join/{token}"
+	if got := safeRoute(invitation); got != "/join/{token}" || requestSurface(invitation) != "invitation" {
+		t.Fatalf("safe invitation route = %q surface=%q", got, requestSurface(invitation))
 	}
-	if got := safePath("/provision/linphone/provision-secret"); got != "/provision/:kind/:token" {
-		t.Fatalf("safe provisioning path = %q", got)
+	provisioning := httptest.NewRequest(http.MethodGet, "/provision/linphone/provision-secret", nil)
+	provisioning.Pattern = "GET /provision/linphone/{token}"
+	if got := safeRoute(provisioning); got != "/provision/linphone/{token}" || requestSurface(provisioning) != "provisioning" {
+		t.Fatalf("safe provisioning route = %q surface=%q", got, requestSurface(provisioning))
+	}
+	unmatched := httptest.NewRequest(http.MethodGet, "/private-value", nil)
+	if got := safeRoute(unmatched); got != "unmatched" || requestSurface(unmatched) != "other" {
+		t.Fatalf("unmatched route = %q surface=%q", got, requestSurface(unmatched))
 	}
 	req := httptest.NewRequest(http.MethodGet, "/provision/linphone/provision-secret", nil)
 	category, limit, window := rateCategory(req)
 	if category != "provision" || limit != 20 || window != 5*time.Minute {
 		t.Fatalf("provisioning rate category = %q %d %s", category, limit, window)
+	}
+}
+
+func TestInternalMetricsAreAggregateAndAbsentFromPublicHandler(t *testing.T) {
+	database, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	cipher, err := secure.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	app, err := New(config.Config{Environment: "development", BaseURL: "http://ringring.test"}, database, cipher, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.presence = fakeContactPresence{statuses: map[string]telephony.ContactState{
+		"private-device-one": telephony.ContactReachable,
+		"private-device-two": telephony.ContactUnreachable,
+	}}
+
+	for _, path := range []string{
+		"/parties/private-party-identifier",
+		"/join/private-invitation-token",
+		"/private-unmatched-path",
+	} {
+		response := httptest.NewRecorder()
+		app.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+	}
+	privateMethod := httptest.NewRecorder()
+	app.ServeHTTP(privateMethod, httptest.NewRequest("PRIVATE-METHOD", "/private-method-path", nil))
+	publicMetrics := httptest.NewRecorder()
+	app.ServeHTTP(publicMetrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if publicMetrics.Code != http.StatusNotFound || strings.Contains(publicMetrics.Body.String(), "ringring_database_up") {
+		t.Fatalf("public handler exposed metrics: status=%d body=%q", publicMetrics.Code, publicMetrics.Body.String())
+	}
+
+	internalMetrics := httptest.NewRecorder()
+	app.MetricsHandler().ServeHTTP(internalMetrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := internalMetrics.Body.String()
+	for _, expected := range []string{
+		"ringring_database_up 1",
+		"ringring_asterisk_ami_up 1",
+		"ringring_sip_contacts{state=\"reachable\"} 1",
+		"ringring_sip_contacts{state=\"unreachable\"} 1",
+		"ringring_http_requests_total{surface=\"host\",method=\"GET\",status_class=\"3xx\"} 1",
+		"ringring_http_requests_total{surface=\"invitation\",method=\"GET\",status_class=\"4xx\"} 1",
+	} {
+		if !strings.Contains(body, expected) {
+			t.Errorf("internal metrics omitted %q\n%s", expected, body)
+		}
+	}
+	combined := logs.String() + body
+	for _, forbidden := range []string{
+		"private-party-identifier", "private-invitation-token", "private-unmatched-path",
+		"private-device-one", "private-device-two", "PRIVATE-METHOD", "private-method-path",
+	} {
+		if strings.Contains(combined, forbidden) {
+			t.Fatalf("logs or metrics exposed record value %q\n%s", forbidden, combined)
+		}
+	}
+	for _, expectedRoute := range []string{"route=/parties/{partyID}", "route=/join/{token}"} {
+		if !strings.Contains(logs.String(), expectedRoute) {
+			t.Errorf("request log omitted safe route template %q\n%s", expectedRoute, logs.String())
+		}
 	}
 }
 

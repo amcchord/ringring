@@ -21,6 +21,8 @@ Internet
 
 Caddy, the app, and Asterisk run as separate containers. Only Caddy's HTTPS port and Asterisk's SIP/RTP ports are public. The database, Asterisk Manager Interface (AMI), app origin, FastAGI service, and AI AudioSocket bridge stay on private container networks.
 
+The app also owns a distinct loopback-only metrics listener on `127.0.0.1:9090`. Its scrape computes aggregate database/AMI/contact health and exports bounded process-lifetime web, reconciliation, and voice-service counters. Fixed label allowlists prevent family record values or caller input from becoming time-series dimensions. Compose does not expose or publish the port, Caddy never routes this listener, and RingRing includes no collector or remote-write destination. See [Privacy-preserving observability](OBSERVABILITY.md).
+
 ## Domain model
 
 - **User**: an adult host with a RingRing-native account; optional federated login can be added without changing party ownership.

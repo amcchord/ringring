@@ -14,6 +14,7 @@ import (
 type Config struct {
 	Environment                string
 	HTTPAddr                   string
+	MetricsAddr                string
 	BaseURL                    string
 	DatabasePath               string
 	MasterKey                  []byte
@@ -43,6 +44,7 @@ func Load() (Config, error) {
 	cfg := Config{
 		Environment:                env("APP_ENV", "development"),
 		HTTPAddr:                   env("HTTP_ADDR", ":8080"),
+		MetricsAddr:                env("METRICS_ADDR", "127.0.0.1:9090"),
 		BaseURL:                    strings.TrimRight(env("APP_BASE_URL", "http://localhost:8080"), "/"),
 		DatabasePath:               env("DATABASE_PATH", "data/ringring.db"),
 		GoogleClientID:             os.Getenv("GOOGLE_CLIENT_ID"),
@@ -87,6 +89,9 @@ func Load() (Config, error) {
 		}
 		if cfg.DevAuth {
 			return Config{}, errors.New("DEV_AUTH cannot be enabled in production")
+		}
+		if cfg.MetricsAddr != "127.0.0.1:9090" {
+			return Config{}, errors.New("production METRICS_ADDR must remain 127.0.0.1:9090")
 		}
 	}
 	if cfg.AICallMaxDuration < 30*time.Second || cfg.AICallMaxDuration > 10*time.Minute {

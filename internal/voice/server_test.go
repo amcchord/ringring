@@ -9,12 +9,15 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/amcchord/ringring/internal/model"
+	"github.com/amcchord/ringring/internal/observability"
 	"github.com/amcchord/ringring/internal/secure"
 	"github.com/amcchord/ringring/internal/store"
 	"github.com/amcchord/ringring/internal/weather"
@@ -23,6 +26,12 @@ import (
 type fakePartySource struct {
 	party    model.Party
 	services model.PartyServices
+}
+
+type failingPartySource struct{ err error }
+
+func (f failingPartySource) PartyVoiceSettings(context.Context, string) (model.Party, model.PartyServices, error) {
+	return model.Party{}, model.PartyServices{}, f.err
 }
 
 func (f fakePartySource) PartyVoiceSettings(context.Context, string) (model.Party, model.PartyServices, error) {
@@ -132,16 +141,40 @@ func TestSpendLimitReconciliationDoesNotUseCachedWeatherAudio(t *testing.T) {
 	}
 }
 
+func TestVoiceObservabilityKeepsRecordValuesOutOfLogsAndMetrics(t *testing.T) {
+	metrics := observability.New()
+	var logs bytes.Buffer
+	server := &Server{
+		Source: failingPartySource{err: errors.New("private-party-value from provider")},
+		Logger: slog.New(slog.NewTextHandler(&logs, nil)), Metrics: metrics,
+	}
+	reader := scriptedAGI("0", "0")
+	var commands bytes.Buffer
+	server.handleWeather(reader, bufio.NewWriter(&commands), map[string]string{"agi_arg_1": "private-party-value"})
+
+	response := httptest.NewRecorder()
+	metrics.Handler(nil).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	combined := logs.String() + response.Body.String()
+	if strings.Contains(combined, "private-party-value") {
+		t.Fatalf("voice observability exposed a party value:\n%s", combined)
+	}
+	if !strings.Contains(logs.String(), "error_class=internal") ||
+		!strings.Contains(response.Body.String(), "ringring_voice_service_requests_total{service=\"weather\",result=\"error\"} 1") {
+		t.Fatalf("voice failure was not safely observable:\n%s", combined)
+	}
+}
+
 func TestVoiceExtensionSelectionUsesAuthenticatedEndpointAndConfirmsDigits(t *testing.T) {
 	manager := &fakeExtensionManager{errors: map[string]error{}}
 	reconciles := 0
+	metrics := observability.New()
 	server := &Server{
 		Extensions: manager,
 		Reconcile: func(context.Context) error {
 			reconciles++
 			return nil
 		},
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Metrics: metrics,
 	}
 	reader := scriptedAGI("103", "0", "0", "0", "0", "49", "0", "0", "0")
 	var commands bytes.Buffer
@@ -168,6 +201,11 @@ func TestVoiceExtensionSelectionUsesAuthenticatedEndpointAndConfirmsDigits(t *te
 	}, "\n") + "\n"
 	if commands.String() != want {
 		t.Fatalf("unexpected FastAGI exchange:\n%s", commands.String())
+	}
+	response := httptest.NewRecorder()
+	metrics.Handler(nil).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(response.Body.String(), "ringring_voice_service_requests_total{service=\"extension\",result=\"changed\"} 1") {
+		t.Fatalf("successful extension change was not observed:\n%s", response.Body.String())
 	}
 }
 

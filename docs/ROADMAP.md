@@ -45,6 +45,6 @@
 - [x] Backup, restore, and disaster-recovery verification.
 - [x] SIP TLS 1.2 transport, trusted-certificate handoff, UDP fallback, and automated SIPp/Linphone compatibility matrix.
 - [ ] Physical ATA, desk-phone, and softphone SIP TLS compatibility matrix.
-- [ ] Observability without call-content collection.
+- [x] Internal aggregate observability without record identifiers or call-content collection.
 - [ ] Security review and threat-model tests.
 - [ ] Optional PostgreSQL and multi-node migration path.

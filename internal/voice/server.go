@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/amcchord/ringring/internal/model"
+	"github.com/amcchord/ringring/internal/observability"
 	"github.com/amcchord/ringring/internal/openairuntime"
 	"github.com/amcchord/ringring/internal/store"
 	"github.com/amcchord/ringring/internal/weather"
@@ -53,6 +54,7 @@ type Server struct {
 	AudioDir          string
 	PlaybackDir       string
 	Logger            *slog.Logger
+	Metrics           *observability.Registry
 	Now               func() time.Time
 	CacheDuration     time.Duration
 	AIModel           string
@@ -87,7 +89,7 @@ func (s *Server) handle(connection net.Conn) {
 	writer := bufio.NewWriter(connection)
 	environment, err := readEnvironment(reader)
 	if err != nil {
-		s.logger().Warn("read FastAGI environment", "error", err)
+		s.logger().Warn("read FastAGI environment", "error_class", observability.ErrorClass(err))
 		return
 	}
 	switch environment["agi_network_script"] {
@@ -104,9 +106,12 @@ func (s *Server) handle(connection net.Conn) {
 }
 
 func (s *Server) handleChooseExtension(reader *bufio.Reader, writer *bufio.Writer, environment map[string]string) {
+	result := "abandoned"
+	defer func() { s.Metrics.ObserveVoice("extension", result) }()
 	partyID := environment["agi_arg_1"]
 	endpoint := environment["agi_arg_2"]
 	if s.Extensions == nil || !safePartyID.MatchString(partyID) || !safePartyID.MatchString(endpoint) {
+		result = "error"
 		_ = agiCommand(reader, writer, "EXEC Playback ss-noservice")
 		return
 	}
@@ -156,16 +161,18 @@ func (s *Server) handleChooseExtension(reader *bufio.Reader, writer *bufio.Write
 		}
 		if changeErr != nil {
 			cancel()
-			s.logger().Warn("change extension from phone", "party_id", partyID, "error", changeErr)
+			result = "error"
+			s.logger().Warn("change extension from phone", "error_class", observability.ErrorClass(changeErr))
 			_ = agiCommand(reader, writer, "EXEC Playback ss-noservice")
 			return
 		}
 		if s.Reconcile != nil {
 			if reconcileErr := s.Reconcile(ctx); reconcileErr != nil {
-				s.logger().Warn("reconcile phones after extension change", "party_id", partyID, "error", reconcileErr)
+				s.logger().Warn("reconcile phones after extension change", "error_class", observability.ErrorClass(reconcileErr))
 			}
 		}
 		cancel()
+		result = "changed"
 
 		for _, command := range []string{
 			"EXEC Playback auth-thankyou",
@@ -194,6 +201,8 @@ func validExtension(extension string) bool {
 }
 
 func (s *Server) handleWeather(reader *bufio.Reader, writer *bufio.Writer, environment map[string]string) {
+	result := "error"
+	defer func() { s.Metrics.ObserveVoice("weather", result) }()
 	partyID := environment["agi_arg_1"]
 	if !safePartyID.MatchString(partyID) {
 		_ = agiCommand(reader, writer, "EXEC Playback ss-noservice")
@@ -204,11 +213,13 @@ func (s *Server) handleWeather(reader *bufio.Reader, writer *bufio.Writer, envir
 	defer cancel()
 	path, err := s.weatherAudio(ctx, partyID)
 	if err != nil {
-		s.logger().Warn("prepare weather line", "party_id", partyID, "error", err)
+		s.logger().Warn("prepare weather line", "error_class", observability.ErrorClass(err))
 		_ = agiCommand(reader, writer, "EXEC Playback ss-noservice")
 		return
 	}
-	_ = agiCommand(reader, writer, `STREAM FILE "`+path+`" ""`)
+	if err := agiCommand(reader, writer, `STREAM FILE "`+path+`" ""`); err == nil {
+		result = "ready"
+	}
 }
 
 func (s *Server) weatherAudio(ctx context.Context, partyID string) (string, error) {
