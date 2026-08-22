@@ -21,6 +21,13 @@ This is the durable, chronological project record. Add new entries at the top. C
 - OpenAI client tests cover one-time key creation, owner filtering, pagination, deletion confirmation, retry-safe missing-key deletion, malformed credentials, and invalid pagination. Store tests cover the additive legacy migration, host scope, stale/concurrent compare-and-swap rejection, encrypted-key installation, routing pause, error transition, retry, and completion.
 - The full browser flow covers CSRF rejection, partial external failure, encrypted fresh-key persistence, no key or internal-state disclosure, paused dashboard/party states, retry without a second key, old-key retirement, route resumption, and cross-host denial.
 - `make check` passes formatting, vet, and the complete race-enabled suite. At 390×844 and 1280×900, ready and retry controls have no horizontal overflow, use 54–78px buttons, retain friendly status labels, and expose no provider key identifier or runtime secret; the disposable browser, app, database, and viewport override were removed or reset.
+- GitHub Actions passed feature commit `501a47e`. A network-disabled image of that exact commit migrated an extracted production backup, became ready, generated telephony state, stopped cleanly, and matched the sealed integrity, foreign-key, credential-decryption, and family-count report. The new key-ID field remained empty, both copied environment files remained exact, and all candidate resources were removed.
+
+### Production
+
+- Created `/root/ringring-backups/ringring-20260822T075725Z-8a1a8ab.tar.gz` before the schema change and passed its checksum, safe-extraction, integrity, foreign-key, credential-decryption, readiness, and telephony-regeneration drill with the pre-upgrade image.
+- Deployed exact feature commit `501a47e` by rebuilding and recreating only the app container. Asterisk and Caddy identities, both root-readable environment files, generated PJSIP/dialplan files, and a content hash over every pre-existing family-state column remained exact. The nullable migration exists and is empty; no production party key or OpenAI resource was created, replaced, listed, or revoked.
+- Public readiness and signup, the key-control stylesheet, private aggregate-only AMI verification, the SIP Fail2Ban jail, and new app logs pass. Created `/root/ringring-backups/ringring-20260822T080332Z-501a47e.tar.gz` after deployment and passed its full isolated restore drill; the restarted live app remains ready and no restore runtime remains.
 
 ### Remaining
 
