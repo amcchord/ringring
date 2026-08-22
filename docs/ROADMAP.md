@@ -37,7 +37,7 @@
 
 - [x] Reproducible Docker Compose deployment and SIP firewall installer.
 - [ ] Guided installation and upgrade command.
-- [ ] Backup, restore, and disaster-recovery verification.
+- [x] Backup, restore, and disaster-recovery verification.
 - [ ] SIP TLS device compatibility matrix.
 - [ ] Observability without call-content collection.
 - [ ] Security review and threat-model tests.

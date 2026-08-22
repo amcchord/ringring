@@ -13,7 +13,7 @@ No database, app origin, Docker API, or Asterisk Manager Interface port is publi
 
 ## Server prerequisites
 
-Install Docker Engine and the Compose v2 plugin, then create state directories:
+Install Docker Engine, the Compose v2 plugin, Git, and GNU Make, then create state directories:
 
 ```sh
 install -d -m 0755 /opt/ringring

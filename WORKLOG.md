@@ -25,10 +25,17 @@ This is the durable, chronological project record. Add new entries at the top. C
 - A candidate image verified the existing offline production copy with SQLite integrity, foreign keys, current schema, aggregate counts, and the saved master key's ability to decrypt the party credential.
 - A separate network-disabled Compose project exercised the complete backup command against copied state, including app stop, WAL cleanup, snapshot verification, restart, archive/checksum creation, and the full restore drill. It left the live app healthy and removed every candidate container, extracted copy, and temporary secret archive.
 
+### Production
+
+- GitHub Actions passed commit `4270a1d`. Took an additional offline root-only rollback copy, deployed the verified image from the clean production checkout, and installed GNU Make so the documented operational targets work directly on the host.
+- Created the first checked-in production recovery archive and sidecar under `/root/ringring-backups`, both mode `0600` inside a mode-`0700` directory. The sidecar checksum passes and the sealed report confirms SQLite and foreign-key integrity, the existing one host/one party state, and successful decryption of the saved party key.
+- Ran the checked-in restore drill against that exact archive from `/opt/ringring`. Safe extraction, the sealed report, isolated app readiness, telephony regeneration, clean shutdown, and unchanged post-start state all passed with no network or host ports.
+- The live app and Asterisk are healthy, readiness and signup security headers pass, Fail2Ban is active, and settled runtime logs contain no warnings or errors. Candidate images, containers, clones, extracted state, and temporary secret archives were removed; the verified production archive and pre-deploy rollback copy remain root-only.
+
 ### Remaining
 
-- Push and deploy the verified candidate, create a fresh checked-in production backup, and repeat the drill from `/opt/ringring`.
-- After production verification, retain scheduled off-host encrypted copies and periodically repeat the drill as state changes.
+- Copy verified archives into operator-controlled encrypted off-host storage and apply a retention schedule; periodically repeat the drill as state changes.
+- Complete a two-way-audio call with two remote physical devices and add host/member deletion flows.
 
 ## 2026-08-22 — First authenticated SIP/RTP loop
 
