@@ -48,3 +48,5 @@ If an operator adds Prometheus or another scraper, keep the loopback boundary an
 These alerts identify subsystem failure without identifying which family, phone, or caller was active. A host-triggered setup ring appears only as the fixed host HTTP route/status surface; RingRing adds no device, SIP username, extension, or call label. Physical call quality and background ringing still require the host-confirmed checklist and real-device testing; aggregate metrics do not prove them.
 
 Creating an additional member phone uses the fixed host device-creation route surface. Metrics and application logs do not include its party, member, device label, generated SIP username, extension, provisioning token, or fan-out size.
+
+Canceling unused invitations uses one fixed host route/status surface. Neither the active count nor any party, invitation ID, token hash, bearer link, expiry, or number of removed rows is logged or used as a metric label.

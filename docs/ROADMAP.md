@@ -7,6 +7,7 @@
 - [x] Party creation and isolated extension range.
 - [x] Single-use member invite.
 - [x] Private copy-or-scan invitation handoff without a third-party QR service.
+- [x] Host-visible active invitation count and party-scoped cancellation of unused links.
 - [x] Member and device provisioning with one-time SIP setup card.
 - [x] Host-added independent phones sharing one member extension and ringing together.
 - [x] Generated Asterisk PJSIP endpoints and party dialplans.

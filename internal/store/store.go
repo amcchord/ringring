@@ -790,6 +790,60 @@ func (s *Store) CreateInvitation(ctx context.Context, input NewInvitation) error
 	return nil
 }
 
+// ActiveInvitationCountForHost returns only unclaimed links that have not yet
+// expired. The host join is part of the query so a party identifier alone
+// cannot reveal even an aggregate invitation count.
+func (s *Store) ActiveInvitationCountForHost(ctx context.Context, partyID, hostUserID string, now time.Time) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(i.id)
+		FROM parties p
+		LEFT JOIN invitations i ON i.party_id = p.id AND i.used_at IS NULL AND i.expires_at >= ?
+		WHERE p.id = ? AND p.host_user_id = ?
+		GROUP BY p.id`, unix(now), partyID, hostUserID).Scan(&count)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("count active host invitations: %w", err)
+	}
+	return count, nil
+}
+
+// CancelActiveInvitationsForHost atomically verifies party ownership and
+// removes every unclaimed, unexpired bearer link. Used and expired records are
+// retained for their existing lifecycle semantics.
+func (s *Store) CancelActiveInvitationsForHost(ctx context.Context, partyID, hostUserID string, now time.Time) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin active invitation cancellation: %w", err)
+	}
+	defer tx.Rollback()
+
+	var exists int
+	err = tx.QueryRowContext(ctx, `SELECT 1 FROM parties WHERE id = ? AND host_user_id = ?`, partyID, hostUserID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("load invitation cancellation party: %w", err)
+	}
+	result, err := tx.ExecContext(ctx, `
+		DELETE FROM invitations
+		WHERE party_id = ? AND used_at IS NULL AND expires_at >= ?`, partyID, unix(now))
+	if err != nil {
+		return 0, fmt.Errorf("cancel active invitations: %w", err)
+	}
+	removed, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("count canceled active invitations: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit active invitation cancellation: %w", err)
+	}
+	return removed, nil
+}
+
 func (s *Store) PartyByInvitation(ctx context.Context, tokenHash []byte, now time.Time) (model.Party, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT p.id, p.name, p.slug, p.host_user_id, p.openai_project_id,

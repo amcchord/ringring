@@ -77,6 +77,76 @@ func TestInvitationCanOnlyBeClaimedOnce(t *testing.T) {
 	}
 }
 
+func TestHostCanCountAndCancelOnlyActiveInvitations(t *testing.T) {
+	ctx := t.Context()
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	now := time.Date(2026, 8, 22, 18, 30, 0, 0, time.UTC)
+	host, _ := s.UpsertGoogleUser(ctx, GoogleProfile{Subject: "invite-cancel-host", Email: "host@example.test", Name: "Host"}, now, "usr_invite_cancel_host")
+	otherHost, _ := s.UpsertGoogleUser(ctx, GoogleProfile{Subject: "invite-cancel-other", Email: "other@example.test", Name: "Other"}, now, "usr_invite_cancel_other")
+	party, _ := s.CreateParty(ctx, NewParty{ID: "pty_invite_cancel", Name: "Party", Slug: "invite-cancel", HostUserID: host.ID, CreatedAt: now})
+	otherParty, _ := s.CreateParty(ctx, NewParty{ID: "pty_invite_cancel_other", Name: "Other", Slug: "invite-cancel-other", HostUserID: otherHost.ID, CreatedAt: now})
+	create := func(id, token, partyID, creatorID string, expires time.Time) {
+		t.Helper()
+		if err := s.CreateInvitation(ctx, NewInvitation{
+			ID: id, PartyID: partyID, CreatedByUserID: creatorID, TokenHash: secure.Hash(token), ExpiresAt: expires, CreatedAt: now.Add(-time.Minute),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	create("inv_cancel_active", "cancel-active", party.ID, host.ID, now.Add(time.Hour))
+	create("inv_cancel_boundary", "cancel-boundary", party.ID, host.ID, now)
+	create("inv_cancel_expired", "cancel-expired", party.ID, host.ID, now.Add(-time.Second))
+	create("inv_cancel_used", "cancel-used", party.ID, host.ID, now.Add(time.Hour))
+	create("inv_cancel_other", "cancel-other", otherParty.ID, otherHost.ID, now.Add(time.Hour))
+	if _, _, _, err := s.ClaimInvitation(ctx, NewClaim{
+		TokenHash: secure.Hash("cancel-used"), MemberID: "mem_cancel_used", DisplayName: "Used", Extension: "101",
+		DeviceID: "dev_cancel_used", DeviceLabel: "Phone", SIPUsername: "rrd_cancel_used",
+		SIPSecretCiphertext: "cipher-used", Provisioning: testProvisioning("cancel-used-provision", now), Now: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if count, err := s.ActiveInvitationCountForHost(ctx, party.ID, host.ID, now); err != nil || count != 2 {
+		t.Fatalf("active invitation count = %d, %v", count, err)
+	}
+	if _, err := s.ActiveInvitationCountForHost(ctx, party.ID, otherHost.ID, now); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-host active invitation count error = %v", err)
+	}
+	if _, err := s.CancelActiveInvitationsForHost(ctx, party.ID, otherHost.ID, now); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-host invitation cancellation error = %v", err)
+	}
+	if count, _ := s.ActiveInvitationCountForHost(ctx, party.ID, host.ID, now); count != 2 {
+		t.Fatalf("cross-host cancellation changed active count to %d", count)
+	}
+
+	removed, err := s.CancelActiveInvitationsForHost(ctx, party.ID, host.ID, now)
+	if err != nil || removed != 2 {
+		t.Fatalf("canceled invitation count = %d, %v", removed, err)
+	}
+	if count, err := s.ActiveInvitationCountForHost(ctx, party.ID, host.ID, now); err != nil || count != 0 {
+		t.Fatalf("post-cancel active invitation count = %d, %v", count, err)
+	}
+	for _, token := range []string{"cancel-active", "cancel-boundary"} {
+		if _, err := s.PartyByInvitation(ctx, secure.Hash(token), now); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("canceled token %q error = %v", token, err)
+		}
+	}
+	if _, err := s.PartyByInvitation(ctx, secure.Hash("cancel-expired"), now); !errors.Is(err, ErrInviteExpired) {
+		t.Fatalf("expired invitation changed: %v", err)
+	}
+	if _, err := s.PartyByInvitation(ctx, secure.Hash("cancel-used"), now); !errors.Is(err, ErrInviteUsed) {
+		t.Fatalf("used invitation changed: %v", err)
+	}
+	if got, err := s.PartyByInvitation(ctx, secure.Hash("cancel-other"), now); err != nil || got.ID != otherParty.ID {
+		t.Fatalf("other party invitation changed: %#v, %v", got, err)
+	}
+}
+
 func TestExtensionUniqueWithinParty(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(":memory:")

@@ -2,6 +2,32 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Cancel a mis-sent invitation
+
+### Shipped
+
+- Added a host-visible count of active unused invitations and a deliberately labeled control to cancel all of those links for one party. A host can now recover after pasting a bearer link into the wrong conversation instead of waiting up to 48 hours.
+- Added a transactional store boundary that repeats exact party/host ownership and removes only unclaimed, unexpired invitation rows. Used invitations, expired rows, members, phones, provisioning, and routing remain unchanged; a concurrent claim or cancellation serializes through SQLite.
+- Bounded and CSRF-protected both invitation write forms, included cancellation in the existing party-write rate limit, cleared a pending encrypted reveal cookie, and kept counts, IDs, hashes, links, expiry, and removal totals out of logs and metrics.
+
+### Decisions
+
+- Show only an aggregate active count. RingRing does not know a recipient and should not add names, delivery history, token fragments, or a persistent invitation directory merely to support revocation.
+- Cancel every active unused link for the party rather than asking the host to distinguish opaque links that RingRing intentionally reveals only once. Making a fresh link is cheap and clearer after suspected disclosure.
+- Preserve used and expired records. Cancellation is a bearer-link safety action, not deletion of members or historical lifecycle state.
+
+### Verification
+
+- Focused store, web, rate-limit, accessibility, and executable security-contract tests cover active/used/expired boundary semantics, exact host isolation, failed-request non-mutation, cancellation invalidation, preserved claimed state, bounded forms, the cleared reveal, route classification, and unambiguous touch-sized controls.
+- A disposable browser host exercised singular and plural active counts, the expanded warning, cancellation, and the clean post-cancel party state at 1280×900 and 390×844. Summary and action targets were 44px tall, the 301px mobile control fit without horizontal overflow, the notice confirmed cancellation, and both the pending QR and management control disappeared. The viewport/tab/listeners were removed and the disposable database was moved to Trash.
+- `make check`, `make security`, and `make admin-test` pass locally, including formatting, shell/operator fixtures, vet, the complete race-enabled suite, and the reachable-vulnerability scan. The accepted module advisory remains unreachable from RingRing.
+
+### Remaining
+
+- Complete the exact-candidate SIP/NAT/Linphone tests, guarded production upgrade, and zero-mutation production audit without canceling the real outstanding family invitation.
+- Complete the physical ATA, desk-phone, and mobile softphone matrix across two real networks.
+- Obtain the external child-safety review and OpenAI Zero Data Retention eligibility before opening the AI conversation gate.
+
 ## 2026-08-22 — Private scan-to-join invitations
 
 ### Shipped

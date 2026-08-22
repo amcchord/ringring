@@ -30,6 +30,19 @@
         <p class="invite-secret-note"><strong>Keep it private.</strong> Anyone with the link or code can claim this invitation until it is used or expires.</p>
       </div>
       {{end}}
+      {{if gt .ActiveInvitationCount 0}}
+      <details class="invite-actions">
+        <summary>Manage unused {{if eq .ActiveInvitationCount 1}}link{{else}}links{{end}} · {{.ActiveInvitationCount}} active</summary>
+        <div class="invite-action-card">
+          <p>{{if eq .ActiveInvitationCount 1}}This link still works{{else}}These links still work{{end}} until claimed or expired. Cancel {{if eq .ActiveInvitationCount 1}}it{{else}}them{{end}} if the wrong person received one or nobody needs to join.</p>
+          <form method="post" action="/parties/{{.Party.ID}}/invites/cancel">
+            <input type="hidden" name="csrf" value="{{.CSRF}}">
+            <button class="text-button danger-button" type="submit">Cancel unused {{if eq .ActiveInvitationCount 1}}link{{else}}links{{end}}</button>
+          </form>
+          <small>Used invitations and members are not changed.</small>
+        </div>
+      </details>
+      {{end}}
     </div>
 
     <div class="panel service-panel">

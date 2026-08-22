@@ -323,3 +323,30 @@ func TestInvitationQRCodeStaysInsideTheOneTimeHostReveal(t *testing.T) {
 		}
 	}
 }
+
+func TestHostCanCancelOnlyActiveInvitationsInsideOwnedParty(t *testing.T) {
+	required := map[string][]string{
+		"internal/store/store.go": {
+			"ActiveInvitationCountForHost", "CancelActiveInvitationsForHost",
+			"WHERE p.id = ? AND p.host_user_id = ?", "SELECT 1 FROM parties WHERE id = ? AND host_user_id = ?",
+			"WHERE party_id = ? AND used_at IS NULL AND expires_at >= ?",
+		},
+		"internal/webapp/app.go": {
+			`POST /parties/{partyID}/invites/cancel`, "cancelInvitations",
+			"a.parseSmallForm(w, r)", "a.validCSRF(r, session)",
+			"CancelActiveInvitationsForHost", "a.clearCookie(w, inviteFlashCookie",
+		},
+		"internal/webapp/ratelimit.go": {`strings.Contains(r.URL.Path, "/invites/")`},
+		"web/templates/party.html": {
+			"Manage unused", "/invites/cancel", "Cancel unused", "Used invitations and members are not changed.",
+		},
+	}
+	for filename, markers := range required {
+		contents := readRepositoryFile(t, filename)
+		for _, marker := range markers {
+			if !strings.Contains(contents, marker) {
+				t.Errorf("%s is missing active-invitation cancellation boundary %q", filename, marker)
+			}
+		}
+	}
+}

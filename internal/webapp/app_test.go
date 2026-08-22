@@ -416,7 +416,8 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	inviteBody := readBody(t, invite)
 	if invite.Header.Get("Cache-Control") != "no-store" || !strings.Contains(inviteBody, `class="invite-qr"`) ||
 		!strings.Contains(inviteBody, `src="data:image/png;base64,`) || !strings.Contains(inviteBody, "Or scan it.") ||
-		!strings.Contains(inviteBody, "Anyone with the link or code can claim this invitation") {
+		!strings.Contains(inviteBody, "Anyone with the link or code can claim this invitation") ||
+		!strings.Contains(inviteBody, "Manage unused link · 1 active") || !strings.Contains(inviteBody, "Cancel unused link") {
 		t.Fatal("one-time invitation did not include its private local QR handoff")
 	}
 	inviteURL := firstMatch(t, inviteBody, `value="(http://[^"]+/join/[^"]+)"`)
@@ -560,6 +561,32 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 		t.Fatalf("another host reached party presence: status=%d calls=%d", outsiderParty.StatusCode, presenceCounter.calls)
 	}
 	_ = readBody(t, outsiderParty)
+	cancelInvitesPath := server.URL + "/parties/" + partyID + "/invites/cancel"
+	missingCancelCSRF := postForm(t, client, cancelInvitesPath, nil)
+	if missingCancelCSRF.StatusCode != http.StatusForbidden {
+		t.Fatalf("invitation cancellation accepted missing CSRF: status=%d", missingCancelCSRF.StatusCode)
+	}
+	_ = readBody(t, missingCancelCSRF)
+	outsiderCancel := postForm(t, outsiderClient, cancelInvitesPath, url.Values{"csrf": {outsiderCSRF}})
+	if outsiderCancel.StatusCode != http.StatusNotFound {
+		t.Fatalf("another host canceled invitations: status=%d", outsiderCancel.StatusCode)
+	}
+	_ = readBody(t, outsiderCancel)
+	if stillActive := get(t, client, secondInviteURL); stillActive.StatusCode != http.StatusOK {
+		t.Fatalf("rejected cancellation changed active invitation: status=%d", stillActive.StatusCode)
+	} else {
+		_ = readBody(t, stillActive)
+	}
+	canceledInvites := postForm(t, client, cancelInvitesPath, url.Values{"csrf": {csrf}})
+	canceledInvitesBody := readBody(t, canceledInvites)
+	if canceledInvites.StatusCode != http.StatusOK || !strings.Contains(canceledInvitesBody, "Unused invitation links were canceled") ||
+		strings.Contains(canceledInvitesBody, "Manage unused link") || strings.Contains(canceledInvitesBody, "Cancel unused link") {
+		t.Fatalf("host invitation cancellation response was wrong: status=%d", canceledInvites.StatusCode)
+	}
+	if canceledLink := get(t, client, secondInviteURL); canceledLink.StatusCode != http.StatusNotFound || !strings.Contains(readBody(t, canceledLink), "not in service") {
+		t.Fatalf("canceled invitation remained usable: status=%d", canceledLink.StatusCode)
+	}
+	presenceCounter.calls = 0
 	hostParty = get(t, client, server.URL+"/parties/"+partyID)
 	hostPartyBody = readBody(t, hostParty)
 	onlineRendered := strings.Contains(hostPartyBody, "presence-online\">online")

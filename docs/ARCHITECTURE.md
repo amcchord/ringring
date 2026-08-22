@@ -52,6 +52,8 @@ destinations through another path.
 
 Immediately after creating an invitation, the authenticated no-store party page renders both its HTTPS link and a PNG QR containing that exact link. RingRing builds the QR in memory with the same local renderer used for Linphone provisioning; the token is never sent to an image service. The encrypted host-only reveal cookie is consumed on that first page view, so neither the link nor QR is reconstructed on refresh. Scanning merely opens the ordinary invitation page: token hashing, expiration, atomic single use, CSRF, and safe extension selection remain unchanged.
 
+The same host page counts active invitations through a party-and-host join without selecting their hashes. Its cancellation transaction first requires that exact host ownership, then deletes only rows for that party whose `used_at` is null and whose expiry has not passed. A concurrent claim and cancellation serialize through SQLite: cancellation removes the token before a claim can load it, or a completed claim sets `used_at` and is preserved. Used invitations, expired audit rows, members, devices, and routes are unchanged.
+
 ## NAT and phone compatibility
 
 Most devices will register outbound from home networks. PJSIP endpoints use symmetric RTP, forced response ports, rewritten contacts, server-relayed media, keepalives, and conservative codecs (`ulaw`, `alaw`, and optional `g722`). The setup UI will give exact registrar, username, secret, transport, and extension values instead of exposing Asterisk terminology.

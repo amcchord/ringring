@@ -117,6 +117,7 @@ type PageData struct {
 	RadioStations            []radio.Station
 	InviteURL                string
 	InviteQR                 template.URL
+	ActiveInvitationCount    int
 	JoinCSRF                 string
 	JoinDisplayName          string
 	JoinExtension            string
@@ -263,6 +264,7 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 	mux.HandleFunc("POST /parties", app.requireUser(app.createParty))
 	mux.HandleFunc("GET /parties/{partyID}", app.requireUser(app.party))
 	mux.HandleFunc("POST /parties/{partyID}/invites", app.requireUser(app.createInvitation))
+	mux.HandleFunc("POST /parties/{partyID}/invites/cancel", app.requireUser(app.cancelInvitations))
 	mux.HandleFunc("POST /parties/{partyID}/services", app.requireUser(app.updateServices))
 	mux.HandleFunc("POST /parties/{partyID}/openai-spend-limit", app.requireUser(app.updatePartyOpenAISpendLimit))
 	mux.HandleFunc("POST /parties/{partyID}/openai-key/rotate", app.requireUser(app.rotatePartyOpenAIKey))
@@ -923,6 +925,11 @@ func (a *App) party(w http.ResponseWriter, r *http.Request, session authSession)
 			data.InviteQR = template.URL(inviteQR)
 		}
 	}
+	data.ActiveInvitationCount, err = a.store.ActiveInvitationCountForHost(r.Context(), party.ID, session.User.ID, a.now())
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
 	if r.URL.Query().Get("deleted") == "member" {
 		data.Notice = "The member and every phone credential attached to that extension were deleted."
 		if r.URL.Query().Get("phones") == "delayed" {
@@ -940,6 +947,9 @@ func (a *App) party(w http.ResponseWriter, r *http.Request, session authSession)
 	}
 	if r.URL.Query().Get("ring-test") == "sent" {
 		data.Notice = "Ring test sent. The selected phone should ring and say its extension after it is answered."
+	}
+	if r.URL.Query().Get("invites") == "canceled" {
+		data.Notice = "Unused invitation links were canceled. Make a fresh link when someone is ready to join."
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	a.render(w, "party", data)
@@ -1338,6 +1348,9 @@ func (a *App) updateServices(w http.ResponseWriter, r *http.Request, session aut
 }
 
 func (a *App) createInvitation(w http.ResponseWriter, r *http.Request, session authSession) {
+	if !a.parseSmallForm(w, r) {
+		return
+	}
 	if !a.validCSRF(r, session) {
 		http.Error(w, "invalid request", http.StatusForbidden)
 		return
@@ -1370,6 +1383,26 @@ func (a *App) createInvitation(w http.ResponseWriter, r *http.Request, session a
 	}
 	a.setInviteFlash(w, partyID, token)
 	http.Redirect(w, r, "/parties/"+url.PathEscape(partyID), http.StatusSeeOther)
+}
+
+func (a *App) cancelInvitations(w http.ResponseWriter, r *http.Request, session authSession) {
+	if !a.parseSmallForm(w, r) {
+		return
+	}
+	if !a.validCSRF(r, session) {
+		http.Error(w, "invalid request", http.StatusForbidden)
+		return
+	}
+	partyID := r.PathValue("partyID")
+	if _, err := a.store.CancelActiveInvitationsForHost(r.Context(), partyID, session.User.ID, a.now()); errors.Is(err, store.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	} else if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	a.clearCookie(w, inviteFlashCookie, "/parties/"+partyID)
+	http.Redirect(w, r, "/parties/"+url.PathEscape(partyID)+"?invites=canceled", http.StatusSeeOther)
 }
 
 func (a *App) addMemberDevice(w http.ResponseWriter, r *http.Request, session authSession) {

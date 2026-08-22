@@ -24,6 +24,14 @@ func TestRateLimiterResetsAfterWindow(t *testing.T) {
 	}
 }
 
+func TestInvitationCancellationUsesPartyWriteLimit(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "https://ringring.live/parties/pty_example/invites/cancel", nil)
+	category, limit, window := rateCategory(request)
+	if category != "party-write" || limit != 30 || window != 5*time.Minute {
+		t.Fatalf("invitation cancellation rate category = %q, %d, %v", category, limit, window)
+	}
+}
+
 func TestClientIPTrustsOnlyTheCaddyPeer(t *testing.T) {
 	app := &App{cfg: config.Config{Environment: "production"}}
 	tests := []struct {

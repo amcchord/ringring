@@ -36,6 +36,7 @@ func TestSharedAccessibilityContract(t *testing.T) {
 		`.device-ring-test .text-button:disabled { color: var(--muted);`,
 		`.add-device-card input { min-height: 48px;`,
 		`.device-line, .member-add-device, .member-remove-link { grid-column: 1 / -1; }`,
+		`.invite-actions summary { min-height: 44px;`,
 		`.kicker.light { color: var(--white); }`,
 	} {
 		if !strings.Contains(css, want) {
@@ -102,6 +103,8 @@ func TestFormInstructionsAreVisibleAndAssociated(t *testing.T) {
 				`alt="One-time RingRing invitation QR code"`,
 				`aria-describedby="invite-qr-help"`,
 				`id="invite-qr-help"`,
+				`action="/parties/{{.Party.ID}}/invites/cancel"`,
+				`Used invitations and members are not changed.`,
 				`aria-describedby="openai-spend-help"`,
 				`aria-describedby="ring-test-help-{{.ID}}"`,
 				`id="ring-test-help-{{.ID}}"`,

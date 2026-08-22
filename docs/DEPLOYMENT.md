@@ -343,3 +343,7 @@ The incoming setup ring adds no schema, stored call state, secret, public port, 
 ### Additional member phones upgrade and rollback
 
 Adding another phone uses the existing `devices` and `device_provisioning_tokens` tables, encryption key, setup reveal, and generated PJSIP/dialplan files. It adds no schema, environment variable, public port, provider request, or background service. Existing members and phones are unchanged at startup. Newer releases may store several independent device rows for one member; older releases already list, route, rotate, revoke, and cascade-delete those rows correctly, so rollback preserves same-extension ringing. The isolated SIP smoke creates the extra device through the host web route and verifies the loaded explicit fan-out without changing a production family record.
+
+### Invitation cancellation upgrade and rollback
+
+Counting and canceling active invitations uses the existing `invitations` ownership, expiry, and `used_at` fields. It adds no schema, environment variable, public port, provider request, or background service, and an upgrade does not inspect, consume, or delete an invitation. A host cancellation permanently removes only that party's active unused token hashes; rollback cannot restore a deliberately canceled bearer link, while used/expired invitations and every member/device remain compatible with older releases.
