@@ -734,6 +734,32 @@ func (s *Store) EnforceAIChildSafetyGate(ctx context.Context, approved bool, now
 	return nil
 }
 
+// ListOpenAIProjectIDs returns the provider projects that could supply a party
+// model call. Startup uses this narrow list only while validating an explicitly
+// requested-open conversation gate; identifiers are never logged or rendered.
+func (s *Store) ListOpenAIProjectIDs(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT openai_project_id FROM parties
+		WHERE openai_project_id IS NOT NULL AND openai_project_id <> ''
+		ORDER BY openai_project_id`)
+	if err != nil {
+		return nil, fmt.Errorf("list OpenAI project IDs: %w", err)
+	}
+	defer rows.Close()
+	var projectIDs []string
+	for rows.Next() {
+		var projectID string
+		if err := rows.Scan(&projectID); err != nil {
+			return nil, fmt.Errorf("scan OpenAI project ID: %w", err)
+		}
+		projectIDs = append(projectIDs, projectID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list OpenAI project IDs: %w", err)
+	}
+	return projectIDs, nil
+}
+
 func (s *Store) PartyVoiceSettings(ctx context.Context, partyID string) (model.Party, model.PartyServices, error) {
 	party, err := s.partyByID(ctx, partyID)
 	if err != nil {

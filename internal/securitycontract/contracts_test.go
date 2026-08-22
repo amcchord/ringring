@@ -216,13 +216,15 @@ func TestAsteriskHasNoPSTNOrGlobalOutboundRoute(t *testing.T) {
 func TestAIConversationRequiresOperatorChildSafetyApprovalAtEveryBoundary(t *testing.T) {
 	required := map[string][]string{
 		".env.example":                     {"AI_CHILD_SAFETY_APPROVED=false"},
-		"ringringctl":                      {"AI_CHILD_SAFETY_APPROVED=false", "AI_CHILD_SAFETY_APPROVED must be true or false"},
-		"cmd/ringring/main.go":             {"EnforceAIChildSafetyGate", "AIChildSafetyApproved: cfg.AIChildSafetyApproved"},
+		"ringringctl":                      {"AI_CHILD_SAFETY_APPROVED=false", "AI_CHILD_SAFETY_APPROVED must be true or false", "ringring verify-openai-retention"},
+		"cmd/ringring/main.go":             {"requireOpenAIZeroDataRetention", "VerifyOrganizationZeroDataRetention", "VerifyProjectZeroDataRetention", "EnforceAIChildSafetyGate", "AIChildSafetyApproved: cfg.AIChildSafetyApproved"},
 		"internal/config/config.go":        {`envStrictBool("AI_CHILD_SAFETY_APPROVED", false)`},
+		"internal/openaiadmin/client.go":   {"/organization/data_retention", "/data_retention", "organization_default", "none", "zero_data_retention", "enhanced_zero_data_retention", "has not enabled Zero Data Retention"},
 		"internal/store/store.go":          {"ErrAIChildSafety", "input.AIEnabled && !input.AIChildSafetyApproved", "EnforceAIChildSafetyGate"},
 		"internal/telephony/reconciler.go": {"!r.AIChildSafetyApproved", "services[index].AIEnabled = false"},
 		"internal/voice/ai.go":             {"!s.AIChildSafetyApproved", "AI conversation child-safety gate is closed"},
-		"internal/webapp/app.go":           {"aiEnabled && !a.cfg.AIChildSafetyApproved", "AIChildSafetyApproved: a.cfg.AIChildSafetyApproved"},
+		"internal/webapp/app.go":           {"VerifyOrganizationZeroDataRetention", "VerifyProjectZeroDataRetention", "aiEnabled && !a.cfg.AIChildSafetyApproved", "AIChildSafetyApproved: a.cfg.AIChildSafetyApproved"},
+		"scripts/restore-drill.sh":         {"--env AI_CHILD_SAFETY_APPROVED=false"},
 		"web/templates/party.html":         {"$conversationReady", "Locked until the server operator"},
 	}
 	for filename, markers := range required {

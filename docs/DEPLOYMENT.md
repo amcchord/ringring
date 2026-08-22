@@ -120,9 +120,15 @@ Host-set spend limits add three forward-only `parties` columns for the last conf
 Do not change the gate to `true` until both conditions are independently satisfied:
 
 1. An external child-safety review has approved the intended callers, disclosures, content controls, supervision, monitoring, reporting, and escalation process under OpenAI's [Under 18 API Guidance](https://developers.openai.com/api/docs/guides/safety-checks/under-18-api-guidance).
-2. OpenAI has confirmed Zero Data Retention for the exact organization/project used by RingRing. Verify the current provider state through the official [organization data-retention endpoint](https://developers.openai.com/api/reference/python/resources/admin/subresources/organization/subresources/data_retention/methods/retrieve); a forbidden or `not_eligible` response is not confirmation.
+2. OpenAI has confirmed Zero Data Retention for the exact organization and party projects used by RingRing. Ask the installed app to make the read-only official [organization](https://developers.openai.com/api/reference/python/resources/admin/subresources/organization/subresources/data_retention/methods/retrieve) and [project](https://developers.openai.com/api/reference/python/resources/admin/subresources/organization/subresources/projects/subresources/data_retention/methods/retrieve) data-retention requests:
 
-After both checks, edit the root-only `/etc/ringring/app.env`, set exactly `AI_CHILD_SAFETY_APPROVED=true`, run `cd /opt/ringring && docker compose up -d --force-recreate app`, and then run `sudo /opt/ringring/ringringctl doctor`. To revoke approval, set the value back to `false` and recreate the app container; startup closes saved conversation preferences before telephony reconciliation. Do not put review evidence, provider responses, or administrator credentials in the repository.
+   ```sh
+   sudo /opt/ringring/ringringctl openai-retention
+   ```
+
+   Success prints only `status`, the non-secret organization ZDR type, and the number of party projects checked. A forbidden or `not_eligible` response, modified-abuse-monitoring or project `none` mode, unknown/malformed result, missing administrator key, timeout, or transport error fails the command and is not confirmation.
+
+After both checks, edit the root-only `/etc/ringring/app.env`, set exactly `AI_CHILD_SAFETY_APPROVED=true`, and run `cd /opt/ringring && docker compose up -d --force-recreate app`. Before opening any listener, startup independently repeats the bounded read-only provider checks and refuses to start unless the organization and every stored party project remain ZDR-safe. Then run `sudo /opt/ringring/ringringctl doctor`; while the gate is configured open, doctor rechecks provider retention again. To revoke approval, set the value back to `false` and recreate the app container; startup closes saved conversation preferences before telephony reconciliation. Do not put review evidence, provider responses, or administrator credentials in the repository.
 
 ## SIP authentication firewall
 
@@ -322,7 +328,7 @@ sheet and needs no data or configuration migration.
 
 The `*14` release adds `party_services.ai_enabled` with a forward-only startup migration. Take the app-state backup while the app is stopped, then restart the old version before beginning the normal update. The column defaults to disabled and older RingRing builds ignore it, so rolling the app image and checkout back leaves the migrated database usable; the four `AI_*` environment variables are also ignored by older builds. Keep the database backup until the upgraded app, private port `4574`, and generated Asterisk dialplan have all been verified. Do not publish port `4574` during either upgrade or rollback.
 
-The child-safety gate release adds no schema or provider mutation. Existing deployments omit `AI_CHILD_SAFETY_APPROVED` and therefore default closed. On first startup, the new app durably clears any older enabled `*14` preference before regenerating routes, so a rollback cannot revive the conversation line from stale state. The new variable is ignored by older builds. Leave it false unless the two documented external approvals are complete.
+The child-safety gate release adds no schema or provider mutation. Existing deployments omit `AI_CHILD_SAFETY_APPROVED` and therefore default closed. On first startup, the new app durably clears any older enabled `*14` preference before regenerating routes, so a rollback cannot revive the conversation line from stale state. A later hardening release adds only the read-only ZDR verification command and open-gate startup/doctor checks. Its isolated restore drill explicitly overrides the gate to false so a network-disabled recovery exercise neither needs the administrator key nor claims provider compliance. Older builds ignore the gate variable and do not perform the provider check; therefore do not roll back an approved deployment while `*14` is enabled. Leave the gate false unless the two documented external approvals are complete.
 
 ### `*15` upgrade and rollback
 

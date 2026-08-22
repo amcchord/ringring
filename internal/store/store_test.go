@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -635,6 +636,41 @@ func TestProvisioningTokenIsHashedOneTimeExpiringAndRevocable(t *testing.T) {
 	}
 	if _, err := s.ConsumeProvisioningToken(ctx, revocable.TokenHash, now.Add(34*time.Minute)); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("revoked provisioning error = %v", err)
+	}
+}
+
+func TestListOpenAIProjectIDsIsDistinctAndOrdered(t *testing.T) {
+	ctx := t.Context()
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
+	host, err := s.UpsertGoogleUser(ctx, GoogleProfile{Subject: "retention-host", Email: "host@example.test", Name: "Host"}, now, "usr_retention_host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	projects := []string{"proj_zulu", "proj_alpha", "proj_zulu"}
+	for index, projectID := range projects {
+		partyID := fmt.Sprintf("pty_retention_%d", index)
+		party, err := s.CreateParty(ctx, NewParty{ID: partyID, Name: "Party", Slug: fmt.Sprintf("retention-%d", index), HostUserID: host.ID, CreatedAt: now})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.UpdatePartyOpenAI(ctx, party.ID, projectID, "service-account", "key", "ciphertext", "ready", 1000); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.CreateParty(ctx, NewParty{ID: "pty_retention_empty", Name: "No project", Slug: "retention-empty", HostUserID: host.ID, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	projectIDs, err := s.ListOpenAIProjectIDs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"proj_alpha", "proj_zulu"}; !reflect.DeepEqual(projectIDs, want) {
+		t.Fatalf("project IDs = %#v, want %#v", projectIDs, want)
 	}
 }
 

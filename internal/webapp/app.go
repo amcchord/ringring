@@ -76,6 +76,8 @@ type App struct {
 
 type openAIProjectManager interface {
 	Provision(context.Context, string, string) (openaiadmin.ProvisionedProject, error)
+	VerifyOrganizationZeroDataRetention(context.Context) (openaiadmin.OrganizationDataRetention, error)
+	VerifyProjectZeroDataRetention(context.Context, string) (openaiadmin.ProjectDataRetention, error)
 	ArchiveProject(context.Context, string) error
 	CreateServiceAccountAPIKey(context.Context, string, string) (openaiadmin.ServiceAccountAPIKey, error)
 	ServiceAccountAPIKeyIDs(context.Context, string, string) ([]string, error)
@@ -892,11 +894,29 @@ func (a *App) provisionOpenAI(ctx context.Context, party model.Party) error {
 	if err != nil {
 		return err
 	}
+	if a.cfg.AIChildSafetyApproved {
+		if _, err := a.openAI.VerifyOrganizationZeroDataRetention(ctx); err != nil {
+			a.archiveUnverifiedOpenAIProject(provisioned.ProjectID)
+			return fmt.Errorf("verify OpenAI organization Zero Data Retention for provisioned project: %w", err)
+		}
+		if _, err := a.openAI.VerifyProjectZeroDataRetention(ctx, provisioned.ProjectID); err != nil {
+			a.archiveUnverifiedOpenAIProject(provisioned.ProjectID)
+			return fmt.Errorf("verify provisioned OpenAI project Zero Data Retention: %w", err)
+		}
+	}
 	ciphertext, err := a.cipher.Encrypt(provisioned.APIKey, []byte(party.ID))
 	if err != nil {
 		return err
 	}
 	return a.store.UpdatePartyOpenAI(ctx, party.ID, provisioned.ProjectID, provisioned.ServiceAccountID, provisioned.APIKeyID, ciphertext, "ready", provisioned.SpendLimitCents)
+}
+
+func (a *App) archiveUnverifiedOpenAIProject(projectID string) {
+	cleanupContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := a.openAI.ArchiveProject(cleanupContext, projectID); err != nil {
+		a.logger.Error("archive OpenAI project after retention verification failed", "error_class", observability.ErrorClass(err))
+	}
 }
 
 func (a *App) party(w http.ResponseWriter, r *http.Request, session authSession) {

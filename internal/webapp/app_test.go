@@ -30,21 +30,29 @@ type fakeWeatherGeocoder struct {
 }
 
 type fakeOpenAIProjects struct {
-	archiveAttempts int
-	archived        []string
-	archiveErr      error
-	createAttempts  int
-	createdKey      openaiadmin.ServiceAccountAPIKey
-	createErr       error
-	listAttempts    int
-	keyIDs          []string
-	listErr         error
-	deleteAttempts  int
-	deletedKeys     []string
-	deleteFailures  int
-	spendAttempts   int
-	spendAmounts    []int
-	spendFailures   int
+	provisionAttempts          int
+	provisioned                openaiadmin.ProvisionedProject
+	provisionErr               error
+	organizationRetentionCalls int
+	organizationRetentionErr   error
+	retentionAttempts          int
+	retentionProject           string
+	retentionErr               error
+	archiveAttempts            int
+	archived                   []string
+	archiveErr                 error
+	createAttempts             int
+	createdKey                 openaiadmin.ServiceAccountAPIKey
+	createErr                  error
+	listAttempts               int
+	keyIDs                     []string
+	listErr                    error
+	deleteAttempts             int
+	deletedKeys                []string
+	deleteFailures             int
+	spendAttempts              int
+	spendAmounts               []int
+	spendFailures              int
 }
 
 type fakeContactPresence struct {
@@ -86,8 +94,26 @@ func (f *countingContactPresence) ContactStatuses(context.Context) (map[string]t
 	return f.statuses, nil
 }
 
-func (*fakeOpenAIProjects) Provision(context.Context, string, string) (openaiadmin.ProvisionedProject, error) {
-	return openaiadmin.ProvisionedProject{}, errors.New("not used")
+func (f *fakeOpenAIProjects) Provision(context.Context, string, string) (openaiadmin.ProvisionedProject, error) {
+	f.provisionAttempts++
+	return f.provisioned, f.provisionErr
+}
+
+func (f *fakeOpenAIProjects) VerifyOrganizationZeroDataRetention(context.Context) (openaiadmin.OrganizationDataRetention, error) {
+	f.organizationRetentionCalls++
+	if f.organizationRetentionErr != nil {
+		return openaiadmin.OrganizationDataRetention{}, f.organizationRetentionErr
+	}
+	return openaiadmin.OrganizationDataRetention{Type: "zero_data_retention"}, nil
+}
+
+func (f *fakeOpenAIProjects) VerifyProjectZeroDataRetention(_ context.Context, projectID string) (openaiadmin.ProjectDataRetention, error) {
+	f.retentionAttempts++
+	f.retentionProject = projectID
+	if f.retentionErr != nil {
+		return openaiadmin.ProjectDataRetention{}, f.retentionErr
+	}
+	return openaiadmin.ProjectDataRetention{Type: "organization_default"}, nil
 }
 
 func (f *fakeOpenAIProjects) ArchiveProject(_ context.Context, projectID string) error {
@@ -188,6 +214,88 @@ func TestNewSIPCredentialsAreNumericGroupedAndEncrypted(t *testing.T) {
 	}
 	if grouped := groupSetupDigits(password, 4); len(strings.Fields(grouped)) != 6 || strings.ReplaceAll(grouped, " ", "") != password {
 		t.Fatalf("password grouping changed the credential: %q", grouped)
+	}
+}
+
+func TestProvisionOpenAIRechecksRetentionWhenGateOpen(t *testing.T) {
+	database, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	cipher, err := secure.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	now := time.Date(2026, 8, 22, 14, 0, 0, 0, time.UTC)
+	host, err := database.UpsertGoogleUser(ctx, store.GoogleProfile{Subject: "retention-provision-host", Email: "host@example.test", Name: "Host"}, now, "usr_retention_provision")
+	if err != nil {
+		t.Fatal(err)
+	}
+	newParty := func(id string) model.Party {
+		t.Helper()
+		party, err := database.CreateParty(ctx, store.NewParty{ID: id, Name: "Retention test", Slug: id, HostUserID: host.ID, CreatedAt: now})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return party
+	}
+	newManager := func(projectID string) *fakeOpenAIProjects {
+		return &fakeOpenAIProjects{provisioned: openaiadmin.ProvisionedProject{
+			ProjectID: projectID, ServiceAccountID: "svc_test", APIKeyID: "key_test",
+			APIKey: "private-runtime-key", SpendLimitCents: 1000,
+		}}
+	}
+	newApp := func(manager *fakeOpenAIProjects, approved bool) *App {
+		return &App{
+			cfg: config.Config{AIChildSafetyApproved: approved}, store: database, cipher: cipher, openAI: manager,
+			logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		}
+	}
+
+	closedParty := newParty("pty_retention_closed")
+	closedManager := newManager("proj_retention_closed")
+	if err := newApp(closedManager, false).provisionOpenAI(ctx, closedParty); err != nil {
+		t.Fatal(err)
+	}
+	if closedManager.organizationRetentionCalls != 0 || closedManager.retentionAttempts != 0 || closedManager.archiveAttempts != 0 {
+		t.Fatalf("closed gate made a retention request or archived a project: %#v", closedManager)
+	}
+	closedStored, err := database.PartyForHost(ctx, closedParty.ID, host.ID)
+	if err != nil || closedStored.OpenAIProjectID != "proj_retention_closed" || closedStored.OpenAIStatus != "ready" {
+		t.Fatalf("closed-gate project was not stored normally: party=%#v error=%v", closedStored, err)
+	}
+
+	approvedParty := newParty("pty_retention_approved")
+	approvedManager := newManager("proj_retention_approved")
+	if err := newApp(approvedManager, true).provisionOpenAI(ctx, approvedParty); err != nil {
+		t.Fatal(err)
+	}
+	if approvedManager.organizationRetentionCalls != 1 || approvedManager.retentionAttempts != 1 || approvedManager.retentionProject != "proj_retention_approved" || approvedManager.archiveAttempts != 0 {
+		t.Fatalf("approved project was not checked at both retention boundaries: %#v", approvedManager)
+	}
+
+	organizationDeniedParty := newParty("pty_retention_org_denied")
+	organizationDenied := newManager("proj_retention_org_denied")
+	organizationDenied.organizationRetentionErr = errors.New("organization is not eligible")
+	err = newApp(organizationDenied, true).provisionOpenAI(ctx, organizationDeniedParty)
+	if err == nil || organizationDenied.organizationRetentionCalls != 1 || organizationDenied.retentionAttempts != 0 || organizationDenied.archiveAttempts != 1 || len(organizationDenied.archived) != 1 || organizationDenied.archived[0] != "proj_retention_org_denied" {
+		t.Fatalf("organization retention failure did not fail closed and archive: manager=%#v error=%v", organizationDenied, err)
+	}
+
+	projectDeniedParty := newParty("pty_retention_project_denied")
+	projectDenied := newManager("proj_retention_project_denied")
+	projectDenied.retentionErr = errors.New("project override disabled retention")
+	err = newApp(projectDenied, true).provisionOpenAI(ctx, projectDeniedParty)
+	if err == nil || projectDenied.organizationRetentionCalls != 1 || projectDenied.retentionAttempts != 1 || projectDenied.archiveAttempts != 1 || len(projectDenied.archived) != 1 || projectDenied.archived[0] != "proj_retention_project_denied" {
+		t.Fatalf("project retention failure did not fail closed and archive: manager=%#v error=%v", projectDenied, err)
+	}
+	for _, party := range []model.Party{organizationDeniedParty, projectDeniedParty} {
+		stored, err := database.PartyForHost(ctx, party.ID, host.ID)
+		if err != nil || stored.OpenAIProjectID != "" || stored.OpenAIKeyCiphertext != "" {
+			t.Fatalf("unverified provider state reached local party storage: party=%#v error=%v", stored, err)
+		}
 	}
 }
 

@@ -88,6 +88,7 @@ Usage:
   $program install [--answers FILE] [--yes] [--skip-public-check] [--dry-run]
   $program upgrade [--target GIT_REF] [--yes] [--skip-public-check] [--dry-run]
   $program doctor [--skip-public-check]
+  $program openai-retention
 
 Secrets are read from a root-only answers file or hidden interactive prompts.
 They are never accepted as command-line arguments.
@@ -506,6 +507,9 @@ verify_deployment() {
   wait_for_health asterisk
   docker compose exec -T app ringring verify-state </dev/null
   docker compose exec -T app ringring verify-ami </dev/null
+  if test "$(optional_env_value "$config_dir/app.env" AI_CHILD_SAFETY_APPROVED)" = true; then
+    docker compose exec -T app ringring verify-openai-retention </dev/null
+  fi
   phone_check=$(docker compose exec -T asterisk asterisk -rx 'dialplan show s@rr-phone-check' </dev/null 2>/dev/null)
   printf '%s\n' "$phone_check" | grep -q 'auth-thankyou' || die "Asterisk's fixed incoming phone-check context is unavailable."
   if printf '%s\n' "$phone_check" | grep -q 'Dial('; then
@@ -851,6 +855,18 @@ doctor_command() {
   echo "RingRing doctor passed at $(git -C "$checkout" rev-parse HEAD)."
 }
 
+openai_retention_command() {
+  require_root
+  validate_managed_paths
+  test "$#" -eq 0 || die "The openai-retention command accepts no options."
+  paths_match "$source_checkout" "$checkout" || die "Run openai-retention with $checkout/ringringctl."
+  require_git_checkout "$checkout"
+  validate_installed_configuration
+  require_command docker
+  cd "$checkout"
+  docker compose exec -T app ringring verify-openai-retention </dev/null
+}
+
 test "$#" -ge 1 || {
   usage
   exit 2
@@ -861,6 +877,7 @@ case "$command_name" in
   install) install_command "$@" ;;
   upgrade) upgrade_command "$@" ;;
   doctor) doctor_command "$@" ;;
+  openai-retention) openai_retention_command "$@" ;;
   -h|--help|help) usage ;;
   *) usage >&2; die "Unknown command: $command_name" ;;
 esac

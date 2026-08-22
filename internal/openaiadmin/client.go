@@ -41,6 +41,17 @@ type ServiceAccountAPIKey struct {
 	Value string
 }
 
+// OrganizationDataRetention is the narrow, non-secret provider evidence used
+// by the operator safety gate. RingRing accepts only the two current API values
+// that explicitly identify Zero Data Retention.
+type OrganizationDataRetention struct {
+	Type string `json:"type"`
+}
+
+type ProjectDataRetention struct {
+	Type string `json:"type"`
+}
+
 type projectResponse struct {
 	ID     string `json:"id"`
 	Status string `json:"status"`
@@ -55,6 +66,64 @@ func New(adminKey string, spendLimitCents int, httpClient *http.Client) *Client 
 		baseURL:    defaultBaseURL,
 		spendLimit: spendLimitCents,
 		httpClient: httpClient,
+	}
+}
+
+// VerifyOrganizationZeroDataRetention reads the organization control without
+// changing it. A missing key, provider denial, malformed response, unknown
+// value, or any non-ZDR retention mode fails closed.
+func (c *Client) VerifyOrganizationZeroDataRetention(ctx context.Context) (OrganizationDataRetention, error) {
+	if c.adminKey == "" {
+		return OrganizationDataRetention{}, errors.New("OpenAI admin key is not configured")
+	}
+	var response struct {
+		Object string `json:"object"`
+		Type   string `json:"type"`
+	}
+	if err := c.get(ctx, "/organization/data_retention", &response); err != nil {
+		return OrganizationDataRetention{}, fmt.Errorf("retrieve OpenAI organization data retention: %w", err)
+	}
+	if response.Object != "organization.data_retention" {
+		return OrganizationDataRetention{}, errors.New("retrieve OpenAI organization data retention: response had an unexpected object")
+	}
+	switch response.Type {
+	case "zero_data_retention", "enhanced_zero_data_retention":
+		return OrganizationDataRetention{Type: response.Type}, nil
+	case "modified_abuse_monitoring", "enhanced_modified_abuse_monitoring":
+		return OrganizationDataRetention{}, errors.New("OpenAI organization has not enabled Zero Data Retention")
+	default:
+		return OrganizationDataRetention{}, errors.New("OpenAI organization returned an unknown data retention control")
+	}
+}
+
+// VerifyProjectZeroDataRetention checks a single party-owned project after the
+// organization itself has already passed the ZDR check. Organization-default
+// is therefore safe; explicit non-ZDR overrides are not.
+func (c *Client) VerifyProjectZeroDataRetention(ctx context.Context, projectID string) (ProjectDataRetention, error) {
+	if c.adminKey == "" {
+		return ProjectDataRetention{}, errors.New("OpenAI admin key is not configured")
+	}
+	if projectID == "" {
+		return ProjectDataRetention{}, errors.New("OpenAI project ID is required")
+	}
+	var response struct {
+		Object string `json:"object"`
+		Type   string `json:"type"`
+	}
+	path := "/organization/projects/" + url.PathEscape(projectID) + "/data_retention"
+	if err := c.get(ctx, path, &response); err != nil {
+		return ProjectDataRetention{}, fmt.Errorf("retrieve OpenAI project data retention: %w", err)
+	}
+	if response.Object != "project.data_retention" {
+		return ProjectDataRetention{}, errors.New("retrieve OpenAI project data retention: response had an unexpected object")
+	}
+	switch response.Type {
+	case "organization_default", "zero_data_retention", "enhanced_zero_data_retention":
+		return ProjectDataRetention{Type: response.Type}, nil
+	case "none", "modified_abuse_monitoring", "enhanced_modified_abuse_monitoring":
+		return ProjectDataRetention{}, errors.New("OpenAI project has not enabled Zero Data Retention")
+	default:
+		return ProjectDataRetention{}, errors.New("OpenAI project returned an unknown data retention control")
 	}
 }
 

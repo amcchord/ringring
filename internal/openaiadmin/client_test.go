@@ -6,8 +6,112 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 )
+
+func TestVerifyOrganizationZeroDataRetention(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+		wantType string
+	}{
+		{"zero data retention", `{"object":"organization.data_retention","type":"zero_data_retention"}`, "zero_data_retention"},
+		{"enhanced zero data retention", `{"object":"organization.data_retention","type":"enhanced_zero_data_retention"}`, "enhanced_zero_data_retention"},
+		{"modified abuse monitoring", `{"object":"organization.data_retention","type":"modified_abuse_monitoring"}`, ""},
+		{"enhanced modified abuse monitoring", `{"object":"organization.data_retention","type":"enhanced_modified_abuse_monitoring"}`, ""},
+		{"unknown value", `{"object":"organization.data_retention","type":"future_mode"}`, ""},
+		{"wrong object", `{"object":"project.data_retention","type":"zero_data_retention"}`, ""},
+		{"missing type", `{"object":"organization.data_retention"}`, ""},
+		{"malformed response", `{"object":`, ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/organization/data_retention" {
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				}
+				if r.Header.Get("Authorization") != "Bearer sk-admin-test" {
+					t.Error("missing authorization header")
+				}
+				_, _ = w.Write([]byte(test.response))
+			}))
+			defer server.Close()
+			client := New("sk-admin-test", 1000, server.Client())
+			client.baseURL = server.URL
+			retention, err := client.VerifyOrganizationZeroDataRetention(t.Context())
+			if test.wantType != "" {
+				if err != nil || retention.Type != test.wantType {
+					t.Fatalf("valid ZDR response rejected: retention=%#v error=%v", retention, err)
+				}
+			} else if err == nil {
+				t.Fatalf("unsafe retention response accepted: %#v", retention)
+			}
+		})
+	}
+}
+
+func TestVerifyOrganizationZeroDataRetentionFailsClosed(t *testing.T) {
+	if _, err := New("", 1000, http.DefaultClient).VerifyOrganizationZeroDataRetention(t.Context()); err == nil {
+		t.Fatal("missing admin key was accepted")
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":{"type":"invalid_request_error","message":"organization is not eligible"}}`))
+	}))
+	defer server.Close()
+	client := New("sk-admin-private-value", 1000, server.Client())
+	client.baseURL = server.URL
+	_, err := client.VerifyOrganizationZeroDataRetention(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "not eligible") || strings.Contains(err.Error(), "sk-admin-private-value") {
+		t.Fatalf("provider denial was not safely rejected: %v", err)
+	}
+}
+
+func TestVerifyProjectZeroDataRetention(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+		wantType string
+	}{
+		{"organization default", `{"object":"project.data_retention","type":"organization_default"}`, "organization_default"},
+		{"zero data retention", `{"object":"project.data_retention","type":"zero_data_retention"}`, "zero_data_retention"},
+		{"enhanced zero data retention", `{"object":"project.data_retention","type":"enhanced_zero_data_retention"}`, "enhanced_zero_data_retention"},
+		{"none", `{"object":"project.data_retention","type":"none"}`, ""},
+		{"modified abuse monitoring", `{"object":"project.data_retention","type":"modified_abuse_monitoring"}`, ""},
+		{"enhanced modified abuse monitoring", `{"object":"project.data_retention","type":"enhanced_modified_abuse_monitoring"}`, ""},
+		{"unknown value", `{"object":"project.data_retention","type":"future_mode"}`, ""},
+		{"wrong object", `{"object":"organization.data_retention","type":"zero_data_retention"}`, ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.EscapedPath() != "/organization/projects/proj%2Fsafe/data_retention" {
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.EscapedPath())
+				}
+				if r.Header.Get("Authorization") != "Bearer sk-admin-test" {
+					t.Error("missing authorization header")
+				}
+				_, _ = w.Write([]byte(test.response))
+			}))
+			defer server.Close()
+			client := New("sk-admin-test", 1000, server.Client())
+			client.baseURL = server.URL
+			retention, err := client.VerifyProjectZeroDataRetention(t.Context(), "proj/safe")
+			if test.wantType != "" {
+				if err != nil || retention.Type != test.wantType {
+					t.Fatalf("valid project ZDR response rejected: retention=%#v error=%v", retention, err)
+				}
+			} else if err == nil {
+				t.Fatalf("unsafe project retention response accepted: %#v", retention)
+			}
+		})
+	}
+	client := New("sk-admin-test", 1000, http.DefaultClient)
+	if _, err := client.VerifyProjectZeroDataRetention(t.Context(), ""); err == nil {
+		t.Fatal("missing project ID was accepted")
+	}
+}
 
 func TestProvision(t *testing.T) {
 	var paths []string

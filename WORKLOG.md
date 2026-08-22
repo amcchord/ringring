@@ -2,6 +2,35 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Machine-checked Zero Data Retention gate
+
+### Shipped
+
+- Added bounded, read-only OpenAI organization- and project-retention verifiers to the existing administrator client. They accept only an explicitly safe ZDR mode—or a project inheriting the already-verified organization—and reject a missing key, provider denial, modified monitoring, a project `none` override, an unknown object/value, malformed JSON, timeout, or transport error.
+- Made an explicitly open `AI_CHILD_SAFETY_APPROVED` startup depend on current organization evidence plus every stored party project before RingRing opens any listener. The default/explicitly closed path makes no provider request and continues to clear stale conversation settings and routes as before.
+- Rechecked both organization and new-project retention before saving a newly provisioned party key while the gate is open. Either failure archives the unverified project and keeps its identifiers and credential out of local party state.
+- Added `ringringctl openai-retention` for a secret-safe preflight and made `ringringctl doctor` recheck retention whenever the configured gate is open. The successful report contains only `status`, the non-secret organization retention type, and a project count; neither command mutates provider state.
+- Kept restore verification honest and isolated by explicitly forcing the child-safety gate closed in the network-disabled restored app. State and credential verification still use the saved root-only environment, while no recovery drill can claim or require live ZDR.
+
+### Decisions
+
+- Treat the operator's external child-safety approval and current provider ZDR as two independent prerequisites. A manually edited Boolean is not sufficient evidence for the provider-controlled condition.
+- Verify before opening listeners. A requested-open deployment with stale, ambiguous, or unavailable provider evidence remains unhealthy instead of serving the host UI with a misleadingly open conversation gate.
+- Keep the organization administrator key out of model requests. Its new use is one administrative compliance read at startup or explicit operator verification; Realtime calls still receive only the encrypted party-scoped runtime key.
+- Do not update provider retention automatically. Eligibility and legal/safety approval are external operator decisions, and a read-only failure must not turn into an attempted policy mutation.
+
+### Verification
+
+- Focused admin-client tests cover accepted organization/project ZDR types, inherited project state, rejected modified-monitoring and `none` modes, missing/unknown/wrong-object/malformed responses, safe provider denial, exact method/path/authentication, and absence of the administrator key from errors. Main-package tests prove the closed gate never calls either verifier, every stored project is checked, and provider or database denial propagates without leaking a project identifier. Web tests prove open-gate provisioning rechecks both levels, archives either failed project, and stores no unverified key, while the closed gate preserves current provisioning without provider retention calls.
+- Operator fixtures cover the standalone retention report and conditional doctor recheck. Executable security contracts pin the provider path/types, startup ordering hook, deployment check, and offline restore override.
+- `make check` and `make security` pass, including formatting, shell/operator fixtures, vet, the complete race-enabled suite, and the reachable-vulnerability scan.
+- A direct read-only call from the reference host to the documented organization endpoint returned `403 not_eligible`. No provider or family resource was changed; this is positive evidence that `*14` must remain closed, not approval.
+
+### Remaining
+
+- Obtain OpenAI ZDR eligibility and an external child-safety review before setting the operator gate to true.
+- Complete the physical ATA, desk-phone, and mobile softphone matrix across two real networks.
+
 ## 2026-08-22 — Keypad-friendly phone credentials
 
 ### Shipped
@@ -64,7 +93,6 @@ This is the durable, chronological project record. Add new entries at the top. C
 
 - Complete the physical ATA, desk-phone, and mobile softphone matrix across two real networks.
 - Obtain the external child-safety review and OpenAI Zero Data Retention eligibility before opening the AI conversation gate.
-
 ## 2026-08-22 — A private first-call card for new members
 
 ### Shipped

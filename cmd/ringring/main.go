@@ -15,6 +15,7 @@ import (
 
 	"github.com/amcchord/ringring/internal/config"
 	"github.com/amcchord/ringring/internal/maintenance"
+	"github.com/amcchord/ringring/internal/openaiadmin"
 	"github.com/amcchord/ringring/internal/openairuntime"
 	"github.com/amcchord/ringring/internal/radio"
 	"github.com/amcchord/ringring/internal/secure"
@@ -24,6 +25,49 @@ import (
 	"github.com/amcchord/ringring/internal/weather"
 	"github.com/amcchord/ringring/internal/webapp"
 )
+
+const (
+	openAIRetentionRequestTimeout = 10 * time.Second
+	openAIRetentionAuditTimeout   = 30 * time.Second
+)
+
+type openAIRetentionVerifier interface {
+	VerifyOrganizationZeroDataRetention(context.Context) (openaiadmin.OrganizationDataRetention, error)
+	VerifyProjectZeroDataRetention(context.Context, string) (openaiadmin.ProjectDataRetention, error)
+}
+
+type openAIProjectSource interface {
+	ListOpenAIProjectIDs(context.Context) ([]string, error)
+}
+
+type openAIRetentionReport struct {
+	OrganizationType string `json:"organization_type"`
+	ProjectsVerified int    `json:"projects_verified"`
+}
+
+func requireOpenAIZeroDataRetention(ctx context.Context, childSafetyApproved bool, verifier openAIRetentionVerifier, projects openAIProjectSource) (openAIRetentionReport, error) {
+	if !childSafetyApproved {
+		return openAIRetentionReport{}, nil
+	}
+	organization, err := verifier.VerifyOrganizationZeroDataRetention(ctx)
+	if err != nil {
+		return openAIRetentionReport{}, err
+	}
+	projectIDs, err := projects.ListOpenAIProjectIDs(ctx)
+	if err != nil {
+		return openAIRetentionReport{}, err
+	}
+	for index, projectID := range projectIDs {
+		if _, err := verifier.VerifyProjectZeroDataRetention(ctx, projectID); err != nil {
+			return openAIRetentionReport{}, fmt.Errorf("verify OpenAI project Zero Data Retention (%d of %d): %w", index+1, len(projectIDs), err)
+		}
+	}
+	return openAIRetentionReport{OrganizationType: organization.Type, ProjectsVerified: len(projectIDs)}, nil
+}
+
+func openAIAdminClient(cfg config.Config) *openaiadmin.Client {
+	return openaiadmin.New(cfg.OpenAIAdminKey, cfg.OpenAIPartySpendLimitCents, &http.Client{Timeout: openAIRetentionRequestTimeout})
+}
 
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "radio-catalog" {
@@ -73,6 +117,27 @@ func main() {
 				logger.Error("write AMI verification report", "error", err)
 				os.Exit(1)
 			}
+		case "verify-openai-retention":
+			database, err := store.Open(cfg.DatabasePath)
+			if err != nil {
+				logger.Error("open database for OpenAI retention verification", "error", err)
+				os.Exit(1)
+			}
+			defer database.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), openAIRetentionAuditTimeout)
+			defer cancel()
+			retention, err := requireOpenAIZeroDataRetention(ctx, true, openAIAdminClient(cfg), database)
+			if err != nil {
+				logger.Error("verify OpenAI Zero Data Retention", "error", err)
+				os.Exit(1)
+			}
+			if err := json.NewEncoder(os.Stdout).Encode(struct {
+				Status string `json:"status"`
+				openAIRetentionReport
+			}{Status: "ok", openAIRetentionReport: retention}); err != nil {
+				logger.Error("write OpenAI retention verification report", "error", err)
+				os.Exit(1)
+			}
 		default:
 			logger.Error("unknown command")
 			os.Exit(2)
@@ -85,6 +150,16 @@ func main() {
 		os.Exit(1)
 	}
 	defer database.Close()
+	retentionContext, cancelRetention := context.WithTimeout(context.Background(), openAIRetentionAuditTimeout)
+	retention, err := requireOpenAIZeroDataRetention(retentionContext, cfg.AIChildSafetyApproved, openAIAdminClient(cfg), database)
+	cancelRetention()
+	if err != nil {
+		logger.Error("AI conversation gate requires current OpenAI Zero Data Retention", "error", err)
+		os.Exit(1)
+	}
+	if cfg.AIChildSafetyApproved {
+		logger.Info("OpenAI Zero Data Retention verified for AI conversation gate", "organization_type", retention.OrganizationType, "projects_verified", retention.ProjectsVerified)
+	}
 	if err := database.EnforceAIChildSafetyGate(context.Background(), cfg.AIChildSafetyApproved, time.Now()); err != nil {
 		logger.Error("enforce AI conversation child-safety gate", "error", err)
 		os.Exit(1)
