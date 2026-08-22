@@ -39,7 +39,9 @@ COPY --from=build /stage/var/lib/asterisk/ /var/lib/asterisk/
 COPY config/ /etc/asterisk/
 COPY entrypoint.sh /usr/local/bin/ringring-asterisk-entrypoint
 COPY refresh-tls.sh /usr/local/bin/ringring-asterisk-refresh-tls
-RUN chmod 0755 /usr/local/bin/ringring-asterisk-entrypoint /usr/local/bin/ringring-asterisk-refresh-tls
+RUN find /etc/asterisk -maxdepth 1 -type f -exec chown asterisk:ringring {} + \
+    && find /etc/asterisk -maxdepth 1 -type f -exec chmod 0640 {} + \
+    && chmod 0755 /usr/local/bin/ringring-asterisk-entrypoint /usr/local/bin/ringring-asterisk-refresh-tls
 
 EXPOSE 5060/udp 5061/tcp 5038/tcp 10000-10199/udp
 ENTRYPOINT ["/usr/local/bin/ringring-asterisk-entrypoint"]

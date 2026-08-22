@@ -230,6 +230,14 @@ func TestHostPhoneRingHasFixedScopedBoundaries(t *testing.T) {
 		}
 	}
 	required := map[string][]string{
+		"deploy/asterisk/Dockerfile": {
+			"find /etc/asterisk -maxdepth 1 -type f -exec chown asterisk:ringring",
+			"find /etc/asterisk -maxdepth 1 -type f -exec chmod 0640",
+		},
+		"deploy/asterisk/entrypoint.sh": {
+			"chmod 0640 /etc/asterisk/manager.conf /etc/asterisk/pjsip.conf /etc/asterisk/extensions.conf",
+			"chown asterisk:ringring /etc/asterisk/manager.conf /etc/asterisk/pjsip.conf /etc/asterisk/extensions.conf",
+		},
 		"internal/telephony/ami.go": {
 			`amiObjectPattern.MatchString(sipUsername)`, `extensionrules.Valid(extension)`,
 			`"Channel", "PJSIP/"+sipUsername`, `"Context", "rr-phone-check"`, `"Async", "true"`,
@@ -242,6 +250,7 @@ func TestHostPhoneRingHasFixedScopedBoundaries(t *testing.T) {
 			"state != telephony.ContactReachable", "a.ringer.RingDevice",
 		},
 		"web/templates/party.html": {"📳 Ring this phone", "/ring-test"},
+		"ringringctl":              {"dialplan show s@rr-phone-check", "fixed incoming phone-check context is unavailable"},
 	}
 	for filename, markers := range required {
 		contents := readRepositoryFile(t, filename)

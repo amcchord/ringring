@@ -41,6 +41,7 @@ if test "$1" = compose; then
       case "$*" in
         *verify-state*) printf '{"status":"ok","users":0}\n' ;;
         *verify-ami*) printf '{"status":"ok","contact_count":0}\n' ;;
+        *"dialplan show s@rr-phone-check"*) printf 'same => n,Playback(auth-thankyou)\n' ;;
         *127.0.0.1:9090/metrics*) printf 'ringring_database_up 1\nringring_asterisk_ami_up 1\n' ;;
         *"pjsip show transport transport-tls"*) printf 'Transport: transport-tls TLS 0.0.0.0:5061\n' ;;
       esac

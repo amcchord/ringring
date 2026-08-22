@@ -506,6 +506,11 @@ verify_deployment() {
   wait_for_health asterisk
   docker compose exec -T app ringring verify-state </dev/null
   docker compose exec -T app ringring verify-ami </dev/null
+  phone_check=$(docker compose exec -T asterisk asterisk -rx 'dialplan show s@rr-phone-check' </dev/null 2>/dev/null)
+  printf '%s\n' "$phone_check" | grep -q 'auth-thankyou' || die "Asterisk's fixed incoming phone-check context is unavailable."
+  if printf '%s\n' "$phone_check" | grep -q 'Dial('; then
+    die "Asterisk's fixed incoming phone-check context unexpectedly contains a dialing primitive."
+  fi
   if ! internal_metrics=$(docker compose exec -T app curl --fail --silent --show-error --max-time 6 http://127.0.0.1:9090/metrics </dev/null); then
     die "The internal metrics endpoint is unavailable."
   fi

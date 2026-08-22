@@ -189,6 +189,10 @@ if test "$ready" -ne 1; then
   docker logs ringring-sip-smoke-asterisk >&2 || true
   exit 1
 fi
+docker exec ringring-sip-smoke-asterisk sh -eu -c '
+  test "$(stat -c %a /etc/asterisk/extensions.conf)" = 640
+  test "$(stat -c %U:%G /etc/asterisk/extensions.conf)" = asterisk:ringring
+'
 docker exec ringring-sip-smoke-asterisk \
   asterisk -rx 'pjsip show transport transport-tls' | grep -q 'transport-tls'
 tls_report=$(docker exec ringring-sip-smoke-asterisk sh -c \

@@ -10,6 +10,7 @@ This is the durable, chronological project record. Add new entries at the top. C
 - Scoped every request through the authenticated host, party, active device, generated SIP username, and current private AMI contact state. Cross-party, revoked, missing, offline, and unknown devices cannot be rung; per-host and per-device limits constrain repeated calls.
 - Added a fixed Asterisk prompt context with bundled sounds, a 20-second absolute limit, and CDR disabled. The application validates the generated endpoint and ordinary extension, then supplies only fixed AMI Originate fields; the context has no trunk, `Dial`, transfer, URL, AGI, AudioSocket, or shell path.
 - Updated the real-phone checklist and setup handoff so hosts can use the incoming ring alongside `*10`, while still requiring a real cross-network two-way call for the physical-hardware milestone.
+- Hardened the Asterisk image and entrypoint against restrictive checkout umasks by normalizing static configuration ownership and mode. The guarded verifier now requires the fixed phone-check context to be loaded, rather than accepting container health and AMI reachability alone.
 
 ### Decisions
 
@@ -21,6 +22,7 @@ This is the durable, chronological project record. Add new entries at the top. C
 
 - Tests cover the host/party/device query, absence of decrypted credentials, revoked and cross-party rejection, contact-state enforcement, exact fixed AMI frame, input validation before connection, two-rings-per-minute limiting, accessible disabled controls, and executable dialplan/permission boundaries.
 - The disposable SIP smoke now signs in as its isolated host, sends the web request to a registered endpoint, answers the resulting SIP call, verifies the caller label and spoken prompt, checks the loaded context has no `Dial`, confirms no CDR file was created, and waits for a clean zero-channel hangup.
+- The first production audit exposed a mode-`0600` `extensions.conf` created when Git updated the root checkout under `ringringctl`'s intentional `umask 077`. The running file was restored to the Asterisk account before any device existed, then build-time, entrypoint, smoke, security-contract, and deployment-verifier regressions were added so the failure cannot hide behind a healthy process again.
 - `make check`, `make security`, and `make admin-test` pass locally, including formatting, shell validation, vet, the complete race-enabled suite, control-plane fixtures, and the reachable-vulnerability scan.
 
 ### Remaining

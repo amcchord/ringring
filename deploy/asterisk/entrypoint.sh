@@ -17,8 +17,8 @@ esac
 
 sed "s|__ASTERISK_AMI_SECRET__|${ASTERISK_AMI_SECRET}|g" /etc/asterisk/manager.conf.in > /etc/asterisk/manager.conf
 sed "s|__SIP_PUBLIC_HOST__|${SIP_PUBLIC_HOST}|g" /etc/asterisk/pjsip.conf.in > /etc/asterisk/pjsip.conf
-chmod 0640 /etc/asterisk/manager.conf /etc/asterisk/pjsip.conf
-chown asterisk:ringring /etc/asterisk/manager.conf /etc/asterisk/pjsip.conf
+chmod 0640 /etc/asterisk/manager.conf /etc/asterisk/pjsip.conf /etc/asterisk/extensions.conf
+chown asterisk:ringring /etc/asterisk/manager.conf /etc/asterisk/pjsip.conf /etc/asterisk/extensions.conf
 install -d -o asterisk -g ringring /var/run/asterisk /var/log/asterisk /var/spool/asterisk
 /usr/local/bin/ringring-asterisk-refresh-tls --prepare
 

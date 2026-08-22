@@ -178,6 +178,8 @@ openssl s_client -connect ringring.live:5061 -servername ringring.live -verify_h
 
 The host-triggered incoming ring uses the same private AMI listener. Its source-controlled account has Asterisk's narrow `originate` write privilege in addition to the existing reload permissions, but not `all` or configuration access; the ACL still permits only the fixed app-container address. The application exposes no arbitrary Originate fields and the internal prompt context has no public-network route. After an upgrade, use the disposable `make sip-smoke` gate—not a real family device—to verify the complete host request, contact recheck, AMI Originate, answered SIP call, bundled prompt, clean hangup, and absent CDR.
 
+The Asterisk image and entrypoint normalize every static config—and especially `extensions.conf`—to a group-readable mode owned by the runtime account. This is required because `ringringctl` intentionally uses a restrictive root umask, and a Git-updated config may otherwise enter the Docker build context as mode `0600`. Install and upgrade verification fail unless the fixed phone-check context is actually loaded, so container health and AMI reachability alone cannot mask a declined dialplan module.
+
 To verify the Linphone path without touching a family phone, use a disposable party/invitation in an isolated development database. Confirm that the QR decodes to the setup page's provisioning URL, the first `GET` returns `application/xml` with `Cache-Control: no-store`, and the second returns `410`. Never print the URL, XML, or setup-screen credentials into deployment logs.
 
 ## Backup and recovery
