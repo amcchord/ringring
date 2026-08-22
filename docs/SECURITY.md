@@ -30,8 +30,9 @@ Expected public ports are:
 - `80/tcp`: ACME and redirect to HTTPS.
 - `443/tcp`: web application.
 - `5060/udp`: compatibility SIP registration; rate limited.
-- `5061/tcp`: SIP over TLS.
-- `10000-20000/udp`: negotiated RTP media.
+- `10000-10199/udp`: negotiated RTP media.
+
+SIP over TLS on `5061/tcp` is planned but is not part of the first deployment.
 
 The database, AMI, metrics, debug endpoints, and container APIs are never public.
 
@@ -49,4 +50,4 @@ Do not open a public issue for a vulnerability that could expose credentials or 
 
 ## Known pre-production gaps
 
-This repository is not production-ready until the worklog records verification of TLS, firewall policy, SIP rate limiting, backup/restore, credential rotation, cross-party authorization tests, and deletion flows.
+The first deployment has verified HTTPS/TLS, narrow published ports, and cross-party configuration isolation. It is not production-ready until the worklog also records SIP authentication failure blocking/rate limiting, backup/restore, SIP credential rotation and revocation, real-device two-way audio, and deletion flows.

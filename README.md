@@ -4,7 +4,7 @@
 
 RingRing turns SIP phones, softphones, and ordinary telephones connected through SIP-to-FXS adapters into a tiny private phone network. Create a party, invite the people you trust, choose short extensions, and call one another—without connecting to the public telephone network.
 
-The hosted reference instance will live at [ringring.live](https://ringring.live).
+The hosted reference instance is live at [ringring.live](https://ringring.live).
 
 > [!IMPORTANT]
 > RingRing cannot place emergency calls or reach regular phone numbers. Keep another way to contact emergency services available.
@@ -22,7 +22,9 @@ See [the architecture](docs/ARCHITECTURE.md), [the security model](docs/SECURITY
 
 ## Status
 
-RingRing is at the beginning of active development. Do not use it as a production phone service yet. The public repository intentionally contains no deployment credentials or family data.
+The first vertical slice is deployed: the public splash page, host dashboard, party creation, one-time member enrollment, SIP credential issuance, party-scoped Asterisk configuration, and the `*11` time line are implemented. The reference instance is still a preview rather than a dependable phone service; host sign-up will open after Google OAuth is connected, and real-device calling, credential rotation, backup/restore, and SIP abuse controls still need production verification.
+
+The public repository intentionally contains no deployment credentials or family data.
 
 ## Development
 
@@ -32,7 +34,7 @@ Requirements:
 - Docker with Compose for the full VoIP stack
 - `make`
 
-The project commands will be:
+Project commands:
 
 ```sh
 cp .env.example .env

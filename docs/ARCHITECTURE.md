@@ -11,7 +11,7 @@ Internet
   |
   +-- SIP 5060/UDP, 5061/TCP ------- Asterisk
   |                                     |  ^
-  +-- RTP 10000-20000/UDP --------------+  |
+  +-- RTP 10000-10199/UDP --------------+  |
                                             |
                             generated config + private AMI reload
                                             |
@@ -40,7 +40,7 @@ Extension `101` can therefore exist in many parties without collision. A device 
 
 Most devices will register outbound from home networks. PJSIP endpoints use symmetric RTP, forced response ports, rewritten contacts, server-relayed media, keepalives, and conservative codecs (`ulaw`, `alaw`, and optional `g722`). The setup UI will give exact registrar, username, secret, transport, and extension values instead of exposing Asterisk terminology.
 
-UDP SIP is supported for older adapters; TLS is the preferred path for capable devices. Strong random SIP credentials, registration throttling, and automated blocking are required before inviting real users.
+UDP SIP is supported for older adapters. SIP TLS is planned for capable devices but is not exposed by the first deployment. Strong random SIP credentials, registration throttling, and automated blocking are required before inviting real users.
 
 ## Configuration flow
 
