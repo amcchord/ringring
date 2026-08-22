@@ -2,6 +2,31 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Official Linphone party-call interoperability
+
+### Shipped
+
+- Extended `make linphone-smoke` from provisioning and registration into an actual party call: the officially provisioned Linphone account at extension `101` now calls a disposable SIPp member at extension `102` through RingRing's production telephony renderer and generated party dialplan.
+- Added deterministic file-backed media to the headless client. Linphone plays a 440 Hz linear WAV, records the RTP returned through Asterisk and SIPp, and requires an established call, more than 100 packets in each direction, an allowed codec, and the expected tone in the recording.
+- Added the second disposable account and a two-phase SIPp receiver so Asterisk's contact qualification is isolated from the measured call. Parameterized the shared smoke transport's advertised signaling and media address so each isolated Docker network receives correct in-dialog routing.
+
+### Decisions
+
+- Keep media server-relayed with the same `direct_media=no` production setting, so the audio assertion exercises Asterisk rather than a direct synthetic client path.
+- Require independent evidence at each boundary: Liblinphone validates its imported account, registration state, call state, codec, packet counters, and recording; SIPp answers the second member leg and echoes RTP; Asterisk confirms both contacts and a clean zero-channel teardown.
+- Keep the official GPLv3 client test-only and isolated from the MIT application, live database, production environment, public ports, and family credentials.
+
+### Verification
+
+- An isolated server candidate passed the extended `make linphone-smoke`: exactly one generated XML fetch, one imported account, authenticated registration, two reachable party contacts, an extension `101` to `102` call, and echoed bidirectional audio.
+- The existing `make sip-smoke` still passes two authenticated SIPp registrations, extension calling, the `*10` echo route, and bidirectional PCMU after the shared transport-address correction.
+- `make check`, Python bytecode compilation, POSIX shell syntax checks, and `git diff --check` pass locally.
+
+### Remaining
+
+- Scan a production setup QR in the current Linphone mobile app and verify its user-visible import flow, foreground ringing, push/background behavior, and Wi-Fi/cellular transitions.
+- Complete a two-way-audio call between two remote physical devices across real family networks.
+
 ## 2026-08-22 — Linphone provisioning interoperability
 
 ### Shipped

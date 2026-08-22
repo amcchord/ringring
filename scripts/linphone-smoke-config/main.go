@@ -10,8 +10,10 @@ import (
 )
 
 const (
-	smokeUsername = "rr_smoke_a"
-	smokePassword = "smoke-only-a-7Qm4s9Vx"
+	smokeUsernameA = "rr_smoke_a"
+	smokePasswordA = "smoke-only-a-7Qm4s9Vx"
+	smokeUsernameB = "rr_smoke_b"
+	smokePasswordB = "smoke-only-b-2Kp8w6Nz"
 )
 
 func main() {
@@ -20,16 +22,22 @@ func main() {
 		os.Exit(2)
 	}
 	outputDirectory := filepath.Clean(os.Args[1])
-	configuration, err := telephony.Render([]telephony.DialDevice{{
-		PartyID: "pty_smoke", DeviceID: "dev_smoke_a", Extension: "101",
-		SIPUsername: smokeUsername, SIPSecret: smokePassword,
-	}}, nil)
+	configuration, err := telephony.Render([]telephony.DialDevice{
+		{
+			PartyID: "pty_smoke", DeviceID: "dev_smoke_a", Extension: "101",
+			SIPUsername: smokeUsernameA, SIPSecret: smokePasswordA,
+		},
+		{
+			PartyID: "pty_smoke", DeviceID: "dev_smoke_b", Extension: "102",
+			SIPUsername: smokeUsernameB, SIPSecret: smokePasswordB,
+		},
+	}, nil)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	document, err := provisioning.LinphoneXML(provisioning.LinphoneConfig{
-		Server: os.Args[2], Username: smokeUsername, Password: smokePassword, Extension: "101",
+		Server: os.Args[2], Username: smokeUsernameA, Password: smokePasswordA, Extension: "101",
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

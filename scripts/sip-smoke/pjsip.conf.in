@@ -10,9 +10,9 @@ unidentified_request_prune_interval=30
 type=transport
 protocol=udp
 bind=0.0.0.0:5060
-local_net=172.31.89.0/24
-external_signaling_address=172.31.89.20
-external_media_address=172.31.89.20
+local_net=172.31.0.0/16
+external_signaling_address=__SIP_PUBLIC_HOST__
+external_media_address=__SIP_PUBLIC_HOST__
 allow_reload=yes
 
 #include /var/lib/ringring/asterisk/pjsip.conf
