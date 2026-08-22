@@ -22,9 +22,15 @@ This is the durable, chronological project record. Add new entries at the top. C
 - The harness exposed and then regression-tested the AOR-name requirement. It also verifies the generated party context, extension route, and server-mediated media setting before starting Asterisk.
 - The candidate run left no smoke-test container, Docker network, generated state, host port, or production data change behind.
 
+### Production
+
+- GitHub Actions and the local race-enabled checks passed for commit `472ad6e`. Took a new offline, root-only app-state and generated-config backup, then deployed that commit from the clean production checkout.
+- Ran the checked-in smoke test from `/opt/ringring`; it passed both challenged registrations, the party-scoped extension call, and bidirectional RTP, then left no test container or network behind.
+- The app and Asterisk are healthy, live readiness and signup return `200` with the expected security headers, private AI port `4574` remains unpublished, Fail2Ban is active, and settled runtime logs contain no warnings or errors.
+- SQLite reports `integrity_check=ok`; the existing one host and one party remain intact and no production device was created or changed.
+
 ### Remaining
 
-- Run the same checked-in harness from the production checkout after deployment and verify service health.
 - Complete a two-way-audio call with two remote physical devices, then exercise backup/restore and add host/member deletion flows.
 
 ## 2026-08-21 — Disclosed, bounded RingRing AI calls
