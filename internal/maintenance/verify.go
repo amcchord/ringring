@@ -24,6 +24,7 @@ type StateReport struct {
 	Invitations   int    `json:"invitations"`
 	Sessions      int    `json:"sessions"`
 	RecoveryCodes int    `json:"recovery_codes"`
+	Provisioning  int    `json:"provisioning_tokens"`
 	PartyKeys     int    `json:"party_keys_verified"`
 	DeviceSecrets int    `json:"device_secrets_verified"`
 }
@@ -88,7 +89,9 @@ func VerifyState(ctx context.Context, databasePath string, masterKey []byte) (St
 		return StateReport{}, fmt.Errorf("close foreign-key check: %w", err)
 	}
 
-	currentSchema, err := database.QueryContext(ctx, `SELECT ai_enabled FROM party_services LIMIT 0`)
+	currentSchema, err := database.QueryContext(ctx, `
+		SELECT s.ai_enabled, t.token_hash, t.device_id, t.expires_at, t.used_at, t.created_at
+		FROM party_services s CROSS JOIN device_provisioning_tokens t LIMIT 0`)
 	if err != nil {
 		return StateReport{}, errors.New("database schema is not current")
 	}
@@ -106,6 +109,7 @@ func VerifyState(ctx context.Context, databasePath string, masterKey []byte) (St
 		{"invitations", &report.Invitations},
 		{"sessions", &report.Sessions},
 		{"recovery_codes", &report.RecoveryCodes},
+		{"device_provisioning_tokens", &report.Provisioning},
 	}
 	for _, count := range counts {
 		if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+count.table).Scan(count.value); err != nil {

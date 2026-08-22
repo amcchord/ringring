@@ -43,7 +43,7 @@ The experience should feel friendly enough for a child to use and safe enough fo
 
 - Never commit or log API keys, OAuth secrets, SIP passwords, session keys, encryption keys, invite tokens, cookies, or private user data.
 - Production secrets belong in a root-readable environment file or secret manager outside the repository.
-- Store only a hash of invitation tokens. Show SIP passwords only when they are issued or deliberately rotated.
+- Store only hashes of invitation and one-time provisioning tokens. Mask token-bearing paths in logs and show SIP passwords only when they are issued or deliberately rotated.
 - Encrypt recoverable credentials at rest with the application master key.
 - Use cryptographically secure random values for every token and password.
 - Treat names and email addresses as personal data. Collect the minimum needed and avoid analytics/trackers by default.

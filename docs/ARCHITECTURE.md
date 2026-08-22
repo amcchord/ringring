@@ -28,6 +28,7 @@ Caddy, the app, and Asterisk run as separate containers. Only Caddy's HTTPS port
 - **Invitation**: a single-use, expiring, hashed bearer token that permits one member/device enrollment.
 - **Member**: a person represented by a display label and one extension within a party. An account is not required.
 - **Device**: a SIP registration identity and encrypted secret associated with a member.
+- **Provisioning link**: a single-use, 30-minute, hashed bearer token that lets Linphone fetch only one device's account configuration.
 - **Service line**: a party-enabled special extension such as time, weather, radio, or OpenAI voice.
 
 ## Call isolation
@@ -53,6 +54,14 @@ The database is authoritative. When a device or party setting changes, the app:
 5. Logs reload failures while preserving the database as the recoverable source of truth. One-time credentials already issued to a person stay visible even if a reload needs to be retried.
 
 On startup, the app regenerates all telephony configuration from the database.
+
+## One-time Linphone setup
+
+The one-time setup screen keeps the universal registrar, username, password, extension, and transport fields for ATAs, desk phones, and arbitrary SIP apps. It also renders a Linphone-specific QR according to [Linphone's remote-provisioning format](https://wiki.linphone.org/xwiki/wiki/public/view/Linphone/Remote%20Provisioning/). No external QR or provisioning service receives the credentials.
+
+The QR contains an HTTPS URL, not the SIP password. Its 32-byte random token is stored only as a SHA-256 digest, expires after 30 minutes, and is consumed transactionally by the first `GET`. `HEAD` does not consume it. The response decrypts only that device's SIP secret and returns a transient Linphone XML document with the generated username, extension, RingRing registrar, UDP port, and password; it contains no member name, party name, host data, or integration key. A second fetch receives a generic gone response. Rotation atomically replaces any prior link, while revocation and cascading device deletion remove it.
+
+Setup pages and provisioning responses are `no-store`, `no-referrer`, and `noindex`; token-bearing request paths are masked in application logs and separately rate limited. The UI warns people to use Linphone's scanner instead of a normal camera/browser because an ordinary fetch would consume the link without configuring the app. A desktop `sip-linphone` handler and a copyable remote-provisioning URL are secondary paths. This configures the account only and does not assert mobile push or background-ringing support.
 
 The authenticated party page reads current PJSIP contact state through the same private AMI boundary. Asterisk emits one `ContactList` event per registered contact and a completion event; the app immediately reduces those events to a generated SIP username and normalized reachability state. Contact URIs, source addresses, ports, call IDs, and user-agent strings never enter the template or database. Results are not cached or exposed on public or invitation pages. A failed or slow AMI query produces an explicit “status unavailable” hint while leaving host controls usable.
 

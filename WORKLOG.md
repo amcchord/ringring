@@ -2,6 +2,34 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — One-time Linphone QR setup
+
+### Shipped
+
+- Added a bright Linphone card to both invitation-claim and host-rotation setup screens while preserving the universal manual settings for ATAs, desk phones, and other softphones.
+- Added locally rendered QR images, a documented desktop `sip-linphone` action, and a copyable remote-provisioning URL. The XML follows Linphone's transient configuration format, uses its current bracketed proxy syntax, and marks every changed entry for overwrite.
+- Added an additive provisioning-token table and transactional lifecycle: a 32-byte random token is stored only as a hash, expires after 30 minutes, consumes once, is atomically replaced on rotation, and disappears on revocation or device deletion. Backup verification now checks and counts the new table.
+- Added the upstream MIT notices for the QR encoder and Reed–Solomon implementation to the repository and final app image.
+
+### Decisions
+
+- Put only an HTTPS provisioning URL in the QR, never the SIP password itself, and render it without an external QR service. The first real `GET` decrypts only that device credential and returns no member name, party name, host data, or integration key.
+- Reject `HEAD` without consuming the link, but make every real fetch one-use. This avoids burning a setup on a preview probe without weakening the bearer-token boundary.
+- Keep manual setup first-class and call the feature Linphone-specific. A generic SIP QR is not interoperable, and sending credentials through an OEM provisioning service would create an unnecessary third-party boundary.
+- Warn people to use Linphone's scanner instead of a normal camera/browser. Setup and XML responses are no-store, no-referrer, no-index, same-origin resources; token paths are masked in logs and separately rate limited.
+
+### Verification
+
+- Store tests cover hashed-at-rest tokens, unknown, used, expired, replaced, revoked, and cascading lifecycle states. Web tests cover safe headers, non-consuming `HEAD`, exact XML account data, exclusion of unrelated private data, generic invalid-token errors, one-use behavior, rotation replacement, revocation, path masking, and rate limiting.
+- `make check` passes formatting, vet, and the complete race-enabled suite. The official Go vulnerability scanner finds no reachable vulnerability in RingRing or any imported package; its only module-level notice is for the unused `x/crypto/openpgp` package.
+- A disposable real-browser flow claimed and rotated a phone, rendered the page at 1280×900 and 390×844, and found no horizontal overflow. The QR remained crisp, controls measured 44–54px, and the mobile order was corrected so the scanner warning appears before the code.
+- macOS Vision decoded exactly one QR and its payload digest matched the setup page's provisioning URL. The browser tab, explicit viewport, temporary QR artifacts, app process, and disposable database were closed or removed; no production family state was touched.
+
+### Remaining
+
+- Import a live production setup into current Linphone on a real phone and verify registration, foreground ringing, and the operating system's background-call behavior.
+- Complete the broader two-remote-device audio test with family hardware.
+
 ## 2026-08-22 — Memorable family access phrase
 
 ### Production

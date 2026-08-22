@@ -176,12 +176,46 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 		"csrf": {joinCSRF}, "display_name": {"Blue phone"}, "extension": {"101"}, "device_label": {"ATA"},
 	})
 	setupBody := readBody(t, setup)
-	if setup.StatusCode != http.StatusOK || !strings.Contains(setupBody, "You are extension 101") || !strings.Contains(setupBody, "sip.example.test") || !strings.Contains(setupBody, "Test both directions") || !strings.Contains(setupBody, "dial <strong>*10</strong>") {
+	if setup.StatusCode != http.StatusOK || !strings.Contains(setupBody, "You are extension 101") || !strings.Contains(setupBody, "sip.example.test") || !strings.Contains(setupBody, "Scan it with <em>Linphone.</em>") || !strings.Contains(setupBody, "data:image/png;base64,") || !strings.Contains(setupBody, "href=\"sip-linphone:?linphone-fetch-config=http%3A%2F%2F") || strings.Contains(setupBody, "#ZgotmplZ") || !strings.Contains(setupBody, "Use Linphone’s scanner—not the regular Camera app") || !strings.Contains(setupBody, "Test both directions") || !strings.Contains(setupBody, "dial <strong>*10</strong>") {
 		t.Fatalf("setup response was not successful: status=%d", setup.StatusCode)
 	}
 	oldUsername := firstMatch(t, setupBody, `(rrd_[A-Za-z0-9_-]+)`)
-	if setup.Header.Get("Cache-Control") != "no-store" {
+	oldPassword := firstMatch(t, setupBody, `<div class="secret-value"><span>Password</span><strong>([^<]+)</strong></div>`)
+	provisionURL := firstMatch(t, setupBody, `value="(http://[^"]+/provision/linphone/[A-Za-z0-9_-]{43})"`)
+	if setup.Header.Get("Cache-Control") != "no-store" || setup.Header.Get("Referrer-Policy") != "no-referrer" || !strings.Contains(setup.Header.Get("X-Robots-Tag"), "noindex") {
 		t.Fatal("setup credentials must not be cached")
+	}
+	headRequest, err := http.NewRequest(http.MethodHead, provisionURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	headProvision, err := client.Do(headRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = headProvision.Body.Close()
+	if headProvision.StatusCode != http.StatusMethodNotAllowed || headProvision.Header.Get("Allow") != http.MethodGet {
+		t.Fatalf("HEAD provisioning check consumed or accepted the link: status=%d", headProvision.StatusCode)
+	}
+	provisioned := get(t, client, provisionURL)
+	provisionedBody := readBody(t, provisioned)
+	if provisioned.StatusCode != http.StatusOK || !strings.HasPrefix(provisioned.Header.Get("Content-Type"), "application/xml") || provisioned.Header.Get("Cache-Control") != "no-store, max-age=0" || provisioned.Header.Get("Referrer-Policy") != "no-referrer" || provisioned.Header.Get("Cross-Origin-Resource-Policy") != "same-origin" || !strings.Contains(provisioned.Header.Get("X-Robots-Tag"), "noindex") {
+		t.Fatalf("Linphone provisioning headers/status were unsafe: status=%d headers=%v", provisioned.StatusCode, provisioned.Header)
+	}
+	if !strings.Contains(provisionedBody, `<entry name="username" overwrite="true">`+oldUsername+`</entry>`) || !strings.Contains(provisionedBody, `<entry name="passwd" overwrite="true">`+oldPassword+`</entry>`) || !strings.Contains(provisionedBody, `&lt;sip:sip.example.test:5060;transport=udp&gt;`) || !strings.Contains(provisionedBody, `RingRing 101`) {
+		t.Fatal("Linphone provisioning document omitted the claimed account")
+	}
+	for _, privateValue := range []string{"Blue phone", "Cousins Club", "ATA", "host@example.test", "proj_test"} {
+		if strings.Contains(provisionedBody, privateValue) {
+			t.Fatalf("Linphone provisioning exposed unrelated private data: %q", privateValue)
+		}
+	}
+	if reusedProvision := get(t, client, provisionURL); reusedProvision.StatusCode != http.StatusGone || !strings.Contains(readBody(t, reusedProvision), "used, expired, replaced, or disconnected") {
+		t.Fatalf("Linphone provisioning link was reusable: status=%d", reusedProvision.StatusCode)
+	}
+	unknownProvision := get(t, client, server.URL+"/provision/linphone/"+strings.Repeat("x", 43))
+	if unknownProvision.StatusCode != http.StatusGone || !strings.Contains(readBody(t, unknownProvision), "setup link is finished") {
+		t.Fatalf("unknown provisioning link did not fail generically: status=%d", unknownProvision.StatusCode)
 	}
 
 	used := get(t, client, inviteURL)
@@ -233,6 +267,10 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if freshUsername == oldUsername {
 		t.Fatal("rotation did not replace the SIP username")
 	}
+	rotatedProvisionURL := firstMatch(t, rotatedBody, `value="(http://[^"]+/provision/linphone/[A-Za-z0-9_-]{43})"`)
+	if rotatedProvisionURL == provisionURL {
+		t.Fatal("rotation reused the prior provisioning link")
+	}
 	if again := get(t, client, rotated.Request.URL.String()); again.StatusCode != http.StatusGone {
 		t.Fatalf("setup reveal could be read twice: status=%d", again.StatusCode)
 	} else {
@@ -267,6 +305,9 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	revokedBody := readBody(t, revoked)
 	if revoked.StatusCode != http.StatusOK || !strings.Contains(revokedBody, "presence-off\">disconnected") || strings.Contains(revokedBody, "presence-online\">online") {
 		t.Fatalf("revocation response was not successful: status=%d", revoked.StatusCode)
+	}
+	if revokedProvision := get(t, client, rotatedProvisionURL); revokedProvision.StatusCode != http.StatusGone || !strings.Contains(readBody(t, revokedProvision), "used, expired, replaced, or disconnected") {
+		t.Fatalf("revocation left provisioning usable: status=%d", revokedProvision.StatusCode)
 	}
 	routing, err = database.RoutingDevices(t.Context())
 	if err != nil {
@@ -349,6 +390,20 @@ func TestProductionRejectsNullOrigin(t *testing.T) {
 	req.Header.Set("Origin", "null")
 	if app.sameOrigin(req) {
 		t.Fatal("production must not trust a null origin")
+	}
+}
+
+func TestSecretPathsAreMaskedAndProvisioningIsRateLimited(t *testing.T) {
+	if got := safePath("/join/invitation-secret"); got != "/join/:token" {
+		t.Fatalf("safe invitation path = %q", got)
+	}
+	if got := safePath("/provision/linphone/provision-secret"); got != "/provision/:kind/:token" {
+		t.Fatalf("safe provisioning path = %q", got)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/provision/linphone/provision-secret", nil)
+	category, limit, window := rateCategory(req)
+	if category != "provision" || limit != 20 || window != 5*time.Minute {
+		t.Fatalf("provisioning rate category = %q %d %s", category, limit, window)
 	}
 }
 

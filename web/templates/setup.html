@@ -11,6 +11,40 @@
   <h1>Hello, {{.Claim.Member.DisplayName}}!<br><em>You are extension {{.Claim.Member.Extension}}.</em></h1>
   <p>Keep this screen private and finish your phone setup now. The password is only shown once.</p>
   {{end}}
+  {{if .LinphoneQR}}
+  <section class="linphone-card" aria-labelledby="linphone-title">
+    <div class="linphone-copy">
+      <span class="kicker">Fastest softphone setup</span>
+      <h2 id="linphone-title">Scan it with <em>Linphone.</em></h2>
+      <ol class="linphone-steps">
+        <li>Install or open <a href="https://www.linphone.org/en/download/">Linphone</a>.</li>
+        <li>From Linphone’s home screen, choose <strong>Scan QR Code</strong>.</li>
+        <li>Scan this code, allow the setup, then dial <strong>*10</strong>.</li>
+      </ol>
+      <p class="scanner-warning"><strong>Use Linphone’s scanner—not the regular Camera app.</strong> A normal browser would use up the private link without configuring your account.</p>
+      <div class="linphone-actions">
+        <a class="button button-primary" href="{{.LinphoneOpenURL}}">Open in Linphone <span aria-hidden="true">→</span></a>
+        <span>Best for a computer that already has Linphone installed.</span>
+      </div>
+      <details class="provision-details">
+        <summary>Configure Linphone by URL instead</summary>
+        <label for="linphone-provision-url">Remote provisioning URL</label>
+        <input id="linphone-provision-url" value="{{.LinphoneProvisionURL}}" readonly autocomplete="off" autocapitalize="none" spellcheck="false">
+        <p>From Linphone’s home screen, choose <strong>Provisioning Link</strong> and paste it there—not into a web browser.</p>
+      </details>
+      <p class="one-time-note">The QR contains a one-time RingRing setup URL, not the SIP password itself. It expires after 30 minutes and stops working after the first fetch.</p>
+    </div>
+    <div class="qr-frame">
+      <img src="{{.LinphoneQR}}" alt="One-time Linphone setup QR code for extension {{.Claim.Member.Extension}}">
+      <strong>Extension {{.Claim.Member.Extension}}</strong>
+    </div>
+  </section>
+  {{end}}
+  <div class="manual-setup-heading">
+    <span class="kicker">Works with any SIP phone</span>
+    <h2>Manual settings</h2>
+    <p>Use these for an ATA, desk phone, or any softphone that is not Linphone.</p>
+  </div>
   <div class="setup-card">
     <div><span>SIP server / registrar</span><strong>{{.SIPPublicHost}}</strong></div>
     <div><span>Username / auth ID</span><strong>{{.Claim.Device.SIPUsername}}</strong></div>
@@ -27,7 +61,7 @@
     <div class="setup-guide-heading">
       <span class="kicker">Any kind of phone</span>
       <h2 id="setup-guide-title">Which box are you holding?</h2>
-      <p>The labels vary by brand, but the five settings above are all most devices need.</p>
+      <p>The labels vary by brand, but the five manual settings above are all most devices need.</p>
     </div>
     <div class="guide-grid">
       <article><span>☎️</span><h3>Telephone adapter</h3><ol><li>Plug the telephone into <strong>PHONE 1</strong>, not the wall.</li><li>Open the adapter’s Line 1 or FXS page.</li><li>Enter the server as proxy/registrar and the username as both User ID and Auth ID.</li></ol></article>

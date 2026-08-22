@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -10,6 +11,12 @@ import (
 
 	"github.com/amcchord/ringring/internal/secure"
 )
+
+func testProvisioning(token string, now time.Time) NewProvisioningToken {
+	return NewProvisioningToken{
+		TokenHash: secure.Hash(token), ExpiresAt: now.Add(30 * time.Minute), CreatedAt: now,
+	}
+}
 
 func TestInvitationCanOnlyBeClaimedOnce(t *testing.T) {
 	ctx := context.Background()
@@ -39,7 +46,7 @@ func TestInvitationCanOnlyBeClaimedOnce(t *testing.T) {
 	claim := NewClaim{
 		TokenHash: secure.Hash(token), MemberID: "mem_1", DisplayName: "Blue phone", Extension: "101",
 		DeviceID: "dev_1", DeviceLabel: "Kitchen phone", SIPUsername: "rrd_1",
-		SIPSecretCiphertext: "ciphertext", Now: now,
+		SIPSecretCiphertext: "ciphertext", Provisioning: testProvisioning("provision-1", now), Now: now,
 	}
 	claimedParty, member, _, err := s.ClaimInvitation(ctx, claim)
 	if err != nil {
@@ -51,6 +58,7 @@ func TestInvitationCanOnlyBeClaimedOnce(t *testing.T) {
 	claim.MemberID = "mem_2"
 	claim.DeviceID = "dev_2"
 	claim.SIPUsername = "rrd_2"
+	claim.Provisioning = testProvisioning("provision-2", now)
 	if _, _, _, err := s.ClaimInvitation(ctx, claim); !errors.Is(err, ErrInviteUsed) {
 		t.Fatalf("second claim error = %v", err)
 	}
@@ -77,7 +85,7 @@ func TestExtensionUniqueWithinParty(t *testing.T) {
 		_, _, _, err := s.ClaimInvitation(ctx, NewClaim{
 			TokenHash: secure.Hash(token), MemberID: "mem_" + token, DisplayName: "Member", Extension: "101",
 			DeviceID: "dev_" + token, DeviceLabel: "Phone", SIPUsername: "sip_" + token,
-			SIPSecretCiphertext: "cipher", Now: now.Add(time.Duration(i) * time.Second),
+			SIPSecretCiphertext: "cipher", Provisioning: testProvisioning("provision-"+token, now), Now: now.Add(time.Duration(i) * time.Second),
 		})
 		if i == 0 && err != nil {
 			t.Fatal(err)
@@ -107,7 +115,8 @@ func TestHostCanRevokeAndReconnectDevice(t *testing.T) {
 	}
 	_, _, device, err := s.ClaimInvitation(ctx, NewClaim{
 		TokenHash: secure.Hash("device-invite"), MemberID: "mem_devices", DisplayName: "Kitchen", Extension: "101",
-		DeviceID: "dev_devices", DeviceLabel: "ATA", SIPUsername: "rrd_old", SIPSecretCiphertext: "old-cipher", Now: now,
+		DeviceID: "dev_devices", DeviceLabel: "ATA", SIPUsername: "rrd_old", SIPSecretCiphertext: "old-cipher",
+		Provisioning: testProvisioning("old-provision", now), Now: now,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -127,7 +136,7 @@ func TestHostCanRevokeAndReconnectDevice(t *testing.T) {
 		t.Fatalf("revoked device remained routable: %#v", routing)
 	}
 
-	rotated, err := s.RotateDevice(ctx, party.ID, host.ID, device.ID, "rrd_fresh", "fresh-cipher")
+	rotated, err := s.RotateDevice(ctx, party.ID, host.ID, device.ID, "rrd_fresh", "fresh-cipher", testProvisioning("fresh-provision", now.Add(time.Minute)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,6 +149,76 @@ func TestHostCanRevokeAndReconnectDevice(t *testing.T) {
 	}
 	if len(routing) != 1 || routing[0].SIPUsername != "rrd_fresh" || routing[0].SIPSecretCiphertext != "fresh-cipher" {
 		t.Fatalf("unexpected routing after reconnect: %#v", routing)
+	}
+}
+
+func TestProvisioningTokenIsHashedOneTimeExpiringAndRevocable(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	now := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
+	host, _ := s.UpsertGoogleUser(ctx, GoogleProfile{Subject: "provision-host", Email: "host@example.test", Name: "Host"}, now, "usr_provision")
+	party, _ := s.CreateParty(ctx, NewParty{ID: "pty_provision", Name: "Party", Slug: "provision", HostUserID: host.ID, CreatedAt: now})
+	if err := s.CreateInvitation(ctx, NewInvitation{
+		ID: "inv_provision", PartyID: party.ID, CreatedByUserID: host.ID,
+		TokenHash: secure.Hash("provision-invite"), ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	const initialToken = "initial-provision"
+	_, _, device, err := s.ClaimInvitation(ctx, NewClaim{
+		TokenHash: secure.Hash("provision-invite"), MemberID: "mem_provision", DisplayName: "Kitchen", Extension: "101",
+		DeviceID: "dev_provision", DeviceLabel: "Softphone", SIPUsername: "rrd_initial", SIPSecretCiphertext: "initial-cipher",
+		Provisioning: testProvisioning(initialToken, now), Now: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var storedHash []byte
+	if err := s.db.QueryRow(`SELECT token_hash FROM device_provisioning_tokens WHERE device_id = ?`, device.ID).Scan(&storedHash); err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(storedHash, []byte(initialToken)) || !bytes.Equal(storedHash, secure.Hash(initialToken)) {
+		t.Fatal("provisioning token was not stored only as its SHA-256 digest")
+	}
+	if _, err := s.ConsumeProvisioningToken(ctx, secure.Hash("wrong-provision"), now.Add(time.Minute)); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown provisioning error = %v", err)
+	}
+	provisioned, err := s.ConsumeProvisioningToken(ctx, secure.Hash(initialToken), now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provisioned.DeviceID != device.ID || provisioned.SIPUsername != "rrd_initial" || provisioned.SIPSecretCiphertext != "initial-cipher" || provisioned.Extension != "101" {
+		t.Fatalf("unexpected provisioning device: %#v", provisioned)
+	}
+	if _, err := s.ConsumeProvisioningToken(ctx, secure.Hash(initialToken), now.Add(2*time.Minute)); !errors.Is(err, ErrProvisionUsed) {
+		t.Fatalf("reused provisioning error = %v", err)
+	}
+
+	if _, err := s.RotateDevice(ctx, party.ID, host.ID, device.ID, "rrd_expired", "expired-cipher", testProvisioning("expired-provision", now)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ConsumeProvisioningToken(ctx, secure.Hash(initialToken), now.Add(3*time.Minute)); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("replaced provisioning error = %v", err)
+	}
+	if _, err := s.ConsumeProvisioningToken(ctx, secure.Hash("expired-provision"), now.Add(31*time.Minute)); !errors.Is(err, ErrProvisionExpired) {
+		t.Fatalf("expired provisioning error = %v", err)
+	}
+
+	revocable := testProvisioning("revocable-provision", now.Add(32*time.Minute))
+	if _, err := s.RotateDevice(ctx, party.ID, host.ID, device.ID, "rrd_revocable", "revocable-cipher", revocable); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RevokeDevice(ctx, party.ID, host.ID, device.ID, now.Add(33*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ConsumeProvisioningToken(ctx, revocable.TokenHash, now.Add(34*time.Minute)); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoked provisioning error = %v", err)
 	}
 }
 
@@ -212,7 +291,8 @@ func TestDeletionIsHostScopedAndCascades(t *testing.T) {
 	}
 	_, member, _, err := s.ClaimInvitation(ctx, NewClaim{
 		TokenHash: secure.Hash("delete-invite"), MemberID: "mem_delete", DisplayName: "Kitchen", Extension: "101",
-		DeviceID: "dev_delete", DeviceLabel: "ATA", SIPUsername: "rrd_delete", SIPSecretCiphertext: "cipher", Now: now,
+		DeviceID: "dev_delete", DeviceLabel: "ATA", SIPUsername: "rrd_delete", SIPSecretCiphertext: "cipher",
+		Provisioning: testProvisioning("delete-provision", now), Now: now,
 	})
 	if err != nil {
 		t.Fatal(err)

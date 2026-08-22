@@ -15,6 +15,7 @@ RUN apt-get update \
     && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin ringring
 
 COPY --from=build /out/ringring /usr/local/bin/ringring
+COPY LICENSE THIRD_PARTY_NOTICES.md /usr/share/doc/ringring/
 USER 10001:10001
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/ringring"]

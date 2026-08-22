@@ -21,7 +21,7 @@ func TestVerifyStateChecksStructureAndEncryptedCredentials(t *testing.T) {
 	if report.Status != "ok" || report.Integrity != "ok" || report.ForeignKeys != "ok" {
 		t.Fatalf("unexpected verification status: %+v", report)
 	}
-	if report.Users != 1 || report.Parties != 1 || report.Members != 1 || report.Devices != 1 || report.Invitations != 1 || report.Sessions != 1 || report.RecoveryCodes != 1 {
+	if report.Users != 1 || report.Parties != 1 || report.Members != 1 || report.Devices != 1 || report.Invitations != 1 || report.Sessions != 1 || report.RecoveryCodes != 1 || report.Provisioning != 1 {
 		t.Fatalf("unexpected restored counts: %+v", report)
 	}
 	if report.PartyKeys != 1 || report.DeviceSecrets != 1 {
@@ -99,7 +99,11 @@ func verificationFixture(t *testing.T) (string, []byte, string, string) {
 	if _, _, _, err := database.ClaimInvitation(context.Background(), store.NewClaim{
 		TokenHash: secure.Hash("invite"), MemberID: "mem_backup", DisplayName: "Member", Extension: "101",
 		DeviceID: "dev_backup", DeviceLabel: "Phone", SIPUsername: "rrd_backup",
-		SIPSecretCiphertext: deviceCiphertext, Now: now,
+		SIPSecretCiphertext: deviceCiphertext,
+		Provisioning: store.NewProvisioningToken{
+			TokenHash: secure.Hash("verify-provision"), ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+		},
+		Now: now,
 	}); err != nil {
 		t.Fatal(err)
 	}

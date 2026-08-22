@@ -21,6 +21,7 @@ import (
 	"github.com/amcchord/ringring/internal/localauth"
 	"github.com/amcchord/ringring/internal/model"
 	"github.com/amcchord/ringring/internal/openaiadmin"
+	"github.com/amcchord/ringring/internal/provisioning"
 	"github.com/amcchord/ringring/internal/secure"
 	"github.com/amcchord/ringring/internal/store"
 	"github.com/amcchord/ringring/internal/telephony"
@@ -38,11 +39,13 @@ const (
 	joinCSRFCookie      = "ringring_join_csrf"
 	authCSRFCookie      = "ringring_auth_csrf"
 	recoveryFlashCookie = "ringring_recovery_reveal"
+	provisioningTTL     = 30 * time.Minute
 )
 
 var (
-	extensionPattern = regexp.MustCompile(`^[0-9]{2,5}$`)
-	usernamePattern  = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._-]{1,30}[a-z0-9])$`)
+	extensionPattern      = regexp.MustCompile(`^[0-9]{2,5}$`)
+	usernamePattern       = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._-]{1,30}[a-z0-9])$`)
+	provisionTokenPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 )
 
 type App struct {
@@ -82,41 +85,44 @@ type PresenceView struct {
 }
 
 type PageData struct {
-	BodyClass      string
-	User           *model.User
-	CSRF           string
-	AuthConfigured bool
-	DevAuth        bool
-	Parties        []model.Party
-	Party          model.Party
-	Member         model.Member
-	Members        []model.Member
-	DevicePresence map[string]PresenceView
-	MemberPresence map[string]PresenceView
-	PresenceNotice string
-	Services       model.PartyServices
-	InviteURL      string
-	JoinCSRF       string
-	Claim          model.ClaimedDevice
-	SIPPublicHost  string
-	SetupForHost   bool
-	PartyURL       string
-	ErrorTitle     string
-	ErrorMessage   string
-	ErrorBackURL   string
-	ErrorBackLabel string
-	AuthCSRF       string
-	FormError      string
-	FormUsername   string
-	FormName       string
-	SignupEnabled  bool
-	SignupCode     bool
-	RecoveryCodes  []string
-	RecoveryTitle  string
-	RecoveryText   string
-	RecoveryNext   string
-	RecoveryButton string
-	Notice         string
+	BodyClass            string
+	User                 *model.User
+	CSRF                 string
+	AuthConfigured       bool
+	DevAuth              bool
+	Parties              []model.Party
+	Party                model.Party
+	Member               model.Member
+	Members              []model.Member
+	DevicePresence       map[string]PresenceView
+	MemberPresence       map[string]PresenceView
+	PresenceNotice       string
+	Services             model.PartyServices
+	InviteURL            string
+	JoinCSRF             string
+	Claim                model.ClaimedDevice
+	SIPPublicHost        string
+	LinphoneProvisionURL string
+	LinphoneOpenURL      template.URL
+	LinphoneQR           template.URL
+	SetupForHost         bool
+	PartyURL             string
+	ErrorTitle           string
+	ErrorMessage         string
+	ErrorBackURL         string
+	ErrorBackLabel       string
+	AuthCSRF             string
+	FormError            string
+	FormUsername         string
+	FormName             string
+	SignupEnabled        bool
+	SignupCode           bool
+	RecoveryCodes        []string
+	RecoveryTitle        string
+	RecoveryText         string
+	RecoveryNext         string
+	RecoveryButton       string
+	Notice               string
 }
 
 type authSession struct {
@@ -125,14 +131,15 @@ type authSession struct {
 }
 
 type setupFlash struct {
-	PartyID     string `json:"party_id"`
-	MemberID    string `json:"member_id"`
-	MemberName  string `json:"member_name"`
-	Extension   string `json:"extension"`
-	DeviceID    string `json:"device_id"`
-	DeviceLabel string `json:"device_label"`
-	SIPUsername string `json:"sip_username"`
-	SIPSecret   string `json:"sip_secret"`
+	PartyID           string `json:"party_id"`
+	MemberID          string `json:"member_id"`
+	MemberName        string `json:"member_name"`
+	Extension         string `json:"extension"`
+	DeviceID          string `json:"device_id"`
+	DeviceLabel       string `json:"device_label"`
+	SIPUsername       string `json:"sip_username"`
+	SIPSecret         string `json:"sip_secret"`
+	ProvisioningToken string `json:"provisioning_token"`
 }
 
 type recoveryFlash struct {
@@ -228,6 +235,7 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 	mux.HandleFunc("POST /account/delete", app.requireUser(app.deleteAccount))
 	mux.HandleFunc("GET /join/{token}", app.join)
 	mux.HandleFunc("POST /join/{token}", app.claimInvitation)
+	mux.HandleFunc("GET /provision/linphone/{token}", app.linphoneProvision)
 	mux.HandleFunc("GET /", app.home)
 
 	app.handler = app.securityHeaders(app.recoverPanic(app.requestLog(app.rateLimit(mux))))
@@ -1025,7 +1033,13 @@ func (a *App) rotateDevice(w http.ResponseWriter, r *http.Request, session authS
 		a.internalError(w, r, err)
 		return
 	}
-	rotated, err := a.store.RotateDevice(r.Context(), partyID, session.User.ID, deviceID, sipUsername, ciphertext)
+	now := a.now()
+	provisionToken, provisionRecord, err := newProvisioningToken(now)
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	rotated, err := a.store.RotateDevice(r.Context(), partyID, session.User.ID, deviceID, sipUsername, ciphertext, provisionRecord)
 	if errors.Is(err, store.ErrNotFound) {
 		http.NotFound(w, r)
 		return
@@ -1040,7 +1054,7 @@ func (a *App) rotateDevice(w http.ResponseWriter, r *http.Request, session authS
 	a.setSetupFlash(w, setupFlash{
 		PartyID: partyID, MemberID: rotated.Member.ID, MemberName: rotated.Member.DisplayName,
 		Extension: rotated.Member.Extension, DeviceID: rotated.Device.ID, DeviceLabel: rotated.Device.Label,
-		SIPUsername: sipUsername, SIPSecret: sipSecret,
+		SIPUsername: sipUsername, SIPSecret: sipSecret, ProvisioningToken: provisionToken,
 	})
 	http.Redirect(w, r, "/parties/"+url.PathEscape(partyID)+"/setup", http.StatusSeeOther)
 }
@@ -1226,6 +1240,9 @@ func (a *App) deleteAccount(w http.ResponseWriter, r *http.Request, session auth
 }
 
 func (a *App) rotatedSetup(w http.ResponseWriter, r *http.Request, session authSession) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Robots-Tag", "noindex, nofollow, noarchive")
 	partyID := r.PathValue("partyID")
 	party, err := a.store.PartyForHost(r.Context(), partyID, session.User.ID)
 	if errors.Is(err, store.ErrNotFound) {
@@ -1241,8 +1258,6 @@ func (a *App) rotatedSetup(w http.ResponseWriter, r *http.Request, session authS
 		a.errorPage(w, http.StatusGone, "Those settings have left the screen", "Rotate the phone again to make a fresh one-time setup card.", "/parties/"+url.PathEscape(partyID), "Back to the party")
 		return
 	}
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Referrer-Policy", "no-referrer")
 	data := a.pageData(&session)
 	data.SetupForHost = true
 	data.PartyURL = "/parties/" + url.PathEscape(partyID)
@@ -1252,6 +1267,9 @@ func (a *App) rotatedSetup(w http.ResponseWriter, r *http.Request, session authS
 		Member:    model.Member{ID: flash.MemberID, PartyID: partyID, DisplayName: flash.MemberName, Extension: flash.Extension},
 		Device:    model.Device{ID: flash.DeviceID, MemberID: flash.MemberID, Label: flash.DeviceLabel, SIPUsername: flash.SIPUsername},
 		SIPSecret: flash.SIPSecret,
+	}
+	if err := a.addLinphoneSetup(&data, flash.ProvisioningToken); err != nil {
+		a.logger.Error("prepare rotated Linphone setup", "error", err)
 	}
 	a.render(w, "setup", data)
 }
@@ -1274,6 +1292,7 @@ func (a *App) join(w http.ResponseWriter, r *http.Request) {
 	})
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Robots-Tag", "noindex, nofollow, noarchive")
 	data := a.pageData(nil)
 	data.Party = party
 	data.JoinCSRF = csrf
@@ -1316,10 +1335,16 @@ func (a *App) claimInvitation(w http.ResponseWriter, r *http.Request) {
 		a.internalError(w, r, err)
 		return
 	}
+	now := a.now()
+	provisionToken, provisionRecord, err := newProvisioningToken(now)
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
 	party, member, device, err := a.store.ClaimInvitation(r.Context(), store.NewClaim{
 		TokenHash: secure.Hash(token), MemberID: memberID, DisplayName: displayName, Extension: extension,
 		DeviceID: deviceID, DeviceLabel: deviceLabel, SIPUsername: sipUsername,
-		SIPSecretCiphertext: ciphertext, Now: a.now(),
+		SIPSecretCiphertext: ciphertext, Provisioning: provisionRecord, Now: now,
 	})
 	if errors.Is(err, store.ErrExtensionTaken) {
 		a.errorPage(w, http.StatusConflict, "That extension is already ringing", "Choose another short number and try again.", r.URL.Path, "Choose another")
@@ -1335,10 +1360,65 @@ func (a *App) claimInvitation(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Robots-Tag", "noindex, nofollow, noarchive")
 	data := a.pageData(nil)
 	data.Claim = model.ClaimedDevice{Party: party, Member: member, Device: device, SIPSecret: sipSecret}
 	data.SIPPublicHost = a.cfg.SIPPublicHost
+	if err := a.addLinphoneSetup(&data, provisionToken); err != nil {
+		a.logger.Error("prepare claimed Linphone setup", "error", err)
+	}
 	a.render(w, "setup", data)
+}
+
+func (a *App) linphoneProvision(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store, max-age=0")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Robots-Tag", "noindex, nofollow, noarchive")
+	w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	token := r.PathValue("token")
+	if !provisionTokenPattern.MatchString(token) {
+		a.provisioningGone(w)
+		return
+	}
+	device, err := a.store.ConsumeProvisioningToken(r.Context(), secure.Hash(token), a.now())
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrProvisionUsed) || errors.Is(err, store.ErrProvisionExpired) {
+		a.provisioningGone(w)
+		return
+	}
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	password, err := a.cipher.Decrypt(device.SIPSecretCiphertext, []byte(device.DeviceID))
+	if err != nil {
+		a.logger.Error("decrypt one-time provisioning credential", "error", err)
+		a.errorPage(w, http.StatusInternalServerError, "The setup line went quiet", "Ask the party host to rotate this phone and make fresh settings.", "/", "Back home")
+		return
+	}
+	document, err := provisioning.LinphoneXML(provisioning.LinphoneConfig{
+		Server: a.cfg.SIPPublicHost, Username: device.SIPUsername, Password: password, Extension: device.Extension,
+	})
+	if err != nil {
+		a.logger.Error("build one-time Linphone provisioning", "error", err)
+		a.errorPage(w, http.StatusInternalServerError, "The setup line went quiet", "Ask the party host to rotate this phone and make fresh settings.", "/", "Back home")
+		return
+	}
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	w.Header().Set("Content-Disposition", `inline; filename="ringring-linphone.xml"`)
+	if _, err := w.Write(document); err != nil {
+		a.logger.Error("write one-time Linphone provisioning", "error", err)
+	}
+}
+
+func (a *App) provisioningGone(w http.ResponseWriter) {
+	a.errorPage(w, http.StatusGone, "That phone setup link is finished", "This private one-time link was used, expired, replaced, or disconnected. Ask the party host for fresh settings.", "/", "Back home")
 }
 
 func (a *App) newSIPCredentials(deviceID string) (string, string, string, error) {
@@ -1355,6 +1435,35 @@ func (a *App) newSIPCredentials(deviceID string) (string, string, string, error)
 		return "", "", "", err
 	}
 	return "rrd_" + suffix, secret, ciphertext, nil
+}
+
+func newProvisioningToken(now time.Time) (string, store.NewProvisioningToken, error) {
+	token, err := secure.Token(32)
+	if err != nil {
+		return "", store.NewProvisioningToken{}, err
+	}
+	return token, store.NewProvisioningToken{
+		TokenHash: secure.Hash(token), ExpiresAt: now.Add(provisioningTTL), CreatedAt: now,
+	}, nil
+}
+
+func (a *App) addLinphoneSetup(data *PageData, token string) error {
+	if !provisionTokenPattern.MatchString(token) {
+		return errors.New("invalid provisioning token")
+	}
+	base, err := url.Parse(a.cfg.BaseURL)
+	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
+		return errors.New("invalid provisioning base URL")
+	}
+	provisionURL := a.cfg.BaseURL + "/provision/linphone/" + url.PathEscape(token)
+	qr, err := provisioning.QRCodeDataURI(provisionURL)
+	if err != nil {
+		return err
+	}
+	data.LinphoneProvisionURL = provisionURL
+	data.LinphoneOpenURL = template.URL("sip-linphone:?linphone-fetch-config=" + url.QueryEscape(provisionURL))
+	data.LinphoneQR = template.URL(qr)
+	return nil
 }
 
 func (a *App) requireUser(next func(http.ResponseWriter, *http.Request, authSession)) http.HandlerFunc {
@@ -1526,7 +1635,7 @@ func (a *App) readSetupFlash(w http.ResponseWriter, r *http.Request, partyID str
 	if err := json.Unmarshal([]byte(plaintext), &flash); err != nil {
 		return setupFlash{}, err
 	}
-	if flash.PartyID != partyID || flash.DeviceID == "" || flash.SIPUsername == "" || flash.SIPSecret == "" {
+	if flash.PartyID != partyID || flash.DeviceID == "" || flash.SIPUsername == "" || flash.SIPSecret == "" || !provisionTokenPattern.MatchString(flash.ProvisioningToken) {
 		return setupFlash{}, errors.New("invalid setup flash")
 	}
 	return flash, nil
@@ -1629,6 +1738,9 @@ func (a *App) recoverPanic(next http.Handler) http.Handler {
 func safePath(path string) string {
 	if strings.HasPrefix(path, "/join/") {
 		return "/join/:token"
+	}
+	if strings.HasPrefix(path, "/provision/") {
+		return "/provision/:kind/:token"
 	}
 	return path
 }

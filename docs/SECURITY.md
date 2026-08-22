@@ -16,6 +16,8 @@ RingRing stores a host name and username, member display labels, extensions, dev
 
 Current SIP contact presence is visible only to the authenticated host of that party. The app queries it on demand over private AMI and keeps only the generated SIP username plus a normalized state long enough to render the no-store response. It does not persist or expose the registered contact URI, network address, port, call ID, or phone user-agent. Public, signup, login, invitation, and one-time setup pages do not query or reveal presence.
 
+The Linphone QR is rendered inside RingRing and contains a one-time HTTPS URL rather than a SIP password. Fetching it returns only the generated SIP identity, password, extension, registrar, and transport needed by that device; it does not return a member name, party name, host identity, or OpenAI credential. No third-party QR/provisioning service is involved.
+
 The `*10` phone test is an in-memory Asterisk media loop inside the caller's party context. It sends the caller's RTP straight back to that same authenticated channel and does not record, persist, transcribe, or send audio to another service.
 
 ## Deletion lifecycle
@@ -32,10 +34,11 @@ Telephony configuration is derived from SQLite. If an Asterisk regeneration or p
 - Deployment secrets live outside Git in a root-readable environment file or secret manager.
 - The application master key encrypts SIP passwords and party-scoped integration keys.
 - Invitation tokens are random, expire, are single-use, and are stored as hashes.
+- Linphone provisioning tokens have 32 random bytes, are stored only as hashes, expire after 30 minutes, and are consumed once. Rotation replaces them and revocation or device deletion removes them.
 - Session cookies are secure, HTTP-only, same-site, rotated at authentication, and backed by server-side state.
 - Host passwords use salted Argon2id hashes at the [OWASP password-storage minimum](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html). Passwords and the family access code are never logged.
 - Random offline recovery codes follow [OWASP's offline-recovery guidance](https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html): they are stored only as domain-separated hashes, revealed once, and rotated as a set after use. A reset invalidates all sessions.
-- Setup screens reveal a newly issued SIP password only once. A lost password is rotated, not retrieved.
+- Setup screens reveal a newly issued SIP password only once. Their provisioning URLs appear only on that same no-store reveal; rotated settings cross the redirect in a short-lived encrypted cookie, and token-bearing paths are masked from application logs. A lost or prematurely consumed setup is rotated, not retrieved.
 
 ## Network exposure
 
@@ -54,7 +57,7 @@ The database, AMI, metrics, debug endpoints, and container APIs are never public
 ## Abuse controls
 
 - There are no PSTN trunks, so toll fraud is structurally unavailable.
-- Authentication, invitations, registration, and expensive service lines are rate limited separately.
+- Authentication, invitations, one-time provisioning, registration, and expensive service lines are rate limited separately.
 - Native login and recovery are limited both per source address and per normalized username; Argon2 work also has a small concurrency ceiling.
 - Production host signup is closed unless a deployment-chosen `HOST_SIGNUP_CODE` is configured. This prevents anonymous visitors from provisioning party OpenAI resources.
 - Repeated SIP failures trigger temporary address blocking.
@@ -75,4 +78,4 @@ Do not open a public issue for a vulnerability that could expose credentials or 
 
 ## Known preview gaps
 
-HTTPS/TLS, narrow published ports, cross-party configuration isolation, native account recovery, SIP credential rotation/revocation, guarded member/party/account deletion, live authentication blocking, and isolated backup/restore are verified. The service remains a preview until two remote physical devices pass two-way audio.
+HTTPS/TLS, narrow published ports, cross-party configuration isolation, native account recovery, one-time Linphone provisioning, SIP credential rotation/revocation, guarded member/party/account deletion, live authentication blocking, and isolated backup/restore are verified in code and disposable environments. A real Linphone import and two remote physical devices still need to pass account setup and two-way audio before the service leaves preview status.

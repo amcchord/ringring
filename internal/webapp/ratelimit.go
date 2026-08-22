@@ -67,6 +67,8 @@ func rateCategory(r *http.Request) (string, int, time.Duration) {
 		return "auth", 30, 5 * time.Minute
 	case strings.HasPrefix(r.URL.Path, "/join/"):
 		return "join", 60, 5 * time.Minute
+	case strings.HasPrefix(r.URL.Path, "/provision/"):
+		return "provision", 20, 5 * time.Minute
 	case r.Method == http.MethodPost && (r.URL.Path == "/parties" || strings.HasSuffix(r.URL.Path, "/invites") || strings.HasSuffix(r.URL.Path, "/services") || strings.HasSuffix(r.URL.Path, "/delete") || strings.Contains(r.URL.Path, "/devices/")):
 		return "party-write", 30, 5 * time.Minute
 	default:

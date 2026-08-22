@@ -15,7 +15,7 @@
 ## Milestone 2 — Friendly enough for family
 
 - [x] Device-specific setup guides for ATAs, VoIP phones, and softphones.
-- [ ] QR-assisted softphone setup.
+- [x] One-time Linphone QR-assisted softphone setup; real-device import remains part of the usability pass.
 - [x] Host member directory and device controls.
 - [x] Self-service two-way echo test.
 - [x] Host-only live registration and reachability hints.

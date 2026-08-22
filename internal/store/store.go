@@ -15,13 +15,15 @@ import (
 )
 
 var (
-	ErrNotFound       = errors.New("not found")
-	ErrInviteUsed     = errors.New("invitation has already been used")
-	ErrInviteExpired  = errors.New("invitation has expired")
-	ErrExtensionTaken = errors.New("extension is already in use")
-	ErrUsernameTaken  = errors.New("username is already in use")
-	ErrRecoveryCode   = errors.New("invalid recovery code")
-	ErrPartiesRemain  = errors.New("host still owns parties")
+	ErrNotFound         = errors.New("not found")
+	ErrInviteUsed       = errors.New("invitation has already been used")
+	ErrInviteExpired    = errors.New("invitation has expired")
+	ErrExtensionTaken   = errors.New("extension is already in use")
+	ErrUsernameTaken    = errors.New("username is already in use")
+	ErrRecoveryCode     = errors.New("invalid recovery code")
+	ErrPartiesRemain    = errors.New("host still owns parties")
+	ErrProvisionUsed    = errors.New("provisioning link has already been used")
+	ErrProvisionExpired = errors.New("provisioning link has expired")
 )
 
 type Store struct {
@@ -72,7 +74,21 @@ type NewClaim struct {
 	DeviceLabel         string
 	SIPUsername         string
 	SIPSecretCiphertext string
+	Provisioning        NewProvisioningToken
 	Now                 time.Time
+}
+
+type NewProvisioningToken struct {
+	TokenHash []byte
+	ExpiresAt time.Time
+	CreatedAt time.Time
+}
+
+type ProvisioningDevice struct {
+	DeviceID            string
+	SIPUsername         string
+	SIPSecretCiphertext string
+	Extension           string
 }
 
 type RotatedDevice struct {
@@ -543,6 +559,9 @@ func (s *Store) ClaimInvitation(ctx context.Context, input NewClaim) (model.Part
 	if err != nil {
 		return model.Party{}, model.Member{}, model.Device{}, fmt.Errorf("create device: %w", err)
 	}
+	if err := replaceProvisioningTokenTx(ctx, tx, input.DeviceID, input.Provisioning); err != nil {
+		return model.Party{}, model.Member{}, model.Device{}, err
+	}
 
 	result, err := tx.ExecContext(ctx, `UPDATE invitations SET used_at = ? WHERE id = ? AND used_at IS NULL`, unix(input.Now), invitationID)
 	if err != nil {
@@ -710,7 +729,7 @@ func (s *Store) DeleteUserWithoutParties(ctx context.Context, userID string) err
 // RotateDevice replaces a device's registration identity and re-enables it if
 // it was previously revoked. Both the party and device ownership checks happen
 // inside the same transaction as the update.
-func (s *Store) RotateDevice(ctx context.Context, partyID, hostUserID, deviceID, sipUsername, secretCiphertext string) (RotatedDevice, error) {
+func (s *Store) RotateDevice(ctx context.Context, partyID, hostUserID, deviceID, sipUsername, secretCiphertext string, provisioning NewProvisioningToken) (RotatedDevice, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return RotatedDevice{}, fmt.Errorf("begin device rotation: %w", err)
@@ -730,6 +749,9 @@ func (s *Store) RotateDevice(ctx context.Context, partyID, hostUserID, deviceID,
 	}
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return RotatedDevice{}, ErrNotFound
+	}
+	if err := replaceProvisioningTokenTx(ctx, tx, deviceID, provisioning); err != nil {
+		return RotatedDevice{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return RotatedDevice{}, fmt.Errorf("commit device rotation: %w", err)
@@ -758,8 +780,71 @@ func (s *Store) RevokeDevice(ctx context.Context, partyID, hostUserID, deviceID 
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return ErrNotFound
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM device_provisioning_tokens WHERE device_id = ?`, deviceID); err != nil {
+		return fmt.Errorf("remove revoked device provisioning: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit device revocation: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ConsumeProvisioningToken(ctx context.Context, tokenHash []byte, now time.Time) (ProvisioningDevice, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return ProvisioningDevice{}, fmt.Errorf("begin provisioning claim: %w", err)
+	}
+	defer tx.Rollback()
+
+	var provision ProvisioningDevice
+	var expires int64
+	var used, revoked sql.NullInt64
+	err = tx.QueryRowContext(ctx, `
+		SELECT d.id, d.sip_username, d.sip_secret_ciphertext, m.extension,
+			t.expires_at, t.used_at, d.revoked_at
+		FROM device_provisioning_tokens t
+		JOIN devices d ON d.id = t.device_id
+		JOIN members m ON m.id = d.member_id
+		WHERE t.token_hash = ?`, tokenHash).Scan(
+		&provision.DeviceID, &provision.SIPUsername, &provision.SIPSecretCiphertext,
+		&provision.Extension, &expires, &used, &revoked,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ProvisioningDevice{}, ErrNotFound
+	}
+	if err != nil {
+		return ProvisioningDevice{}, fmt.Errorf("load provisioning claim: %w", err)
+	}
+	if used.Valid || revoked.Valid {
+		return ProvisioningDevice{}, ErrProvisionUsed
+	}
+	if !fromUnix(expires).After(now) {
+		return ProvisioningDevice{}, ErrProvisionExpired
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE device_provisioning_tokens SET used_at = ? WHERE token_hash = ? AND used_at IS NULL`, unix(now), tokenHash)
+	if err != nil {
+		return ProvisioningDevice{}, fmt.Errorf("consume provisioning claim: %w", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return ProvisioningDevice{}, ErrProvisionUsed
+	}
+	if err := tx.Commit(); err != nil {
+		return ProvisioningDevice{}, fmt.Errorf("commit provisioning claim: %w", err)
+	}
+	return provision, nil
+}
+
+func replaceProvisioningTokenTx(ctx context.Context, tx *sql.Tx, deviceID string, input NewProvisioningToken) error {
+	if len(input.TokenHash) != 32 || !input.ExpiresAt.After(input.CreatedAt) {
+		return errors.New("invalid provisioning token")
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM device_provisioning_tokens WHERE device_id = ?`, deviceID); err != nil {
+		return fmt.Errorf("replace device provisioning: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO device_provisioning_tokens (token_hash, device_id, expires_at, created_at)
+		VALUES (?, ?, ?, ?)`, input.TokenHash, deviceID, unix(input.ExpiresAt), unix(input.CreatedAt)); err != nil {
+		return fmt.Errorf("create device provisioning: %w", err)
 	}
 	return nil
 }
@@ -989,4 +1074,13 @@ CREATE TABLE IF NOT EXISTS devices (
     revoked_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS devices_member ON devices(member_id);
+
+CREATE TABLE IF NOT EXISTS device_provisioning_tokens (
+    token_hash BLOB PRIMARY KEY,
+    device_id TEXT NOT NULL UNIQUE REFERENCES devices(id) ON DELETE CASCADE,
+    expires_at INTEGER NOT NULL,
+    used_at INTEGER,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS device_provisioning_expires ON device_provisioning_tokens(expires_at);
 `
