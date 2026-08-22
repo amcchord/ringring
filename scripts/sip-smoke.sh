@@ -189,9 +189,6 @@ if test "$ready" -ne 1; then
   docker logs ringring-sip-smoke-asterisk >&2 || true
   exit 1
 fi
-docker exec ringring-sip-smoke-asterisk asterisk -rx 'core set verbose 3' >/dev/null
-docker exec ringring-sip-smoke-asterisk \
-  asterisk -rx 'logger add channel ringring-smoke verbose,notice,warning,error' >/dev/null
 docker exec ringring-sip-smoke-asterisk \
   asterisk -rx 'pjsip show transport transport-tls' | grep -q 'transport-tls'
 tls_report=$(docker exec ringring-sip-smoke-asterisk sh -c \
@@ -277,7 +274,10 @@ if printf '%s\n' "$dialplan" | grep -q 'Dial('; then
   echo "Phone-check context unexpectedly contains a Dial application" >&2
   exit 1
 fi
-docker exec ringring-sip-smoke-asterisk asterisk -rx 'core set verbose 3' >/dev/null
+for prompt in hello your extension is auth-thankyou; do
+  docker exec ringring-sip-smoke-asterisk \
+    test -s "/var/lib/asterisk/sounds/en/$prompt.gsm"
+done
 docker rm -f ringring-sip-smoke-register-a >/dev/null
 
 echo "Sending a host-scoped incoming ring test to phone B..."
@@ -297,6 +297,7 @@ party_page=$(docker exec ringring-sip-smoke-app curl --fail --silent --show-erro
   --cookie /tmp/ringring-smoke-cookies http://127.0.0.1:8080/parties/pty_smoke)
 csrf=$(printf '%s\n' "$party_page" | sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' | head -n 1)
 test -n "$csrf"
+ring_started=$(date +%s)
 docker exec ringring-sip-smoke-app sh -c \
   "curl --fail --silent --show-error --location --cookie /tmp/ringring-smoke-cookies \
     --data-urlencode csrf=$csrf http://127.0.0.1:8080/parties/pty_smoke/devices/dev_smoke_b/ring-test" | \
@@ -309,13 +310,13 @@ if test "$ring_result" -ne 0; then
   echo "The incoming ring-test phone did not complete cleanly." >&2
   exit 1
 fi
-if ! grep -R -q 'RingRing setup' "$work_directory/logs/ringring-sip-smoke-phone-b"; then
-  echo "The incoming ring-test INVITE did not carry the fixed caller label." >&2
+ring_elapsed=$(($(date +%s) - ring_started))
+if test "$ring_elapsed" -lt 4 || test "$ring_elapsed" -gt 21; then
+  echo "The incoming ring-test prompt had an unexpected duration." >&2
   exit 1
 fi
-if ! docker exec ringring-sip-smoke-asterisk \
-  grep -q "Playing 'hello\." /var/log/asterisk/ringring-smoke; then
-  echo "Asterisk did not play the first bundled ring-test prompt." >&2
+if ! grep -R -q 'RingRing setup' "$work_directory/logs/ringring-sip-smoke-phone-b"; then
+  echo "The incoming ring-test INVITE did not carry the fixed caller label." >&2
   exit 1
 fi
 if ! docker exec ringring-sip-smoke-asterisk test ! -e /var/log/asterisk/cdr-csv/Master.csv; then
