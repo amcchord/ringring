@@ -25,6 +25,7 @@ This is the durable, chronological project record. Add new entries at the top. C
 - `make check` passes with formatting, vet, and race-enabled tests. Coverage includes native signup/login/recovery, duplicate usernames, one-time recovery reveal, old-session and old-password invalidation, host-scoped device changes, party-scoped service routing, weather lookup, speech conversion, disclosure text, and cache-disable behavior.
 - The complete native signup and sign-in flow passed in a real browser at desktop and 390×844 mobile viewports. The recovery screen issued exactly eight codes and the second reveal was rejected.
 - Shell syntax and whitespace checks pass. Modified Compose images, the live Fail2Ban jail, FastAGI connectivity, and Asterisk media applications still require production deployment verification.
+- Production image verification confirmed that `MP3Player` is loaded and `mpg123` can decode the fixed SomaFM stream over HTTP; the HTTPS form fails because this decoder has no TLS URL support.
 
 ### Remaining
 

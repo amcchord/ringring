@@ -62,7 +62,7 @@ Google OpenID Connect remains an optional integration, not a prerequisite for op
 
 ## Special service lines
 
-Each party controls its own generated routes. `*11` uses Asterisk's local time playback, `*12` calls a private FastAGI service that combines Open-Meteo data with the party's OpenAI text-to-speech key, and `*13` streams the fixed Groove Salad MP3 endpoint through Asterisk. A disabled service has no dialplan route.
+Each party controls its own generated routes. `*11` uses Asterisk's local time playback, `*12` calls a private FastAGI service that combines Open-Meteo data with the party's OpenAI text-to-speech key, and `*13` streams the fixed Groove Salad MP3 endpoint through Asterisk. The public stream uses HTTP because Asterisk's `MP3Player`/`mpg123` path in the reference image cannot open HTTPS; it carries no credentials or caller data. A disabled service has no dialplan route.
 
 Weather audio is cached by party and settings timestamp, and disabling the line takes effect before a cached file can be served. The fixed radio URL is code-controlled; accepting arbitrary host URLs is intentionally deferred to avoid SSRF and dialplan-injection risk.
 

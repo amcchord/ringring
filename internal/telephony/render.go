@@ -29,7 +29,10 @@ type Configuration struct {
 	Dialplan []byte
 }
 
-const grooveSaladStreamURL = "https://ice5.somafm.com/groovesalad-128-mp3"
+// Asterisk's MP3Player delegates to mpg123, whose URL reader does not support
+// TLS in the reference image. This is a public, code-controlled audio stream;
+// no credentials or caller data are sent over it.
+const grooveSaladStreamURL = "http://ice5.somafm.com/groovesalad-128-mp3"
 
 func Render(devices []DialDevice, services []model.RoutingServices) (Configuration, error) {
 	ordered := append([]DialDevice(nil), devices...)

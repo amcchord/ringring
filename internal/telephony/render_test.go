@@ -43,6 +43,9 @@ func TestRenderIsolatesPartyDialplans(t *testing.T) {
 	if strings.Contains(gold, "exten => *12") || !strings.Contains(gold, "exten => *13") {
 		t.Fatal("gold party should contain only its enabled radio service")
 	}
+	if !strings.Contains(gold, "MP3Player(http://ice5.somafm.com/groovesalad-128-mp3)") {
+		t.Fatal("radio route must use the mpg123-compatible fixed HTTP stream")
+	}
 	if strings.Contains(blue, "pty_gold") || strings.Contains(gold, "pty_blue") {
 		t.Fatalf("service party ID leaked across contexts:\n%s", dialplan)
 	}
