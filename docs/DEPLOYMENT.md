@@ -48,6 +48,10 @@ ASTERISK_AMI_ADDR=asterisk:5038
 ASTERISK_AMI_USER=ringring
 ASTERISK_AMI_SECRET=<URL-safe random secret>
 FASTAGI_ADDR=:4573
+AI_AUDIO_ADDR=:4574
+AI_REALTIME_MODEL=gpt-realtime-2.1
+AI_CALL_MAX_DURATION=3m
+AI_MAX_CONCURRENT=2
 VOICE_AUDIO_DIR=/asterisk/audio
 VOICE_PLAYBACK_DIR=/var/lib/ringring/asterisk/audio
 TZ=America/New_York
@@ -66,6 +70,8 @@ Generate application keys with `openssl rand -base64 32` and the AMI secret with
 Native username/password login is always available. In production, new-account signup is open only while `HOST_SIGNUP_CODE` is nonempty; trusted hosts enter that shared code once during account creation. No email address or confirmation is required. A host must save the one-time recovery codes because the server cannot email a reset link.
 
 Google OAuth is optional. If desired, create a web application and register `https://ringring.live/auth/google/callback` as an authorized redirect URI, then set the two Google fields. Leaving them empty does not affect native login.
+
+`AI_AUDIO_ADDR` is private container traffic and must not be published on the host. The reference limits `*14` calls to three minutes and two concurrent sessions in addition to each party project's hard monthly spend limit. Before a party enables the line for anyone under 13, confirm that the OpenAI organization has Zero Data Retention as required by the official [Under 18 API Guidance](https://developers.openai.com/api/docs/guides/safety-checks/under-18-api-guidance).
 
 ## SIP authentication firewall
 
@@ -106,3 +112,7 @@ docker compose up -d --remove-orphans
 ```
 
 Back up `/opt/ringring/deploy/state/app` before schema-changing upgrades. Generated Asterisk files can be regenerated from the database and do not need separate backups.
+
+### `*14` upgrade and rollback
+
+The `*14` release adds `party_services.ai_enabled` with a forward-only startup migration. Take the app-state backup while the app is stopped, then restart the old version before beginning the normal update. The column defaults to disabled and older RingRing builds ignore it, so rolling the app image and checkout back leaves the migrated database usable; the four `AI_*` environment variables are also ignored by older builds. Keep the database backup until the upgraded app, private port `4574`, and generated Asterisk dialplan have all been verified. Do not publish port `4574` during either upgrade or rollback.

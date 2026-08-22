@@ -152,6 +152,10 @@ input:focus { border-color: var(--purple); box-shadow: 0 0 0 4px rgba(108,76,255
 .service-choice { padding-bottom: 3px; }
 .weather-field { display: block; margin: 10px 3px 6px; font-size: .78rem; font-weight: 850; }
 .resolved-place { display: block; margin: 6px 3px 0; color: var(--muted); }
+.ai-service-choice { display: grid; gap: 10px; }
+.ai-safety-note { margin: 0 3px; padding: 11px 12px; color: #5c4511; background: #fff2bd; border: 1.5px solid #e2bd54; border-radius: 12px; font-size: .76rem; line-height: 1.45; }
+.safety-confirmation { display: grid; grid-template-columns: 24px 1fr; gap: 9px; align-items: start; margin: 0 3px; color: var(--muted); font-size: .76rem; font-weight: 750; line-height: 1.45; cursor: pointer; }
+.safety-confirmation input { width: 20px; min-height: 20px; margin: 1px 0 0; accent-color: var(--purple); }
 .service-form .button { width: 100%; margin-top: 5px; }
 .service-note { margin: 18px 0 0; padding-top: 16px; border-top: 1.5px solid var(--line); font-size: .78rem; }
 

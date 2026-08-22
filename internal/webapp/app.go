@@ -800,8 +800,13 @@ func (a *App) updateServices(w http.ResponseWriter, r *http.Request, session aut
 	}
 	query := strings.Join(strings.Fields(r.FormValue("weather_query")), " ")
 	weatherEnabled := r.FormValue("weather_enabled") != ""
-	if weatherEnabled && party.OpenAIStatus != "ready" {
-		a.errorPage(w, http.StatusConflict, "The weather line needs its voice", "Wait until this party's AI line says ready, then turn weather on.", "/parties/"+url.PathEscape(partyID), "Back to the party")
+	aiEnabled := r.FormValue("ai_enabled") != ""
+	if (weatherEnabled || aiEnabled) && party.OpenAIStatus != "ready" {
+		a.errorPage(w, http.StatusConflict, "The AI lines need their voice", "Wait until this party's AI status says ready, then turn an AI-powered line on.", "/parties/"+url.PathEscape(partyID), "Back to the party")
+		return
+	}
+	if aiEnabled && !existing.AIEnabled && r.FormValue("ai_safety_confirmed") == "" {
+		a.errorPage(w, http.StatusBadRequest, "An adult host must confirm the safety rules", "Review the child-safety note and check the confirmation before turning on the AI conversation line.", "/parties/"+url.PathEscape(partyID), "Back to the party")
 		return
 	}
 	if weatherEnabled && query == "" {
@@ -829,7 +834,7 @@ func (a *App) updateServices(w http.ResponseWriter, r *http.Request, session aut
 		TimeEnabled: r.FormValue("time_enabled") != "", WeatherEnabled: weatherEnabled,
 		WeatherQuery: location.Query, WeatherLabel: location.Label,
 		WeatherLatitude: location.Latitude, WeatherLongitude: location.Longitude,
-		RadioEnabled: r.FormValue("radio_enabled") != "", UpdatedAt: a.now(),
+		RadioEnabled: r.FormValue("radio_enabled") != "", AIEnabled: aiEnabled, UpdatedAt: a.now(),
 	})
 	if err != nil {
 		a.internalError(w, r, err)

@@ -40,6 +40,7 @@ type PartyServices struct {
 	WeatherLatitude  float64
 	WeatherLongitude float64
 	RadioEnabled     bool
+	AIEnabled        bool
 	UpdatedAt        time.Time
 }
 
@@ -48,6 +49,7 @@ type RoutingServices struct {
 	TimeEnabled    bool
 	WeatherEnabled bool
 	RadioEnabled   bool
+	AIEnabled      bool
 }
 
 type Invitation struct {

@@ -2,6 +2,34 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-21 — Disclosed, bounded RingRing AI calls
+
+### Shipped
+
+- Added host-controlled `*14` RingRing AI calls using a private Asterisk AudioSocket channel and OpenAI's server-side Realtime WebSocket API. The bridge converts Asterisk 8 kHz signed-linear audio to G.711 μ-law in each direction and paces outbound frames at telephone cadence.
+- Added a short-lived, one-use call ticket so a random Asterisk call UUID must first be authorized by private FastAGI. The bridge then rechecks the party setting, decrypts only that party's runtime key, and never receives the organization admin key.
+- Added an exact AI-voice disclosure before live audio, child-appropriate instructions, no tools, no input transcription, disabled tracing, ignored transcript events, bounded output, a three-minute call limit, and a two-call deployment concurrency limit.
+- Added an adult-host confirmation and prominent under-13/Zero Data Retention warning to the responsive service controls. The AI route is disabled by default and omitted from a party's dialplan unless its party key is ready and the host turns it on.
+- Added a forward-only `party_services.ai_enabled` migration, deployment configuration, rollback guidance, architecture/security documentation, and the current `gpt-realtime-2.1` default.
+
+### Decisions
+
+- Keep media on RingRing's existing Asterisk path instead of transferring SIP control to a model provider. This preserves the local registrar, party-scoped dialplan, SIP gear compatibility, and the no-PSTN boundary.
+- Use Asterisk's AudioSocket channel driver rather than its dialplan application so the regular bridge owns telephone media timing and the application's two-second idle behavior is avoided.
+- RingRing stores no AI call audio or transcripts, but that does not claim provider-side Zero Data Retention. Callers under 13 remain out of scope until the operator confirms that OpenAI organization control and an external child-safety review is complete.
+
+### Verification
+
+- Race-enabled tests cover one-use ticket capacity, party-key decryption, the exact disclosure, disabled-service rechecks, privacy headers and session settings, transcript-event omission, bidirectional PCMU conversion, paced AudioSocket frames, party-isolated route generation, host confirmation, and legacy SQLite migration.
+- The host controls passed real-browser desktop and 390×844 checks with no horizontal overflow. Enabling without adult confirmation was rejected; an unavailable party shows a disabled control without a misleading confirmation checkbox.
+- `make check`, shell syntax, whitespace checks, and the Compose model pass locally or on the deployment host as applicable.
+
+### Remaining
+
+- Confirm Zero Data Retention and complete an external child-safety review before enabling `*14` for any caller under 13.
+- Complete an isolated two-endpoint SIP/RTP smoke test and then a two-way-audio call using remote physical devices.
+- Exercise backup/restore and add host/member deletion flows.
+
 ## 2026-08-21 — Native accounts and family service controls
 
 ### Shipped

@@ -88,6 +88,7 @@ type ServiceSettingsInput struct {
 	WeatherLatitude  float64
 	WeatherLongitude float64
 	RadioEnabled     bool
+	AIEnabled        bool
 	UpdatedAt        time.Time
 }
 
@@ -111,7 +112,39 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate database: %w", err)
 	}
+	if err := ensurePartyServicesAIColumn(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate AI service setting: %w", err)
+	}
 	return &Store{db: db}, nil
+}
+
+func ensurePartyServicesAIColumn(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(party_services)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	found := false
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return err
+		}
+		if name == "ai_enabled" {
+			found = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if found {
+		return nil
+	}
+	_, err = db.Exec(`ALTER TABLE party_services ADD COLUMN ai_enabled INTEGER NOT NULL DEFAULT 0 CHECK(ai_enabled IN (0, 1))`)
+	return err
 }
 
 func (s *Store) Close() error {
@@ -319,14 +352,14 @@ func (s *Store) UpdatePartyOpenAI(ctx context.Context, partyID, projectID, servi
 
 func (s *Store) PartyServices(ctx context.Context, partyID string) (model.PartyServices, error) {
 	var services model.PartyServices
-	var timeEnabled, weatherEnabled, radioEnabled int
+	var timeEnabled, weatherEnabled, radioEnabled, aiEnabled int
 	var updated int64
 	err := s.db.QueryRowContext(ctx, `
 		SELECT party_id, time_enabled, weather_enabled, weather_query, weather_label,
-			weather_latitude, weather_longitude, radio_enabled, updated_at
+			weather_latitude, weather_longitude, radio_enabled, ai_enabled, updated_at
 		FROM party_services WHERE party_id = ?`, partyID).Scan(
 		&services.PartyID, &timeEnabled, &weatherEnabled, &services.WeatherQuery, &services.WeatherLabel,
-		&services.WeatherLatitude, &services.WeatherLongitude, &radioEnabled, &updated,
+		&services.WeatherLatitude, &services.WeatherLongitude, &radioEnabled, &aiEnabled, &updated,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		if _, err := s.partyByID(ctx, partyID); err != nil {
@@ -340,6 +373,7 @@ func (s *Store) PartyServices(ctx context.Context, partyID string) (model.PartyS
 	services.TimeEnabled = timeEnabled != 0
 	services.WeatherEnabled = weatherEnabled != 0
 	services.RadioEnabled = radioEnabled != 0
+	services.AIEnabled = aiEnabled != 0
 	services.UpdatedAt = fromUnix(updated)
 	return services, nil
 }
@@ -348,9 +382,9 @@ func (s *Store) UpdatePartyServices(ctx context.Context, partyID, hostUserID str
 	result, err := s.db.ExecContext(ctx, `
 		INSERT INTO party_services (
 			party_id, time_enabled, weather_enabled, weather_query, weather_label,
-			weather_latitude, weather_longitude, radio_enabled, updated_at
+			weather_latitude, weather_longitude, radio_enabled, ai_enabled, updated_at
 		)
-		SELECT id, ?, ?, ?, ?, ?, ?, ?, ? FROM parties WHERE id = ? AND host_user_id = ?
+		SELECT id, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM parties WHERE id = ? AND host_user_id = ?
 		ON CONFLICT(party_id) DO UPDATE SET
 			time_enabled = excluded.time_enabled,
 			weather_enabled = excluded.weather_enabled,
@@ -359,9 +393,10 @@ func (s *Store) UpdatePartyServices(ctx context.Context, partyID, hostUserID str
 			weather_latitude = excluded.weather_latitude,
 			weather_longitude = excluded.weather_longitude,
 			radio_enabled = excluded.radio_enabled,
+			ai_enabled = excluded.ai_enabled,
 			updated_at = excluded.updated_at`,
 		boolInt(input.TimeEnabled), boolInt(input.WeatherEnabled), input.WeatherQuery, input.WeatherLabel,
-		input.WeatherLatitude, input.WeatherLongitude, boolInt(input.RadioEnabled), unix(input.UpdatedAt), partyID, hostUserID,
+		input.WeatherLatitude, input.WeatherLongitude, boolInt(input.RadioEnabled), boolInt(input.AIEnabled), unix(input.UpdatedAt), partyID, hostUserID,
 	)
 	if err != nil {
 		return model.PartyServices{}, fmt.Errorf("update party services: %w", err)
@@ -373,7 +408,7 @@ func (s *Store) UpdatePartyServices(ctx context.Context, partyID, hostUserID str
 		PartyID: partyID, TimeEnabled: input.TimeEnabled, WeatherEnabled: input.WeatherEnabled,
 		WeatherQuery: input.WeatherQuery, WeatherLabel: input.WeatherLabel,
 		WeatherLatitude: input.WeatherLatitude, WeatherLongitude: input.WeatherLongitude,
-		RadioEnabled: input.RadioEnabled, UpdatedAt: input.UpdatedAt.UTC(),
+		RadioEnabled: input.RadioEnabled, AIEnabled: input.AIEnabled, UpdatedAt: input.UpdatedAt.UTC(),
 	}, nil
 }
 
@@ -656,7 +691,8 @@ func (s *Store) RoutingServices(ctx context.Context) ([]model.RoutingServices, e
 		SELECT p.id,
 			COALESCE(s.time_enabled, 1),
 			CASE WHEN COALESCE(s.weather_enabled, 0) = 1 AND p.openai_status = 'ready' THEN 1 ELSE 0 END,
-			COALESCE(s.radio_enabled, 0)
+			COALESCE(s.radio_enabled, 0),
+			CASE WHEN COALESCE(s.ai_enabled, 0) = 1 AND p.openai_status = 'ready' THEN 1 ELSE 0 END
 		FROM parties p LEFT JOIN party_services s ON s.party_id = p.id
 		ORDER BY p.id`)
 	if err != nil {
@@ -666,13 +702,14 @@ func (s *Store) RoutingServices(ctx context.Context) ([]model.RoutingServices, e
 	var services []model.RoutingServices
 	for rows.Next() {
 		var item model.RoutingServices
-		var timeEnabled, weatherEnabled, radioEnabled int
-		if err := rows.Scan(&item.PartyID, &timeEnabled, &weatherEnabled, &radioEnabled); err != nil {
+		var timeEnabled, weatherEnabled, radioEnabled, aiEnabled int
+		if err := rows.Scan(&item.PartyID, &timeEnabled, &weatherEnabled, &radioEnabled, &aiEnabled); err != nil {
 			return nil, fmt.Errorf("scan routing services: %w", err)
 		}
 		item.TimeEnabled = timeEnabled != 0
 		item.WeatherEnabled = weatherEnabled != 0
 		item.RadioEnabled = radioEnabled != 0
+		item.AIEnabled = aiEnabled != 0
 		services = append(services, item)
 	}
 	return services, rows.Err()
@@ -816,8 +853,9 @@ CREATE TABLE IF NOT EXISTS party_services (
     weather_label TEXT NOT NULL DEFAULT '',
     weather_latitude REAL NOT NULL DEFAULT 0,
     weather_longitude REAL NOT NULL DEFAULT 0,
-    radio_enabled INTEGER NOT NULL DEFAULT 0 CHECK(radio_enabled IN (0, 1)),
-    updated_at INTEGER NOT NULL
+	radio_enabled INTEGER NOT NULL DEFAULT 0 CHECK(radio_enabled IN (0, 1)),
+	ai_enabled INTEGER NOT NULL DEFAULT 0 CHECK(ai_enabled IN (0, 1)),
+	updated_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS invitations (

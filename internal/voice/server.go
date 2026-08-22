@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/amcchord/ringring/internal/model"
@@ -38,15 +39,22 @@ type SpeechSource interface {
 }
 
 type Server struct {
-	Source        PartySource
-	Cipher        SecretDecryptor
-	Weather       WeatherSource
-	Speech        SpeechSource
-	AudioDir      string
-	PlaybackDir   string
-	Logger        *slog.Logger
-	Now           func() time.Time
-	CacheDuration time.Duration
+	Source            PartySource
+	Cipher            SecretDecryptor
+	Weather           WeatherSource
+	Speech            SpeechSource
+	AudioDir          string
+	PlaybackDir       string
+	Logger            *slog.Logger
+	Now               func() time.Time
+	CacheDuration     time.Duration
+	AIModel           string
+	AIRealtimeURL     string
+	AICallMaxDuration time.Duration
+	AIMaxConcurrent   int
+	aiMu              sync.Mutex
+	aiTickets         map[string]aiTicket
+	aiActive          int
 }
 
 func (s *Server) Serve(listener net.Listener) error {
@@ -67,7 +75,7 @@ func (s *Server) Serve(listener net.Listener) error {
 
 func (s *Server) handle(connection net.Conn) {
 	defer connection.Close()
-	_ = connection.SetDeadline(time.Now().Add(40 * time.Second))
+	_ = connection.SetDeadline(time.Now().Add(55 * time.Second))
 	reader := bufio.NewReader(connection)
 	writer := bufio.NewWriter(connection)
 	environment, err := readEnvironment(reader)
@@ -75,10 +83,18 @@ func (s *Server) handle(connection net.Conn) {
 		s.logger().Warn("read FastAGI environment", "error", err)
 		return
 	}
-	if environment["agi_network_script"] != "weather" {
+	switch environment["agi_network_script"] {
+	case "weather":
+		s.handleWeather(reader, writer, environment)
+	case "ai-authorize":
+		s.handleAIAuthorize(reader, writer, environment)
+	default:
 		_ = agiCommand(reader, writer, "EXEC Playback ss-noservice")
-		return
 	}
+	return
+}
+
+func (s *Server) handleWeather(reader *bufio.Reader, writer *bufio.Writer, environment map[string]string) {
 	partyID := environment["agi_arg_1"]
 	if !safePartyID.MatchString(partyID) {
 		_ = agiCommand(reader, writer, "EXEC Playback ss-noservice")
@@ -205,27 +221,27 @@ func agiCommand(reader *bufio.Reader, writer *bufio.Writer, command string) erro
 func atomicWrite(path string, content []byte) error {
 	file, err := os.CreateTemp(filepath.Dir(path), ".ringring-audio-*")
 	if err != nil {
-		return fmt.Errorf("create temporary weather audio: %w", err)
+		return fmt.Errorf("create temporary voice audio: %w", err)
 	}
 	temporary := file.Name()
 	defer os.Remove(temporary)
 	if err := file.Chmod(0o640); err != nil {
 		_ = file.Close()
-		return fmt.Errorf("set weather audio permissions: %w", err)
+		return fmt.Errorf("set voice audio permissions: %w", err)
 	}
 	if _, err := file.Write(content); err != nil {
 		_ = file.Close()
-		return fmt.Errorf("write weather audio: %w", err)
+		return fmt.Errorf("write voice audio: %w", err)
 	}
 	if err := file.Sync(); err != nil {
 		_ = file.Close()
-		return fmt.Errorf("sync weather audio: %w", err)
+		return fmt.Errorf("sync voice audio: %w", err)
 	}
 	if err := file.Close(); err != nil {
-		return fmt.Errorf("close weather audio: %w", err)
+		return fmt.Errorf("close voice audio: %w", err)
 	}
 	if err := os.Rename(temporary, path); err != nil {
-		return fmt.Errorf("replace weather audio: %w", err)
+		return fmt.Errorf("replace voice audio: %w", err)
 	}
 	return nil
 }

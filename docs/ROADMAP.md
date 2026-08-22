@@ -29,8 +29,9 @@
 - [x] Per-party encrypted runtime key use.
 - [ ] Immediate party-key revocation and replacement.
 - [ ] Host-set project spend limit; service toggles are implemented.
-- [ ] Realtime voice line with child-appropriate party instructions.
+- [x] Realtime voice line with child-appropriate instructions, disclosure, bounded calls, and no tools.
 - [x] AI disclosure for generated weather speech and no default transcript retention.
+- [ ] External child-safety review and confirmation of OpenAI Zero Data Retention before use by callers under 13.
 
 ## Milestone 4 — Dependable self-hosting
 

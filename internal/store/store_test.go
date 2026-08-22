@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -157,13 +159,13 @@ func TestPartyServiceSettingsAreHostScopedAndDefaultToTime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !defaults.TimeEnabled || defaults.WeatherEnabled || defaults.RadioEnabled {
+	if !defaults.TimeEnabled || defaults.WeatherEnabled || defaults.RadioEnabled || defaults.AIEnabled {
 		t.Fatalf("unexpected service defaults: %#v", defaults)
 	}
 	input := ServiceSettingsInput{
 		TimeEnabled: false, WeatherEnabled: true, WeatherQuery: "Portland, Maine",
 		WeatherLabel: "Portland, Maine", WeatherLatitude: 43.66, WeatherLongitude: -70.25,
-		RadioEnabled: true, UpdatedAt: now.Add(time.Minute),
+		RadioEnabled: true, AIEnabled: true, UpdatedAt: now.Add(time.Minute),
 	}
 	if _, err := s.UpdatePartyServices(ctx, party.ID, other.ID, input); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("non-host update error = %v", err)
@@ -172,7 +174,7 @@ func TestPartyServiceSettingsAreHostScopedAndDefaultToTime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.TimeEnabled || !updated.WeatherEnabled || !updated.RadioEnabled || updated.WeatherLabel != "Portland, Maine" {
+	if updated.TimeEnabled || !updated.WeatherEnabled || !updated.RadioEnabled || !updated.AIEnabled || updated.WeatherLabel != "Portland, Maine" {
 		t.Fatalf("unexpected updated settings: %#v", updated)
 	}
 	if err := s.UpdatePartyOpenAI(ctx, party.ID, "project", "service-account", "encrypted-key", "ready"); err != nil {
@@ -182,7 +184,45 @@ func TestPartyServiceSettingsAreHostScopedAndDefaultToTime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(routing) != 1 || routing[0].TimeEnabled || !routing[0].WeatherEnabled || !routing[0].RadioEnabled {
+	if len(routing) != 1 || routing[0].TimeEnabled || !routing[0].WeatherEnabled || !routing[0].RadioEnabled || !routing[0].AIEnabled {
 		t.Fatalf("unexpected routing services: %#v", routing)
+	}
+}
+
+func TestOpenAddsAIServiceColumnToLegacyDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE TABLE party_services (
+		party_id TEXT PRIMARY KEY,
+		time_enabled INTEGER NOT NULL DEFAULT 1,
+		weather_enabled INTEGER NOT NULL DEFAULT 0,
+		weather_query TEXT NOT NULL DEFAULT '',
+		weather_label TEXT NOT NULL DEFAULT '',
+		weather_latitude REAL NOT NULL DEFAULT 0,
+		weather_longitude REAL NOT NULL DEFAULT 0,
+		radio_enabled INTEGER NOT NULL DEFAULT 0,
+		updated_at INTEGER NOT NULL
+	)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	var count int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('party_services') WHERE name = 'ai_enabled'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("ai_enabled column count = %d", count)
 	}
 }

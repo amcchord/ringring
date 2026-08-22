@@ -24,7 +24,7 @@ See [the architecture](docs/ARCHITECTURE.md), [the security model](docs/SECURITY
 
 The core private-phone flow is live: hosts can create parties, issue one-time member invitations, provision devices, rotate or revoke SIP credentials, and follow setup guides for ATAs, VoIP phones, and softphones. Hosts sign up immediately with a RingRing username, password, shared family access code, and offline recovery codes—Google and email confirmation are not required.
 
-Party-scoped `*11` time, `*12` weather, and `*13` internet-radio lines are deployed alongside automated per-party OpenAI key provisioning. The reference instance remains a preview until two remote devices pass a real two-way-audio call and backup/restore and deletion drills are complete. The interactive OpenAI companion is still planned.
+Party-scoped `*11` time, `*12` weather, `*13` internet-radio, and opt-in `*14` RingRing AI lines are deployed alongside automated per-party OpenAI key provisioning. The AI line uses a clearly disclosed voice, a party key, privacy-preserving safety identifiers, child-appropriate instructions, no tools, bounded calls, and no RingRing audio or transcript storage. The reference instance remains a preview until two remote devices pass a real two-way-audio call and backup/restore and deletion drills are complete.
 
 The public repository intentionally contains no deployment credentials or family data.
 

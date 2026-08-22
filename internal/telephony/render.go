@@ -113,6 +113,17 @@ func Render(devices []DialDevice, services []model.RoutingServices) (Configurati
 			fmt.Fprintf(&dialplan, " same => n,MP3Player(%s)\n", grooveSaladStreamURL)
 			dialplan.WriteString(" same => n,Hangup()\n")
 		}
+		if service.AIEnabled {
+			dialplan.WriteString("exten => *14,1,Answer()\n")
+			dialplan.WriteString(" same => n,Set(RINGRING_AI_CALL_ID=${UUID()})\n")
+			dialplan.WriteString(" same => n,Set(RINGRING_AI_READY=0)\n")
+			fmt.Fprintf(&dialplan, " same => n,AGI(agi://app:4573/ai-authorize,%s,${RINGRING_AI_CALL_ID},${CALLERID(num)})\n", service.PartyID)
+			dialplan.WriteString(" same => n,GotoIf($[\"${RINGRING_AI_READY}\"=\"1\"]?bridge:unavailable)\n")
+			dialplan.WriteString(" same => n(bridge),Dial(AudioSocket/app:4574/${RINGRING_AI_CALL_ID}/c(slin))\n")
+			dialplan.WriteString(" same => n,Hangup()\n")
+			dialplan.WriteString(" same => n(unavailable),Playback(ss-noservice)\n")
+			dialplan.WriteString(" same => n,Hangup()\n")
+		}
 
 		extensions := make([]string, 0, len(parties[contextName]))
 		for extension := range parties[contextName] {

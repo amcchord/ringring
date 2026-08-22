@@ -29,6 +29,10 @@ type Config struct {
 	AsteriskAMIUser            string
 	AsteriskAMISecret          string
 	FastAGIAddr                string
+	AIAudioAddr                string
+	AIRealtimeModel            string
+	AICallMaxDuration          time.Duration
+	AIMaxConcurrent            int
 	VoiceAudioDir              string
 	VoicePlaybackDir           string
 	InviteTTL                  time.Duration
@@ -52,6 +56,10 @@ func Load() (Config, error) {
 		AsteriskAMIUser:            env("ASTERISK_AMI_USER", "ringring"),
 		AsteriskAMISecret:          os.Getenv("ASTERISK_AMI_SECRET"),
 		FastAGIAddr:                env("FASTAGI_ADDR", ":4573"),
+		AIAudioAddr:                env("AI_AUDIO_ADDR", ":4574"),
+		AIRealtimeModel:            env("AI_REALTIME_MODEL", "gpt-realtime-2.1"),
+		AICallMaxDuration:          envDuration("AI_CALL_MAX_DURATION", 3*time.Minute),
+		AIMaxConcurrent:            envInt("AI_MAX_CONCURRENT", 2),
 		VoiceAudioDir:              env("VOICE_AUDIO_DIR", "/asterisk/audio"),
 		VoicePlaybackDir:           env("VOICE_PLAYBACK_DIR", "/var/lib/ringring/asterisk/audio"),
 		InviteTTL:                  48 * time.Hour,
@@ -80,6 +88,12 @@ func Load() (Config, error) {
 		if cfg.DevAuth {
 			return Config{}, errors.New("DEV_AUTH cannot be enabled in production")
 		}
+	}
+	if cfg.AICallMaxDuration < 30*time.Second || cfg.AICallMaxDuration > 10*time.Minute {
+		return Config{}, errors.New("AI_CALL_MAX_DURATION must be between 30s and 10m")
+	}
+	if cfg.AIMaxConcurrent < 1 || cfg.AIMaxConcurrent > 20 {
+		return Config{}, errors.New("AI_MAX_CONCURRENT must be between 1 and 20")
 	}
 
 	if len(cfg.MasterKey) == 0 {
@@ -127,6 +141,18 @@ func envInt(name string, fallback int) int {
 	}
 	parsed, err := strconv.Atoi(value)
 	if err != nil || parsed < 1 {
+		return fallback
+	}
+	return parsed
+}
+
+func envDuration(name string, fallback time.Duration) time.Duration {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil {
 		return fallback
 	}
 	return parsed

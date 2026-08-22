@@ -18,7 +18,7 @@ Internet
                                        RingRing app
 ```
 
-Caddy, the app, and Asterisk run as separate containers. Only Caddy's HTTPS port and Asterisk's SIP/RTP ports are public. The database, Asterisk Manager Interface (AMI), and app origin stay on private container networks.
+Caddy, the app, and Asterisk run as separate containers. Only Caddy's HTTPS port and Asterisk's SIP/RTP ports are public. The database, Asterisk Manager Interface (AMI), app origin, FastAGI service, and AI AudioSocket bridge stay on private container networks.
 
 ## Domain model
 
@@ -62,7 +62,7 @@ Google OpenID Connect remains an optional integration, not a prerequisite for op
 
 ## Special service lines
 
-Each party controls its own generated routes. `*11` uses Asterisk's local time playback, `*12` calls a private FastAGI service that combines Open-Meteo data with the party's OpenAI text-to-speech key, and `*13` streams the fixed Groove Salad MP3 endpoint through Asterisk. The public stream uses HTTP because Asterisk's `MP3Player`/`mpg123` path in the reference image cannot open HTTPS; it carries no credentials or caller data. A disabled service has no dialplan route.
+Each party controls its own generated routes. `*11` uses Asterisk's local time playback, `*12` calls a private FastAGI service that combines Open-Meteo data with the party's OpenAI text-to-speech key, `*13` streams the fixed Groove Salad MP3 endpoint through Asterisk, and `*14` connects the answered channel to the app's private AI AudioSocket listener. The public radio stream uses HTTP because Asterisk's `MP3Player`/`mpg123` path in the reference image cannot open HTTPS; it carries no credentials or caller data. A disabled service has no dialplan route.
 
 Weather audio is cached by party and settings timestamp, and disabling the line takes effect before a cached file can be served. The fixed radio URL is code-controlled; accepting arbitrary host URLs is intentionally deferred to avoid SSRF and dialplan-injection risk.
 
@@ -70,7 +70,9 @@ Weather audio is cached by party and settings timestamp, and disabling the line 
 
 When `OPENAI_ADMIN_KEY` is configured, party creation provisions an OpenAI project, sets a monthly hard spend limit, creates a service account, encrypts the returned key once, and discards it from logs and responses. Runtime calls use that party key. The organization admin key is never used for model calls.
 
-The first OpenAI voice line may bridge Asterisk audio to the Realtime API through the app. OpenAI's Realtime SIP endpoint is also a candidate, but it will not replace the core local SIP registrar or weaken party isolation.
+For `*14`, FastAGI validates the party setting and issues a short-lived, one-use ticket keyed by a random call UUID. Asterisk then opens an [AudioSocket](https://docs.asterisk.org/Configuration/Channel-Drivers/AudioSocket/) connection containing that UUID. The app claims the ticket, rechecks the party, decrypts only that party's key, converts Asterisk's 8 kHz signed-linear audio to G.711 μ-law, and bridges it to OpenAI's server-side [Realtime WebSocket](https://developers.openai.com/api/docs/guides/realtime-websocket). The connection sends a stable privacy-preserving safety identifier but no member name, SIP username, or extension. Neither the organization admin key nor another party's key enters the call path.
+
+RingRing omits input transcription, disables Realtime tracing, discards output transcript events, exposes no model tools, and stores no call content. It limits each call to three minutes by default and reserves only two simultaneous AI calls per deployment. The host must explicitly enable the line and acknowledge the under-18 rules; callers hear a generated disclosure before live audio begins.
 
 ## Growth seams
 

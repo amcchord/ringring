@@ -87,11 +87,18 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if err := database.UpdatePartyOpenAI(t.Context(), partyID, "proj_test", "svc_test", "encrypted-key", "ready"); err != nil {
 		t.Fatal(err)
 	}
+	unconfirmedAI := postForm(t, client, server.URL+"/parties/"+partyID+"/services", url.Values{
+		"csrf": {csrf}, "ai_enabled": {"1"},
+	})
+	if unconfirmedAI.StatusCode != http.StatusBadRequest || !strings.Contains(readBody(t, unconfirmedAI), "adult host") {
+		t.Fatal("AI line was enabled without the adult safety confirmation")
+	}
 	geocoder := &fakeWeatherGeocoder{}
 	app.weather = geocoder
 	servicePage := postForm(t, client, server.URL+"/parties/"+partyID+"/services", url.Values{
 		"csrf": {csrf}, "time_enabled": {"1"}, "weather_enabled": {"1"},
 		"weather_query": {" Portland,   Maine "}, "radio_enabled": {"1"},
+		"ai_enabled": {"1"}, "ai_safety_confirmed": {"1"},
 	})
 	serviceBody := readBody(t, servicePage)
 	if servicePage.StatusCode != http.StatusOK || !strings.Contains(serviceBody, "Using Portland, Maine") || geocoder.query != "Portland, Maine" {
@@ -101,15 +108,15 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !services.TimeEnabled || !services.WeatherEnabled || !services.RadioEnabled || services.WeatherLatitude != 43.66 {
+	if !services.TimeEnabled || !services.WeatherEnabled || !services.RadioEnabled || !services.AIEnabled || services.WeatherLatitude != 43.66 {
 		t.Fatalf("unexpected service settings: %#v", services)
 	}
 	routingServices, err := database.RoutingServices(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(routingServices) != 1 || !routingServices[0].WeatherEnabled {
-		t.Fatalf("weather service was not routable: %#v", routingServices)
+	if len(routingServices) != 1 || !routingServices[0].WeatherEnabled || !routingServices[0].AIEnabled {
+		t.Fatalf("AI-powered services were not routable: %#v", routingServices)
 	}
 
 	invite := postForm(t, client, server.URL+"/parties/"+partyID+"/invites", url.Values{"csrf": {csrf}})

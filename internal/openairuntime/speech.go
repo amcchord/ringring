@@ -36,7 +36,7 @@ func (c *Client) SpeechPCM(ctx context.Context, apiKey, input string) ([]byte, e
 	}
 	body, err := json.Marshal(map[string]any{
 		"model": "gpt-4o-mini-tts", "voice": "coral", "input": input,
-		"instructions":    "Speak warmly, clearly, and briskly like a cheerful family weather announcer.",
+		"instructions":    "Speak warmly, clearly, and briskly for a cheerful family phone service.",
 		"response_format": "pcm",
 	})
 	if err != nil {
@@ -51,7 +51,7 @@ func (c *Client) SpeechPCM(ctx context.Context, apiKey, input string) ([]byte, e
 	request.Header.Set("User-Agent", "ringring/0.1")
 	response, err := c.httpClient.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("generate weather speech: %w", err)
+		return nil, fmt.Errorf("generate speech: %w", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
@@ -60,7 +60,7 @@ func (c *Client) SpeechPCM(ctx context.Context, apiKey, input string) ([]byte, e
 	}
 	pcm, err := io.ReadAll(io.LimitReader(response.Body, 12<<20))
 	if err != nil {
-		return nil, fmt.Errorf("read weather speech: %w", err)
+		return nil, fmt.Errorf("read speech: %w", err)
 	}
 	if len(pcm) == 0 || len(pcm)%2 != 0 || len(pcm) >= 12<<20 {
 		return nil, errors.New("OpenAI speech API returned invalid PCM audio")

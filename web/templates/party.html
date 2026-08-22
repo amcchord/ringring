@@ -49,6 +49,19 @@
           <input type="checkbox" name="radio_enabled" value="1" {{if .Services.RadioEnabled}}checked{{end}}>
           <span><strong><span class="service-number">*13</span> Groove Salad radio</strong><small>Streams the listener-supported SomaFM station until the phone hangs up.</small></span>
         </label>
+        <div class="service-choice ai-service-choice">
+          <label class="service-toggle">
+            <input type="checkbox" name="ai_enabled" value="1" {{if .Services.AIEnabled}}checked{{end}} {{if not $voiceReady}}disabled{{end}}>
+            <span><strong><span class="service-number">*14</span> RingRing AI</strong><small>{{if $voiceReady}}Talk with a clearly disclosed, family-friendly AI voice for up to three minutes.{{else}}Available when this party's AI status is ready.{{end}}</small></span>
+          </label>
+          <p class="ai-safety-note">RingRing does not save call audio or transcripts. An adult should supervise younger callers. Do not enable this for a child under 13 unless your OpenAI organization has Zero Data Retention.</p>
+          {{if and $voiceReady (not .Services.AIEnabled)}}
+          <label class="safety-confirmation">
+            <input type="checkbox" name="ai_safety_confirmed" value="1">
+            <span>I am the adult host. I will explain that this is AI, supervise younger callers, and follow the under-13 data rule above.</span>
+          </label>
+          {{end}}
+        </div>
         <button class="button button-primary" type="submit">Save fun numbers</button>
       </form>
       <p class="service-note">Special lines stay inside this party. RingRing never routes them to the regular phone network.</p>

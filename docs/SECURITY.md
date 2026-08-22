@@ -12,7 +12,7 @@ RingRing is designed for family use and may handle children's voices and names. 
 
 ## Data minimization
 
-RingRing stores a host name and username, member display labels, extensions, device labels, and operational timestamps. An email address is neither requested nor required by native accounts. It does not record calls. Transcripts and audio persistence are off by default. The default frontend includes no advertising, behavioral analytics, or third-party trackers.
+RingRing stores a host name and username, member display labels, extensions, device labels, and operational timestamps. An email address is neither requested nor required by native accounts. It does not record calls. RingRing does not persist AI input audio, output audio, or transcript events. Provider-side API retention is controlled separately by the OpenAI organization's data controls. The default frontend includes no advertising, behavioral analytics, or third-party trackers.
 
 ## Secrets
 
@@ -43,7 +43,7 @@ The database, AMI, metrics, debug endpoints, and container APIs are never public
 - There are no PSTN trunks, so toll fraud is structurally unavailable.
 - Authentication, invitations, registration, and expensive service lines are rate limited separately.
 - Native login and recovery are limited both per source address and per normalized username; Argon2 work also has a small concurrency ceiling.
-- Production host signup is closed unless a high-entropy `HOST_SIGNUP_CODE` is configured. This prevents unauthenticated bots from provisioning party OpenAI resources.
+- Production host signup is closed unless a deployment-chosen `HOST_SIGNUP_CODE` is configured. This prevents anonymous visitors from provisioning party OpenAI resources.
 - Repeated SIP failures trigger temporary address blocking.
 - Hosts can revoke devices and disable integrations immediately.
 - OpenAI projects should use model restrictions and hard spend limits where available.
@@ -51,6 +51,10 @@ The database, AMI, metrics, debug endpoints, and container APIs are never public
 The reference deployment writes Asterisk PJSIP security events to a dedicated file. Fail2Ban uses its maintained Asterisk filter and inserts bans into Docker's `DOCKER-USER` chain, before published-port forwarding. A legitimate first SIP challenge is not a failure; repeated bad authentication responses are banned with increasing durations.
 
 The weather line sends a host-chosen place to Open-Meteo and a short forecast sentence to the party's OpenAI project for speech generation. Its AI-generated voice identifies itself and names Open-Meteo. RingRing does not send caller audio, member names, or SIP credentials to either service for weather playback.
+
+The `*14` conversation line is disabled by default. Enabling it requires an adult-host confirmation. It uses the current `gpt-realtime-2.1` default, child-appropriate system instructions, no tools, a privacy-preserving `OpenAI-Safety-Identifier`, disabled tracing, no input transcription, bounded response tokens, a three-minute call limit, and a deployment concurrency limit. The app ignores transcript events and never logs WebSocket payloads. A short, exact text-to-speech disclosure plays before the live bridge starts.
+
+OpenAI's [Under 18 API Guidance](https://developers.openai.com/api/docs/guides/safety-checks/under-18-api-guidance) calls for age-appropriate disclosure, content safeguards, monitoring/escalation paths, and heightened privacy care. It also says not to process personal data of children under 13 without Zero Data Retention. RingRing's host UI repeats that boundary: do not enable `*14` for a caller under 13 unless the OpenAI organization has Zero Data Retention. Adult supervision and an external child-safety review remain required before treating this preview as a general child-facing service.
 
 ## Reporting
 

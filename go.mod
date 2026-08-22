@@ -3,6 +3,8 @@ module github.com/amcchord/ringring
 go 1.26
 
 require (
+	github.com/coder/websocket v1.8.15
+	github.com/google/uuid v1.6.0
 	golang.org/x/crypto v0.55.0
 	golang.org/x/oauth2 v0.36.0
 	modernc.org/sqlite v1.57.0
@@ -11,7 +13,6 @@ require (
 require (
 	cloud.google.com/go/compute/metadata v0.3.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect

@@ -13,7 +13,7 @@ func TestRenderIsolatesPartyDialplans(t *testing.T) {
 		{PartyID: "pty_blue", DeviceID: "dev_b", Extension: "102", SIPUsername: "rrd_blue_b", SIPSecret: "secret-b"},
 		{PartyID: "pty_gold", DeviceID: "dev_c", Extension: "101", SIPUsername: "rrd_gold_c", SIPSecret: "secret-c"},
 	}, []model.RoutingServices{
-		{PartyID: "pty_blue", TimeEnabled: true, WeatherEnabled: true},
+		{PartyID: "pty_blue", TimeEnabled: true, WeatherEnabled: true, AIEnabled: true},
 		{PartyID: "pty_gold", TimeEnabled: true, RadioEnabled: true},
 	})
 	if err != nil {
@@ -36,6 +36,9 @@ func TestRenderIsolatesPartyDialplans(t *testing.T) {
 	}
 	if !strings.Contains(blue, "exten => *11") {
 		t.Fatal("time service should be present in each party")
+	}
+	if !strings.Contains(blue, "exten => *14") || !strings.Contains(blue, "ai-authorize,pty_blue") || !strings.Contains(blue, "Dial(AudioSocket/app:4574/${RINGRING_AI_CALL_ID}/c(slin))") {
+		t.Fatalf("blue party missing isolated AI bridge:\n%s", blue)
 	}
 	if !strings.Contains(blue, "exten => *12") || strings.Contains(blue, "exten => *13") {
 		t.Fatal("blue party should contain only its enabled weather service")
@@ -69,7 +72,7 @@ func TestRenderOmitsDisabledSpecialNumbers(t *testing.T) {
 		t.Fatal(err)
 	}
 	dialplan := string(config.Dialplan)
-	for _, number := range []string{"*11", "*12", "*13"} {
+	for _, number := range []string{"*11", "*12", "*13", "*14"} {
 		if strings.Contains(dialplan, "exten => "+number) {
 			t.Fatalf("disabled service %s remained in dialplan:\n%s", number, dialplan)
 		}
