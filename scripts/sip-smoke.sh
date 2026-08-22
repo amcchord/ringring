@@ -275,6 +275,7 @@ if printf '%s\n' "$dialplan" | grep -q 'Dial('; then
   echo "Phone-check context unexpectedly contains a Dial application" >&2
   exit 1
 fi
+docker exec ringring-sip-smoke-asterisk asterisk -rx 'core set verbose 3' >/dev/null
 docker rm -f ringring-sip-smoke-register-a >/dev/null
 
 echo "Sending a host-scoped incoming ring test to phone B..."
