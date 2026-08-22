@@ -20,6 +20,14 @@ This is the durable, chronological project record. Add new entries at the top. C
 
 - Focused generator and complete web tests cover fixed length, nonzero leading digits, CSPRNG failure, identity/password uniqueness sampling, numeric format rejection, encryption association, display grouping, raw copy attributes, one-use provisioning, new-phone issuance, and rotation.
 - A disposable browser claim at 1280×900 and 390×844 proved the grouped values match the raw 15/24-digit pair, both individual and copy-all actions preserve the exact unspaced credentials, every copy control is at least 44px tall, and the setup card has no horizontal overflow. The temporary viewport, clipboard, tab, process, and database were cleaned up afterward.
+- `make check`, `make security`, and `make admin-test` pass locally, including formatting, shell/operator fixtures, vet, the complete race-enabled suite, and the reachable-vulnerability scan. GitHub CI run `32597377790` and Security run `32597377830` passed exact candidate `23d669bf7ae6b5e471d491aadb47968dd8ca7849`.
+- From an isolated server worktree of that exact candidate, the complete SIP/TLS/multi-phone gate authenticated a newly generated numeric phone while retaining the fixed legacy mixed-format phones, and the official Linphone one-fetch provisioning, TLS registration, extension-call, and returned-audio suite passed. Two consecutive two-household NAT registration/call/media runs also passed, and every candidate smoke container, network, and worktree was removed.
+
+### Production
+
+- The guarded fast-forward created and restore-drilled checksummed pre/post archives `ringring-20260822T204422Z-b569daa.tar.gz` and `ringring-20260822T204605Z-23d669b.tar.gz`. Production is clean at exact runtime candidate `23d669bf7ae6b5e471d491aadb47968dd8ca7849`; doctor, public splash, signup, and readiness pass, while public metrics remain `404` and the AI child-safety gate remains closed.
+- The pre/post archives have the same application table set and byte-identical rows across all 11 tables. In particular, the already-present phone's SIP identity and encrypted secret are unchanged before, after, and in the live database; nothing was revealed or rotated.
+- The sealed live aggregate is one user, one party, one member, one device, two invitations, one session, eight recovery codes, one provisioning token, zero readiness records, one verified party key, one verified device secret, and zero active Asterisk contacts. Settled app, Asterisk non-security, and Caddy warning/error checks are zero.
 
 ### Remaining
 
