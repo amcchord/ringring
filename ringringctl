@@ -394,6 +394,7 @@ write_install_configuration() {
     printf 'AI_REALTIME_MODEL=gpt-realtime-2.1\n'
     printf 'AI_CALL_MAX_DURATION=3m\n'
     printf 'AI_MAX_CONCURRENT=2\n'
+    printf 'AI_CHILD_SAFETY_APPROVED=false\n'
     printf 'VOICE_AUDIO_DIR=/asterisk/audio\n'
     printf 'VOICE_PLAYBACK_DIR=/var/lib/ringring/asterisk/audio\n'
     printf 'TZ=%s\n' "$timezone"
@@ -437,6 +438,11 @@ validate_installed_configuration() {
   test -n "$(env_value "$config_dir/app.env" SESSION_SECRET)" || die "The session secret is empty."
   metrics_address=$(optional_env_value "$config_dir/app.env" METRICS_ADDR)
   test -z "$metrics_address" || test "$metrics_address" = 127.0.0.1:9090 || die "METRICS_ADDR must remain on 127.0.0.1:9090."
+  ai_child_safety_approved=$(optional_env_value "$config_dir/app.env" AI_CHILD_SAFETY_APPROVED)
+  case "$ai_child_safety_approved" in
+    ''|true|false) ;;
+    *) die "AI_CHILD_SAFETY_APPROVED must be true or false." ;;
+  esac
 }
 
 wait_for_health() {

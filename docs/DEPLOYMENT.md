@@ -84,6 +84,8 @@ AI_AUDIO_ADDR=:4574
 AI_REALTIME_MODEL=gpt-realtime-2.1
 AI_CALL_MAX_DURATION=3m
 AI_MAX_CONCURRENT=2
+# Do not set true until the child-safety and ZDR checks below are complete.
+AI_CHILD_SAFETY_APPROVED=false
 VOICE_AUDIO_DIR=/asterisk/audio
 VOICE_PLAYBACK_DIR=/var/lib/ringring/asterisk/audio
 TZ=America/New_York
@@ -111,7 +113,16 @@ Party OpenAI key replacement adds a nullable `parties.openai_api_key_id` column 
 
 Host-set spend limits add three forward-only `parties` columns for the last confirmed amount, one pending amount, and its reconciliation state. Existing parties migrate to an honest `unknown` local state without changing their provider project or interrupting current routing; the host's first save verifies or replaces the chosen amount. A new update also mirrors its pause into the older `openai_status` column, so rollback keeps AI routes unavailable rather than ignoring an uncertain provider result. Do not roll back or edit the pending amount mid-update. Return to this release and choose **Finish spend limit update**, which safely repeats that exact amount until OpenAI confirms active enforcement. Do not submit the production form as a deployment probe because it deliberately changes the party's provider limit.
 
-`METRICS_ADDR` and `AI_AUDIO_ADDR` are private container traffic and must not be published on the host. The metrics listener exports only bounded aggregate health/activity and Caddy does not proxy it; see [Privacy-preserving observability](OBSERVABILITY.md). The reference limits `*14` calls to three minutes and two concurrent sessions in addition to each party project's hard monthly spend limit. Before a party enables the line for anyone under 13, confirm that the OpenAI organization has Zero Data Retention as required by the official [Under 18 API Guidance](https://developers.openai.com/api/docs/guides/safety-checks/under-18-api-guidance).
+`METRICS_ADDR` and `AI_AUDIO_ADDR` are private container traffic and must not be published on the host. The metrics listener exports only bounded aggregate health/activity and Caddy does not proxy it; see [Privacy-preserving observability](OBSERVABILITY.md). The reference limits `*14` calls to three minutes and two concurrent sessions in addition to each party project's hard monthly spend limit.
+
+`AI_CHILD_SAFETY_APPROVED` is a server-operator gate for the open-ended `*14` conversation line, not a party preference. It defaults to `false`; fresh installs write that value explicitly, and older deployments that omit it are also closed. While closed, RingRing rejects host attempts to enable `*14`, clears any older saved `ai_enabled` preference at startup, removes the route from generated Asterisk configuration, refuses FastAGI authorization and party-key decryption, and refuses the Realtime WebSocket bridge. Time, weather text-to-speech, radio, echo, extension selection, and ordinary party calls are unaffected.
+
+Do not change the gate to `true` until both conditions are independently satisfied:
+
+1. An external child-safety review has approved the intended callers, disclosures, content controls, supervision, monitoring, reporting, and escalation process under OpenAI's [Under 18 API Guidance](https://developers.openai.com/api/docs/guides/safety-checks/under-18-api-guidance).
+2. OpenAI has confirmed Zero Data Retention for the exact organization/project used by RingRing. Verify the current provider state through the official [organization data-retention endpoint](https://developers.openai.com/api/reference/python/resources/admin/subresources/organization/subresources/data_retention/methods/retrieve); a forbidden or `not_eligible` response is not confirmation.
+
+After both checks, edit the root-only `/etc/ringring/app.env`, set exactly `AI_CHILD_SAFETY_APPROVED=true`, run `cd /opt/ringring && docker compose up -d --force-recreate app`, and then run `sudo /opt/ringring/ringringctl doctor`. To revoke approval, set the value back to `false` and recreate the app container; startup closes saved conversation preferences before telephony reconciliation. Do not put review evidence, provider responses, or administrator credentials in the repository.
 
 ## SIP authentication firewall
 
@@ -306,6 +317,8 @@ sheet and needs no data or configuration migration.
 ### `*14` upgrade and rollback
 
 The `*14` release adds `party_services.ai_enabled` with a forward-only startup migration. Take the app-state backup while the app is stopped, then restart the old version before beginning the normal update. The column defaults to disabled and older RingRing builds ignore it, so rolling the app image and checkout back leaves the migrated database usable; the four `AI_*` environment variables are also ignored by older builds. Keep the database backup until the upgraded app, private port `4574`, and generated Asterisk dialplan have all been verified. Do not publish port `4574` during either upgrade or rollback.
+
+The child-safety gate release adds no schema or provider mutation. Existing deployments omit `AI_CHILD_SAFETY_APPROVED` and therefore default closed. On first startup, the new app durably clears any older enabled `*14` preference before regenerating routes, so a rollback cannot revive the conversation line from stale state. The new variable is ignored by older builds. Leave it false unless the two documented external approvals are complete.
 
 ### `*15` upgrade and rollback
 

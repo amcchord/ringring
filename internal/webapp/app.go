@@ -143,6 +143,7 @@ type PageData struct {
 	OpenAISpendPending       string
 	OpenAISpendLimitMax      string
 	OpenAISpendLimitMaxInput string
+	AIChildSafetyApproved    bool
 }
 
 type authSession struct {
@@ -227,7 +228,7 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 	if cfg.AsteriskConfigDir != "" {
 		app.telephony = &telephony.Reconciler{
 			Source: database, Cipher: cipher, ConfigDir: cfg.AsteriskConfigDir,
-			Reloader: ami,
+			Reloader: ami, AIChildSafetyApproved: cfg.AIChildSafetyApproved,
 		}
 	}
 
@@ -1252,6 +1253,10 @@ func (a *App) updateServices(w http.ResponseWriter, r *http.Request, session aut
 	query := strings.Join(strings.Fields(r.FormValue("weather_query")), " ")
 	weatherEnabled := r.FormValue("weather_enabled") != ""
 	aiEnabled := r.FormValue("ai_enabled") != ""
+	if aiEnabled && !a.cfg.AIChildSafetyApproved {
+		a.errorPage(w, http.StatusConflict, "The AI conversation line is locked", "The server operator has not completed the child-safety review and confirmed Zero Data Retention. Weather and the other family lines still work.", "/parties/"+url.PathEscape(partyID), "Back to the party")
+		return
+	}
 	radioStationID := r.FormValue("radio_station")
 	if radioStationID == "" {
 		radioStationID = existing.RadioStation
@@ -1294,7 +1299,8 @@ func (a *App) updateServices(w http.ResponseWriter, r *http.Request, session aut
 		TimeEnabled: r.FormValue("time_enabled") != "", WeatherEnabled: weatherEnabled,
 		WeatherQuery: location.Query, WeatherLabel: location.Label,
 		WeatherLatitude: location.Latitude, WeatherLongitude: location.Longitude,
-		RadioEnabled: r.FormValue("radio_enabled") != "", RadioStation: radioStation.ID, AIEnabled: aiEnabled, UpdatedAt: a.now(),
+		RadioEnabled: r.FormValue("radio_enabled") != "", RadioStation: radioStation.ID, AIEnabled: aiEnabled,
+		AIChildSafetyApproved: a.cfg.AIChildSafetyApproved, UpdatedAt: a.now(),
 	})
 	if err != nil {
 		a.internalError(w, r, err)
@@ -1912,6 +1918,7 @@ func (a *App) pageData(session *authSession) PageData {
 	data := PageData{
 		AuthConfigured: a.cfg.HostSignupEnabled(), DevAuth: a.cfg.DevAuth,
 		SignupEnabled: a.cfg.HostSignupEnabled(), SignupCode: a.cfg.HostSignupCode != "",
+		AIChildSafetyApproved: a.cfg.AIChildSafetyApproved,
 	}
 	if session != nil {
 		data.User = &session.User

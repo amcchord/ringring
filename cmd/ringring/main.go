@@ -85,6 +85,10 @@ func main() {
 		os.Exit(1)
 	}
 	defer database.Close()
+	if err := database.EnforceAIChildSafetyGate(context.Background(), cfg.AIChildSafetyApproved, time.Now()); err != nil {
+		logger.Error("enforce AI conversation child-safety gate", "error", err)
+		os.Exit(1)
+	}
 	cipher, err := secure.NewCipher(cfg.MasterKey)
 	if err != nil {
 		logger.Error("create credential cipher", "error", err)
@@ -130,7 +134,8 @@ func main() {
 		Cipher: cipher, Weather: weather.New(nil), Speech: openairuntime.New(nil),
 		AudioDir: cfg.VoiceAudioDir, PlaybackDir: cfg.VoicePlaybackDir, Logger: logger,
 		AIModel: cfg.AIRealtimeModel, AICallMaxDuration: cfg.AICallMaxDuration, AIMaxConcurrent: cfg.AIMaxConcurrent,
-		Metrics: app.Metrics(),
+		AIChildSafetyApproved: cfg.AIChildSafetyApproved,
+		Metrics:               app.Metrics(),
 	}
 	go func() {
 		if err := voiceServer.Serve(voiceListener); err != nil {

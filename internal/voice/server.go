@@ -46,25 +46,26 @@ type SpeechSource interface {
 }
 
 type Server struct {
-	Source            PartySource
-	Extensions        ExtensionManager
-	Reconcile         func(context.Context) error
-	Cipher            SecretDecryptor
-	Weather           WeatherSource
-	Speech            SpeechSource
-	AudioDir          string
-	PlaybackDir       string
-	Logger            *slog.Logger
-	Metrics           *observability.Registry
-	Now               func() time.Time
-	CacheDuration     time.Duration
-	AIModel           string
-	AIRealtimeURL     string
-	AICallMaxDuration time.Duration
-	AIMaxConcurrent   int
-	aiMu              sync.Mutex
-	aiTickets         map[string]aiTicket
-	aiActive          int
+	Source                PartySource
+	Extensions            ExtensionManager
+	Reconcile             func(context.Context) error
+	Cipher                SecretDecryptor
+	Weather               WeatherSource
+	Speech                SpeechSource
+	AudioDir              string
+	PlaybackDir           string
+	Logger                *slog.Logger
+	Metrics               *observability.Registry
+	Now                   func() time.Time
+	CacheDuration         time.Duration
+	AIModel               string
+	AIRealtimeURL         string
+	AICallMaxDuration     time.Duration
+	AIMaxConcurrent       int
+	AIChildSafetyApproved bool
+	aiMu                  sync.Mutex
+	aiTickets             map[string]aiTicket
+	aiActive              int
 }
 
 func (s *Server) Serve(listener net.Listener) error {

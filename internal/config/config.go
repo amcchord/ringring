@@ -34,6 +34,7 @@ type Config struct {
 	AIRealtimeModel            string
 	AICallMaxDuration          time.Duration
 	AIMaxConcurrent            int
+	AIChildSafetyApproved      bool
 	VoiceAudioDir              string
 	VoicePlaybackDir           string
 	InviteTTL                  time.Duration
@@ -41,6 +42,10 @@ type Config struct {
 }
 
 func Load() (Config, error) {
+	aiChildSafetyApproved, err := envStrictBool("AI_CHILD_SAFETY_APPROVED", false)
+	if err != nil {
+		return Config{}, err
+	}
 	cfg := Config{
 		Environment:                env("APP_ENV", "development"),
 		HTTPAddr:                   env("HTTP_ADDR", ":8080"),
@@ -62,6 +67,7 @@ func Load() (Config, error) {
 		AIRealtimeModel:            env("AI_REALTIME_MODEL", "gpt-realtime-2.1"),
 		AICallMaxDuration:          envDuration("AI_CALL_MAX_DURATION", 3*time.Minute),
 		AIMaxConcurrent:            envInt("AI_MAX_CONCURRENT", 2),
+		AIChildSafetyApproved:      aiChildSafetyApproved,
 		VoiceAudioDir:              env("VOICE_AUDIO_DIR", "/asterisk/audio"),
 		VoicePlaybackDir:           env("VOICE_PLAYBACK_DIR", "/var/lib/ringring/asterisk/audio"),
 		InviteTTL:                  48 * time.Hour,
@@ -72,7 +78,6 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("APP_BASE_URL: %w", err)
 	}
 
-	var err error
 	if cfg.MasterKey, err = decodeKey("RINGRING_MASTER_KEY"); err != nil {
 		return Config{}, err
 	}
@@ -137,6 +142,21 @@ func envBool(name string, fallback bool) bool {
 	}
 	parsed, err := strconv.ParseBool(value)
 	return err == nil && parsed
+}
+
+func envStrictBool(name string, fallback bool) (bool, error) {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback, nil
+	}
+	switch value {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	default:
+		return false, fmt.Errorf("%s must be true or false", name)
+	}
 }
 
 func envInt(name string, fallback int) int {

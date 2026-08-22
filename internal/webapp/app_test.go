@@ -213,6 +213,18 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if err := database.UpdatePartyOpenAI(t.Context(), partyID, "proj_test", "svc_test", "key_old", initialPartyKey, "ready", 1000); err != nil {
 		t.Fatal(err)
 	}
+	lockedAI := postForm(t, client, server.URL+"/parties/"+partyID+"/services", url.Values{
+		"csrf": {csrf}, "ai_enabled": {"1"}, "ai_safety_confirmed": {"1"},
+	})
+	if lockedAI.StatusCode != http.StatusConflict || !strings.Contains(readBody(t, lockedAI), "server operator") {
+		t.Fatal("AI line was not held behind the operator child-safety gate")
+	}
+	lockedPartyPage := get(t, client, server.URL+"/parties/"+partyID)
+	lockedPartyBody := readBody(t, lockedPartyPage)
+	if !strings.Contains(lockedPartyBody, "Locked until the server operator") || !strings.Contains(lockedPartyBody, `name="ai_enabled" value="1"  disabled`) {
+		t.Fatal("party page did not explain or disable the closed AI conversation gate")
+	}
+	app.cfg.AIChildSafetyApproved = true
 	unconfirmedAI := postForm(t, client, server.URL+"/parties/"+partyID+"/services", url.Values{
 		"csrf": {csrf}, "ai_enabled": {"1"},
 	})

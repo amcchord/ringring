@@ -2,6 +2,33 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Fail-closed child-safety gate for AI conversation
+
+### Shipped
+
+- Added a deployment-wide `AI_CHILD_SAFETY_APPROVED` gate for the open-ended `*14` RingRing AI conversation. It defaults closed when omitted, fresh installs write `false`, and malformed values prevent startup instead of being interpreted as approval.
+- Enforced the closed gate independently in the host form, durable service-setting update, startup state reconciliation, Asterisk configuration reconciliation, FastAGI authorization, party-key access, AudioSocket handoff, and the final Realtime WebSocket bridge. Time, weather's one-way disclosed speech, radio, echo, extension selection, and ordinary party calling remain available.
+- Added a clear locked state and official under-18 guidance link to the host UI. Even after an operator approval, the existing party-level opt-in and adult-host confirmation remain required.
+- Documented the exact two-condition operator procedure, revocation path, upgrade/rollback behavior, architecture, security boundary, and threat-model residual risk. The external child-safety/ZDR roadmap item intentionally remains open.
+
+### Decisions
+
+- OpenAI's current under-18 guidance says not to process personal data from children under 13 without first implementing Zero Data Retention. A read-only request using the configured production administrator credential returned HTTP `403` with code `not_eligible`; that is not ZDR confirmation, so the reference deployment must remain closed.
+- Do not convert provider ambiguity into a host warning or accept an adult checkbox as operator approval. The deployment operator alone may open the gate after both an external child-safety review and provider confirmation for the exact organization/project.
+- Clear stale durable `ai_enabled` preferences at closed-gate startup. This makes an upgrade safe immediately and prevents an older binary from reviving a previously enabled route after rollback.
+
+### Verification
+
+- Regression tests prove the strict default, rejected storage update, durable stale-state clearing, preservation of non-conversation services, dialplan filtering, disabled host control, rejected FastAGI/key access, and a Realtime bridge that exits before network setup. An executable security contract requires every gate wiring point and the installer default.
+- `make check` passes shell validation, installer/certificate fixtures, vet, and the complete race-enabled suite. `make security` reports no reachable vulnerability and only the previously accepted non-reachable module advisory. `make admin-test` passes.
+- The local containerized SIP smoke could not start because Docker Desktop was not running; the same exact-candidate SIP/NAT/Linphone gates remain required on the Docker-enabled reference host before promotion.
+
+### Remaining
+
+- Obtain the external child-safety review and OpenAI ZDR eligibility before changing the production gate from `false`.
+- Complete the physical ATA, desk-phone, and mobile softphone matrix across two real networks, including background transitions.
+- Copy verified backups to encrypted off-host storage with a retention schedule, and design the optional PostgreSQL/multi-node migration path.
+
 ## 2026-08-22 — Copy-ready real-phone setup handoff
 
 ### Shipped

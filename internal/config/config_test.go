@@ -9,7 +9,7 @@ import (
 func TestMetricsAddressDefaultsAndCanBeOverridden(t *testing.T) {
 	for _, name := range []string{
 		"APP_ENV", "APP_BASE_URL", "METRICS_ADDR", "RINGRING_MASTER_KEY", "SESSION_SECRET",
-		"AI_CALL_MAX_DURATION", "AI_MAX_CONCURRENT",
+		"AI_CALL_MAX_DURATION", "AI_MAX_CONCURRENT", "AI_CHILD_SAFETY_APPROVED",
 	} {
 		t.Setenv(name, "")
 	}
@@ -28,6 +28,33 @@ func TestMetricsAddressDefaultsAndCanBeOverridden(t *testing.T) {
 	}
 	if overridden.MetricsAddr != "127.0.0.1:19090" {
 		t.Fatalf("overridden metrics address = %q", overridden.MetricsAddr)
+	}
+}
+
+func TestAIChildSafetyApprovalIsExplicitAndStrict(t *testing.T) {
+	for _, name := range []string{"APP_ENV", "APP_BASE_URL", "RINGRING_MASTER_KEY", "SESSION_SECRET", "AI_CHILD_SAFETY_APPROVED"} {
+		t.Setenv(name, "")
+	}
+	closed, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closed.AIChildSafetyApproved {
+		t.Fatal("AI child-safety gate defaulted open")
+	}
+
+	t.Setenv("AI_CHILD_SAFETY_APPROVED", "true")
+	approved, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !approved.AIChildSafetyApproved {
+		t.Fatal("explicit AI child-safety approval was ignored")
+	}
+
+	t.Setenv("AI_CHILD_SAFETY_APPROVED", "TRUE")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "AI_CHILD_SAFETY_APPROVED") {
+		t.Fatalf("malformed approval did not fail closed: %v", err)
 	}
 }
 

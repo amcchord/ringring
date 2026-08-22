@@ -70,6 +70,9 @@ func (s *Server) handleAIAuthorize(reader *bufio.Reader, writer *bufio.Writer, e
 }
 
 func (s *Server) prepareAICall(ctx context.Context, partyID, callID, callerID string) (string, string, error) {
+	if !s.AIChildSafetyApproved {
+		return "", "", errors.New("AI conversation child-safety gate is closed")
+	}
 	if s.Source == nil || s.Cipher == nil || s.Speech == nil || s.AudioDir == "" || s.PlaybackDir == "" {
 		return "", "", errors.New("AI voice service is not fully configured")
 	}
@@ -104,6 +107,9 @@ func (s *Server) prepareAICall(ctx context.Context, partyID, callID, callerID st
 }
 
 func (s *Server) partyAIKey(ctx context.Context, partyID string) (model.Party, model.PartyServices, string, error) {
+	if !s.AIChildSafetyApproved {
+		return model.Party{}, model.PartyServices{}, "", errors.New("AI conversation child-safety gate is closed")
+	}
 	party, services, err := s.Source.PartyVoiceSettings(ctx, partyID)
 	if err != nil {
 		return model.Party{}, model.PartyServices{}, "", err
@@ -267,6 +273,9 @@ func (s *Server) handleAudioSocket(connection net.Conn) {
 }
 
 func (s *Server) bridgeRealtime(ctx context.Context, phone net.Conn, apiKey, safetyID string) error {
+	if !s.AIChildSafetyApproved {
+		return errors.New("AI conversation child-safety gate is closed")
+	}
 	if apiKey == "" {
 		return errors.New("party OpenAI key is not configured")
 	}

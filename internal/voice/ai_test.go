@@ -43,6 +43,7 @@ func TestPrepareAICallDisclosesAIAndIssuesOneUseTicket(t *testing.T) {
 		},
 		Cipher: cipher, Speech: speech, AudioDir: t.TempDir(), PlaybackDir: "/voice",
 		Now: func() time.Time { return now }, AIMaxConcurrent: 1, Metrics: metrics,
+		AIChildSafetyApproved: true,
 	}
 	callID := uuid.NewString()
 	path, canonicalID, err := server.prepareAICall(t.Context(), "pty_ai", callID, "101")
@@ -78,6 +79,22 @@ func TestPrepareAICallDisclosesAIAndIssuesOneUseTicket(t *testing.T) {
 	}
 }
 
+func TestAIChildSafetyGateStopsAuthorizationAndRealtime(t *testing.T) {
+	server := &Server{}
+	if _, _, err := server.prepareAICall(t.Context(), "pty_ai", uuid.NewString(), "101"); err == nil || !strings.Contains(err.Error(), "child-safety gate") {
+		t.Fatalf("closed gate allowed AI authorization: %v", err)
+	}
+	if _, _, _, err := server.partyAIKey(t.Context(), "pty_ai"); err == nil || !strings.Contains(err.Error(), "child-safety gate") {
+		t.Fatalf("closed gate allowed party key access: %v", err)
+	}
+	appSide, phoneSide := net.Pipe()
+	defer appSide.Close()
+	defer phoneSide.Close()
+	if err := server.bridgeRealtime(t.Context(), appSide, "party-key", "rr_safe_test"); err == nil || !strings.Contains(err.Error(), "child-safety gate") {
+		t.Fatalf("closed gate allowed a Realtime bridge: %v", err)
+	}
+}
+
 func TestSpendLimitReconciliationDoesNotUseCachedAIDisclosure(t *testing.T) {
 	temporary := t.TempDir()
 	if err := os.WriteFile(filepath.Join(temporary, "ai-disclosure-pty_ai.wav"), []byte("cached"), 0o640); err != nil {
@@ -92,6 +109,7 @@ func TestSpendLimitReconciliationDoesNotUseCachedAIDisclosure(t *testing.T) {
 			services: model.PartyServices{PartyID: "pty_ai", AIEnabled: true},
 		},
 		Cipher: &fakeDecryptor{}, Speech: &fakeSpeech{}, AudioDir: temporary, PlaybackDir: "/voice",
+		AIChildSafetyApproved: true,
 	}
 	if _, _, err := server.prepareAICall(t.Context(), "pty_ai", uuid.NewString(), "101"); err == nil {
 		t.Fatal("spend-limit reconciliation served a cached AI disclosure")
@@ -171,7 +189,7 @@ func TestRealtimeBridgeTranscodesAudioAndUsesPrivacyControls(t *testing.T) {
 	defer websocketServer.Close()
 
 	appSide, asteriskSide := net.Pipe()
-	bridge := &Server{AIRealtimeURL: websocketServer.URL, AIModel: "gpt-realtime-2.1"}
+	bridge := &Server{AIRealtimeURL: websocketServer.URL, AIModel: "gpt-realtime-2.1", AIChildSafetyApproved: true}
 	bridgeResult := make(chan error, 1)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()

@@ -30,6 +30,7 @@ var (
 	ErrOpenAIRotation   = errors.New("OpenAI key rotation state changed")
 	ErrOpenAISpendLimit = errors.New("OpenAI spend limit state changed")
 	ErrInvalidRadio     = errors.New("radio station is not in the catalog")
+	ErrAIChildSafety    = errors.New("AI conversation child-safety gate is closed")
 )
 
 type Store struct {
@@ -104,16 +105,17 @@ type RotatedDevice struct {
 }
 
 type ServiceSettingsInput struct {
-	TimeEnabled      bool
-	WeatherEnabled   bool
-	WeatherQuery     string
-	WeatherLabel     string
-	WeatherLatitude  float64
-	WeatherLongitude float64
-	RadioEnabled     bool
-	RadioStation     string
-	AIEnabled        bool
-	UpdatedAt        time.Time
+	TimeEnabled           bool
+	WeatherEnabled        bool
+	WeatherQuery          string
+	WeatherLabel          string
+	WeatherLatitude       float64
+	WeatherLongitude      float64
+	RadioEnabled          bool
+	RadioStation          string
+	AIEnabled             bool
+	AIChildSafetyApproved bool
+	UpdatedAt             time.Time
 }
 
 type DeviceReadinessInput struct {
@@ -656,6 +658,9 @@ func (s *Store) PartyServices(ctx context.Context, partyID string) (model.PartyS
 }
 
 func (s *Store) UpdatePartyServices(ctx context.Context, partyID, hostUserID string, input ServiceSettingsInput) (model.PartyServices, error) {
+	if input.AIEnabled && !input.AIChildSafetyApproved {
+		return model.PartyServices{}, ErrAIChildSafety
+	}
 	station, ok := radio.Resolve(input.RadioStation)
 	if !ok {
 		return model.PartyServices{}, ErrInvalidRadio
@@ -692,6 +697,20 @@ func (s *Store) UpdatePartyServices(ctx context.Context, partyID, hostUserID str
 		WeatherLatitude: input.WeatherLatitude, WeatherLongitude: input.WeatherLongitude,
 		RadioEnabled: input.RadioEnabled, RadioStation: station.ID, AIEnabled: input.AIEnabled, UpdatedAt: input.UpdatedAt.UTC(),
 	}, nil
+}
+
+// EnforceAIChildSafetyGate clears every durable conversation-line preference
+// while the operator gate is closed. This keeps upgrades and rollbacks fail
+// closed even when an older database contains an enabled *14 setting.
+func (s *Store) EnforceAIChildSafetyGate(ctx context.Context, approved bool, now time.Time) error {
+	if approved {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE party_services SET ai_enabled = 0, updated_at = ? WHERE ai_enabled = 1`, unix(now)); err != nil {
+		return fmt.Errorf("close AI conversation child-safety gate: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) PartyVoiceSettings(ctx context.Context, partyID string) (model.Party, model.PartyServices, error) {

@@ -190,6 +190,7 @@ assert_successful_install() {
   grep -qx 'HOST_SIGNUP_CODE=rainbow-42' "$config/app.env" || fail 'signup code was not rendered'
   grep -qx 'OPENAI_ADMIN_KEY=sk-admin-abcdefghijklmnop' "$config/app.env" || fail 'OpenAI key was not rendered'
   grep -qx 'OPENAI_PARTY_SPEND_LIMIT_CENTS=2500' "$config/app.env" || fail 'spend ceiling was not rendered'
+  grep -qx 'AI_CHILD_SAFETY_APPROVED=false' "$config/app.env" || fail 'child-safety gate did not default closed'
   grep -qx 'RINGRING_DOMAIN=phone.example.test' "$checkout/.env" || fail 'Compose domain was not rendered'
   app_ami=$(sed -n 's/^ASTERISK_AMI_SECRET=//p' "$config/app.env")
   asterisk_ami=$(sed -n 's/^ASTERISK_AMI_SECRET=//p' "$config/asterisk.env")

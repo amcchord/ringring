@@ -36,6 +36,7 @@
 - [x] Host-set project hard spend limit with an operator ceiling and fail-closed provider reconciliation.
 - [x] Realtime voice line with child-appropriate instructions, disclosure, bounded calls, and no tools.
 - [x] AI disclosure for generated weather speech and no default transcript retention.
+- [x] Default-closed operator gate across storage, web, telephony, and Realtime boundaries until child-safety/ZDR approval.
 - [ ] External child-safety review and confirmation of OpenAI Zero Data Retention before use by callers under 13.
 
 ## Milestone 4 — Dependable self-hosting

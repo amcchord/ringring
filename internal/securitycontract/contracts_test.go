@@ -183,3 +183,25 @@ func TestAsteriskHasNoPSTNOrGlobalOutboundRoute(t *testing.T) {
 		}
 	}
 }
+
+func TestAIConversationRequiresOperatorChildSafetyApprovalAtEveryBoundary(t *testing.T) {
+	required := map[string][]string{
+		".env.example":                     {"AI_CHILD_SAFETY_APPROVED=false"},
+		"ringringctl":                      {"AI_CHILD_SAFETY_APPROVED=false", "AI_CHILD_SAFETY_APPROVED must be true or false"},
+		"cmd/ringring/main.go":             {"EnforceAIChildSafetyGate", "AIChildSafetyApproved: cfg.AIChildSafetyApproved"},
+		"internal/config/config.go":        {`envStrictBool("AI_CHILD_SAFETY_APPROVED", false)`},
+		"internal/store/store.go":          {"ErrAIChildSafety", "input.AIEnabled && !input.AIChildSafetyApproved", "EnforceAIChildSafetyGate"},
+		"internal/telephony/reconciler.go": {"!r.AIChildSafetyApproved", "services[index].AIEnabled = false"},
+		"internal/voice/ai.go":             {"!s.AIChildSafetyApproved", "AI conversation child-safety gate is closed"},
+		"internal/webapp/app.go":           {"aiEnabled && !a.cfg.AIChildSafetyApproved", "AIChildSafetyApproved: a.cfg.AIChildSafetyApproved"},
+		"web/templates/party.html":         {"$conversationReady", "Locked until the server operator"},
+	}
+	for filename, markers := range required {
+		contents := readRepositoryFile(t, filename)
+		for _, marker := range markers {
+			if !strings.Contains(contents, marker) {
+				t.Errorf("%s is missing child-safety gate marker %q", filename, marker)
+			}
+		}
+	}
+}

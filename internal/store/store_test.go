@@ -486,7 +486,12 @@ func TestPartyServiceSettingsAreHostScopedAndDefaultToTime(t *testing.T) {
 	input := ServiceSettingsInput{
 		TimeEnabled: false, WeatherEnabled: true, WeatherQuery: "Portland, Maine",
 		WeatherLabel: "Portland, Maine", WeatherLatitude: 43.66, WeatherLongitude: -70.25,
-		RadioEnabled: true, RadioStation: "drone-zone", AIEnabled: true, UpdatedAt: now.Add(time.Minute),
+		RadioEnabled: true, RadioStation: "drone-zone", AIEnabled: true, AIChildSafetyApproved: true, UpdatedAt: now.Add(time.Minute),
+	}
+	closedInput := input
+	closedInput.AIChildSafetyApproved = false
+	if _, err := s.UpdatePartyServices(ctx, party.ID, host.ID, closedInput); !errors.Is(err, ErrAIChildSafety) {
+		t.Fatalf("closed child-safety gate error = %v", err)
 	}
 	if _, err := s.UpdatePartyServices(ctx, party.ID, other.ID, input); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("non-host update error = %v", err)
@@ -511,6 +516,20 @@ func TestPartyServiceSettingsAreHostScopedAndDefaultToTime(t *testing.T) {
 	if len(routing) != 1 || routing[0].TimeEnabled || !routing[0].WeatherEnabled || !routing[0].RadioEnabled || routing[0].RadioStation != "drone-zone" || !routing[0].AIEnabled {
 		t.Fatalf("unexpected routing services: %#v", routing)
 	}
+	if err := s.EnforceAIChildSafetyGate(ctx, true, now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	stillApproved, err := s.PartyServices(ctx, party.ID)
+	if err != nil || !stillApproved.AIEnabled {
+		t.Fatalf("open gate mutated the AI preference: %#v error=%v", stillApproved, err)
+	}
+	if err := s.EnforceAIChildSafetyGate(ctx, false, now.Add(3*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	closed, err := s.PartyServices(ctx, party.ID)
+	if err != nil || closed.AIEnabled || !closed.WeatherEnabled || !closed.RadioEnabled {
+		t.Fatalf("closed gate did not clear only the conversation preference: %#v error=%v", closed, err)
+	}
 	if _, err := s.db.Exec(`UPDATE party_services SET radio_station = '' WHERE party_id = ?`, party.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -533,7 +552,7 @@ func TestPartyOpenAIKeyRotationIsHostScopedAndCompareAndSwap(t *testing.T) {
 	if err := s.UpdatePartyOpenAI(ctx, party.ID, "proj_rotation", "svc_rotation", "key_old", "cipher_old", "ready", 1000); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpdatePartyServices(ctx, party.ID, host.ID, ServiceSettingsInput{TimeEnabled: true, WeatherEnabled: true, WeatherQuery: "Portland", WeatherLabel: "Portland", AIEnabled: true, UpdatedAt: now}); err != nil {
+	if _, err := s.UpdatePartyServices(ctx, party.ID, host.ID, ServiceSettingsInput{TimeEnabled: true, WeatherEnabled: true, WeatherQuery: "Portland", WeatherLabel: "Portland", AIEnabled: true, AIChildSafetyApproved: true, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.StartPartyOpenAIKeyRotation(ctx, party.ID, other.ID, "key_old", "key_outsider", "cipher_outsider"); !errors.Is(err, ErrOpenAIRotation) {
@@ -590,7 +609,7 @@ func TestPartyOpenAISpendLimitUpdateIsHostScopedRetryableAndPausesRoutes(t *test
 	if err := s.UpdatePartyOpenAI(ctx, party.ID, "proj_spend", "svc_spend", "key_spend", "cipher_spend", "ready", 1000); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpdatePartyServices(ctx, party.ID, host.ID, ServiceSettingsInput{TimeEnabled: true, WeatherEnabled: true, WeatherQuery: "Portland", WeatherLabel: "Portland", AIEnabled: true, UpdatedAt: now}); err != nil {
+	if _, err := s.UpdatePartyServices(ctx, party.ID, host.ID, ServiceSettingsInput{TimeEnabled: true, WeatherEnabled: true, WeatherQuery: "Portland", WeatherLabel: "Portland", AIEnabled: true, AIChildSafetyApproved: true, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.StartPartyOpenAISpendLimitUpdate(ctx, party.ID, other.ID, "proj_spend", 725); !errors.Is(err, ErrOpenAISpendLimit) {
