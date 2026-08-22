@@ -57,6 +57,12 @@ wait_for_container() {
   if test "$code" -ne 0; then
     echo "$container exited with status $code" >&2
     docker logs "$container" >&2 || true
+    for service in ringring-sip-smoke-app ringring-sip-smoke-asterisk; do
+      if test -n "$(docker ps -aq --filter "name=^/${service}$")"; then
+        echo "--- $service ---" >&2
+        docker logs --tail 200 "$service" >&2 || true
+      fi
+    done
     if test -d "$work_directory/logs/$container"; then
       for log_file in "$work_directory/logs/$container"/*; do
         if test -f "$log_file"; then

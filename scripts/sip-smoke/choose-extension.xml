@@ -98,12 +98,13 @@
       <exec play_dtmf="103#"/>
     </action>
   </nop>
-  <pause milliseconds="5000"/>
+  <pause milliseconds="8000"/>
   <nop>
     <action>
       <exec play_dtmf="1"/>
     </action>
   </nop>
+  <pause milliseconds="1000"/>
 
   <recv request="BYE" timeout="15000"/>
   <send>
