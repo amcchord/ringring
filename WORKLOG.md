@@ -2,6 +2,39 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Curated party radio stations
+
+### Shipped
+
+- Replaced the single fixed `*13` choice with a bright host selector for Groove Salad, Drone Zone, or Deep Space One. Each party persists one short catalog ID and keeps Groove Salad as the backward-compatible default.
+- Added one code-controlled radio catalog shared by the host UI, storage validation, backup verification, telephony renderer, and a new `make radio-smoke` compatibility command. Unknown or empty persisted values fail before reconciliation; an arbitrary host URL can never become a player request or dialplan argument.
+- Added a forward-only `party_services.radio_station` migration, rollback notes, external-content and personal-listening guidance, official station-source links, and a provider-support link. The UI describes the stations as instrumental-leaning without claiming that live programming is moderated or guaranteed child-appropriate.
+
+### Decisions
+
+- Limit the catalog to three official SomaFM direct-player MP3 endpoints whose programming leans ambient and instrumental. SomaFM documents these links for individual personal use, which matches the private family-listening scope; RingRing does not expose a rebroadcast or public-listening feature.
+- Store only stable station IDs. Both the store and renderer resolve those IDs independently so direct database corruption still cannot inject a URL, metadata address, redirect, header, credential, or Asterisk syntax.
+- Keep HTTP only at the final public audio hop because the production Asterisk `MP3Player` delegates to `mpg123`, which does not open these streams over TLS. The request contains no caller identity, party data, SIP credential, or integration key.
+
+### Verification
+
+- Catalog tests require unique safe IDs, the exact SomaFM host and MP3 path shape, HTTPS source pages, immutable copies, and a valid default. Store, migration, backup, renderer, and web tests cover legacy defaulting, host scope, party-specific routing, unknown/empty/corrupt state, arbitrary URL rejection, selected-state rendering, and unchanged settings after a bad request.
+- `make check` passes formatting, vet, and the complete race-enabled suite; ten race-enabled repetitions of the changed packages pass. GitHub Actions passed feature commit `3183669`.
+- The Mac Docker daemon was unavailable for the external target. An isolated deployment-host checkout of the exact commit then passed `make radio-smoke`: all three catalog entries delivered decodable MPEG Layer III audio for five seconds in the production Asterisk image. The exact test images and checkout were removed.
+- A disposable browser party round-tripped Deep Space One and the enabled state. At 390×844 and 1280×900, the selector measured 301–389×52px, the save button was 54px tall, the mobile layout used one column, and neither viewport overflowed horizontally. The visible content boundary remained below the selector; tabs, viewport override, app, ports, and disposable database were reset or removed.
+
+### Production
+
+- Created `/root/ringring-backups/ringring-20260822T090716Z-17ae8b1.tar.gz` before the schema change and passed its checksummed isolated restore drill. A network-disabled image of exact commit `3183669` migrated an extracted copy, became ready, regenerated telephony state, stopped cleanly, validated the catalog, and produced the exact sealed integrity, foreign-key, credential-decryption, and aggregate family-state report; all candidate resources were removed.
+- Deployed exact commit `3183669` by rebuilding and recreating only the app container. Asterisk and Caddy identities, both root-readable environment-file hashes, and both generated phone-routing files remained exact; no production member, device, extension, SIP credential, party key, or external resource changed.
+- Public readiness and radio styling, the exact three-entry runtime catalog, private aggregate-only AMI verification, the SIP Fail2Ban jail, container health, and settled logs pass. Created `/root/ringring-backups/ringring-20260822T090914Z-3183669.tar.gz` after deployment and passed its full restore drill; its sealed family report and both environment files match the pre-deploy archive exactly.
+
+### Remaining
+
+- Complete the accessibility and real-device usability pass, then scan and call with family phones across two remote networks and verify mobile background ringing and Wi-Fi/cellular transitions.
+- Let hosts choose a bounded OpenAI project spend limit; complete the external child-safety review and confirm Zero Data Retention before enabling AI for any caller under 13.
+- Add guided installation/upgrades, a SIP TLS device matrix, privacy-preserving observability, further threat-model tests, and the optional PostgreSQL path.
+
 ## 2026-08-22 — Voice-guided extension selection
 
 ### Shipped
