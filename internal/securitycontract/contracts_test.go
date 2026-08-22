@@ -122,7 +122,7 @@ func TestWebProxyCannotReachPrivateMetricsOrControlServices(t *testing.T) {
 		"deny=0.0.0.0/0.0.0.0",
 		"permit=172.31.88.10/255.255.255.255",
 		"read=system,command",
-		"write=system,command,call",
+		"write=system,command,originate",
 	} {
 		if !strings.Contains(manager, required) {
 			t.Fatalf("AMI boundary lost required rule %q", required)
@@ -131,7 +131,7 @@ func TestWebProxyCannotReachPrivateMetricsOrControlServices(t *testing.T) {
 	if strings.Contains(manager, "permit=0.0.0.0") {
 		t.Fatal("AMI permits every source")
 	}
-	for _, forbidden := range []string{"read=all", "write=all", "originate", "config"} {
+	for _, forbidden := range []string{"read=all", "write=all", "config"} {
 		if strings.Contains(strings.ToLower(manager), forbidden) {
 			t.Fatalf("AMI grants an unnecessary broad permission %q", forbidden)
 		}

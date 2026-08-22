@@ -13,7 +13,7 @@ This is the durable, chronological project record. Add new entries at the top. C
 
 ### Decisions
 
-- Use the existing private app-to-Asterisk control connection rather than expose a SIP or web callback. Its source-controlled account gains only AMI `call` write permission, remains restricted to the fixed app-container address, and receives no configuration or broad `all` permission.
+- Use the existing private app-to-Asterisk control connection rather than expose a SIP or web callback. Asterisk classifies the action under its narrow AMI `originate` privilege, which the source-controlled account gains while remaining restricted to the fixed app-container address and receiving no configuration or broad `all` permission.
 - Treat the ring as a live diagnostic rather than proof saved by the server. The host still confirms the readiness checklist; RingRing adds no call record, caller history, audio, transcript, or device identifier to application logs.
 - Keep the action unavailable until live contact status says online. This avoids presenting a successful queued request as evidence that an unplugged or unreachable family phone rang.
 

@@ -65,7 +65,7 @@ Telephony configuration is derived from SQLite. If an Asterisk regeneration or p
 - Invitation tokens are random, expire, are single-use, and are stored as hashes.
 - Linphone provisioning tokens have 32 random bytes, are stored only as hashes, expire after 30 minutes, and are consumed once. Rotation replaces them and revocation or device deletion removes them.
 - Real-phone readiness records contain only host-confirmed check timestamps. They are host-only, cannot be updated for a revoked phone, reset on credential rotation, and cascade with device deletion.
-- The AMI account is ACL-restricted to the fixed app-container address and has only the system/command rights used for reload/status plus `call` for the validated internal setup ring. It has neither `all` nor configuration permission, and AMI is never exposed through HTTP.
+- The AMI account is ACL-restricted to the fixed app-container address and has only the system/command rights used for reload/status plus Asterisk's narrow `originate` privilege for the validated internal setup ring. It has neither `all` nor configuration permission, and AMI is never exposed through HTTP.
 - Session cookies are secure, HTTP-only, same-site, rotated at authentication, and backed by server-side state.
 - Host passwords use salted Argon2id hashes at the [OWASP password-storage minimum](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html). Passwords and the family access code are never logged.
 - Random offline recovery codes follow [OWASP's offline-recovery guidance](https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html): they are stored only as domain-separated hashes, revealed once, and rotated as a set after use. A reset invalidates all sessions.
