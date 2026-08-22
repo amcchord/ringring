@@ -159,9 +159,31 @@ func TestCredentialCopyHelperIsIntegrityPinnedAndLocalOnly(t *testing.T) {
 			t.Fatalf("the credential copy helper contains transmission or persistence primitive %q", forbidden)
 		}
 	}
-	for _, required := range []string{"navigator.clipboard.writeText", `document.execCommand("copy")`, `helper.remove()`, `data-copy-setup`, `data-setup-field`} {
+	for _, required := range []string{"navigator.clipboard.writeText", `document.execCommand("copy")`, `helper.remove()`, `data-copy-setup`, `data-setup-field`, `getAttribute("data-setup-value")`, "exactValue(value)"} {
 		if !strings.Contains(javascript, required) {
 			t.Fatalf("the credential copy helper is missing bounded behavior %q", required)
+		}
+	}
+}
+
+func TestGeneratedSIPCredentialsStayKeypadFriendlyAndStrong(t *testing.T) {
+	credentials := readRepositoryFile(t, "internal/sipcredentials/credentials.go")
+	for _, required := range []string{
+		"crypto/rand", "UsernameDigits = 15", "PasswordDigits = 24",
+		"about 49.7 bits", "about 79.6 bits", "rand.Int(reader, span)",
+	} {
+		if !strings.Contains(credentials, required) {
+			t.Fatalf("the generated SIP credential policy is missing %q", required)
+		}
+	}
+	app := readRepositoryFile(t, "internal/webapp/app.go")
+	if !strings.Contains(app, "sipcredentials.Generate()") || strings.Contains(app, `return "rrd_" + suffix`) {
+		t.Fatal("the web credential path is not using the digits-only generator")
+	}
+	setup := readRepositoryFile(t, "web/templates/setup.html")
+	for _, required := range []string{`data-setup-value="{{.Claim.Device.SIPUsername}}"`, `data-setup-value="{{.Claim.SIPSecret}}"`, "Digits only", "Leave the spaces out"} {
+		if !strings.Contains(setup, required) {
+			t.Fatalf("the one-time setup card is missing exact-value guidance %q", required)
 		}
 	}
 }

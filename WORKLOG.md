@@ -2,6 +2,30 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Keypad-friendly phone credentials
+
+### Shipped
+
+- Replaced the 28-character mixed SIP username and 32-character mixed password for newly claimed, added, or rotated phones with a 15-digit username and 24-digit password. Every value is uniformly selected with the operating system CSPRNG and never begins with zero.
+- Grouped the username in threes and password in fours on the one-time setup card. Clear guidance says the spaces are visual only; the integrity-pinned local copy helper and Linphone provisioning use the exact unspaced value.
+- Extended the disposable SIP gate to create a phone through the real host route, extract only its test-only numeric pair, load it into Asterisk, and complete an authenticated registration. Existing fixed mixed-format smoke phones continue to prove backward compatibility.
+
+### Decisions
+
+- Prefer keypad-native decimal entry to a shorter alphabet that still forces a desk phone through multi-tap input modes. The username space is about 49.7 bits, while the password retains about 79.6 bits against offline guessing of a captured SIP digest; this is a generated secret, not a human PIN.
+- Keep existing device rows byte-for-byte unchanged. Only explicit issuance or rotation adopts the new format, avoiding a surprise outage and making rollback compatible.
+- Keep grouping out of authentication state. SQLite, encrypted plaintext, generated PJSIP, clipboard text, and provisioning XML contain digits only, with no separators.
+
+### Verification
+
+- Focused generator and complete web tests cover fixed length, nonzero leading digits, CSPRNG failure, identity/password uniqueness sampling, numeric format rejection, encryption association, display grouping, raw copy attributes, one-use provisioning, new-phone issuance, and rotation.
+- A disposable browser claim at 1280×900 and 390×844 proved the grouped values match the raw 15/24-digit pair, both individual and copy-all actions preserve the exact unspaced credentials, every copy control is at least 44px tall, and the setup card has no horizontal overflow. The temporary viewport, clipboard, tab, process, and database were cleaned up afterward.
+
+### Remaining
+
+- Complete the physical ATA, desk-phone, and mobile softphone matrix across two real networks, including manual entry of the new numeric format on representative keypads.
+- Obtain the external child-safety review and OpenAI Zero Data Retention eligibility before opening the AI conversation gate.
+
 ## 2026-08-22 — Accept secure invitation claims from opaque browser previews
 
 ### Shipped

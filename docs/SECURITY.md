@@ -10,7 +10,7 @@ accepted preview risks are tracked in the [RingRing threat model](THREAT_MODEL.m
 - A party is both a tenant boundary and a call-routing boundary.
 - Hosts authenticate with a RingRing username/password account and may administer only parties they host. Google OpenID Connect is optional.
 - Invitees receive the narrow right to claim one membership/device; they do not receive host access.
-- SIP devices authenticate with unique random credentials and enter a server-selected party context.
+- SIP devices authenticate with unique CSPRNG-generated credentials and enter a server-selected party context. New 15-digit identities have about 49.7 bits of global name space; new 24-digit passwords have about 79.6 bits of entropy and are not user-chosen PINs.
 - OpenAI, weather, and radio integrations are outbound services. None may receive credentials for another integration or party.
 
 ## Data minimization
@@ -72,7 +72,7 @@ Telephony configuration is derived from SQLite. If an Asterisk regeneration or p
 - Each party's OpenAI key identifier is stored alongside its encrypted value so a host can replace it. During replacement, AI-powered routes pause until RingRing confirms the fresh key exists and every older active key owned by that party's dedicated service account is deleted. Partial failures remain retryable and never reveal a key to the browser.
 - Invitation tokens are random, expire, are single-use, and are stored as hashes.
 - Linphone provisioning tokens have 32 random bytes, are stored only as hashes, expire after 30 minutes, and are consumed once. Rotation replaces them and revocation or device deletion removes them.
-- Phones sharing an extension never share a SIP credential. Each encrypted password uses its own device ID as associated data and can be revoked without changing the other phones.
+- Phones sharing an extension never share a SIP credential. Each encrypted password uses its own device ID as associated data and can be revoked without changing the other phones. Numeric setup values never start with zero, avoiding phone UIs that coerce them to numbers; spaces on the one-time card are display-only and never become part of authentication.
 - Real-phone readiness records contain only host-confirmed check timestamps. They are host-only, cannot be updated for a revoked phone, reset on credential rotation, and cascade with device deletion.
 - The AMI account is ACL-restricted to the fixed app-container address and has only the system/command rights used for reload/status plus Asterisk's narrow `originate` privilege for the validated internal setup ring. It has neither `all` nor configuration permission, and AMI is never exposed through HTTP.
 - Static Asterisk configuration is normalized to mode `0640` and the dedicated runtime user/group during both image construction and container entry. This prevents the root operator's restrictive checkout umask from making a changed dialplan unreadable while leaving Asterisk's health socket and AMI available.

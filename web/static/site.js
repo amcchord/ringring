@@ -36,13 +36,24 @@
     legacyCopy(text);
   }
 
+  function exactValue(target) {
+    if (!target) {
+      return "";
+    }
+    if ("value" in target) {
+      return target.value;
+    }
+    const setupValue = target.getAttribute("data-setup-value");
+    return setupValue || target.textContent.trim();
+  }
+
   function setupText() {
     const lines = ["RingRing phone setup"];
     document.querySelectorAll("[data-setup-field]").forEach((row) => {
       const label = row.querySelector("dt");
       const value = row.querySelector("[data-setup-value]");
       if (label && value) {
-        lines.push(`${label.textContent.trim()}: ${value.textContent.trim()}`);
+        lines.push(`${label.textContent.trim()}: ${exactValue(value)}`);
       }
     });
     lines.push("", "Private family network only — no regular or emergency calls.");
@@ -58,11 +69,7 @@
       const target = targetID ? document.getElementById(targetID) : null;
       const text = button.hasAttribute("data-copy-setup")
         ? setupText()
-        : target && "value" in target
-          ? target.value
-          : target
-            ? target.textContent.trim()
-            : "";
+        : exactValue(target);
       if (!text) {
         return;
       }

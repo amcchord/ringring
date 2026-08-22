@@ -36,7 +36,7 @@ The app also owns a distinct loopback-only metrics listener on `127.0.0.1:9090`.
 
 ## Call isolation
 
-Every registered endpoint has a globally unique, random SIP username and an Asterisk endpoint context derived from its party ID. The generated dialplan emits only that party's members and enabled service extensions into the context. There is no route from party contexts to trunks or a global outbound context.
+Every registered endpoint has a globally unique, random SIP username and an Asterisk endpoint context derived from its party ID. New credentials use a nonzero 15-digit username (about 49.7 bits of identity space) and a nonzero 24-digit password (about 79.6 bits of secret entropy), generated uniformly from the operating system CSPRNG. Numeric-only fields avoid keypad input-mode changes without weakening the password into a human-chosen PIN. The generated dialplan emits only that party's members and enabled service extensions into the context. There is no route from party contexts to trunks or a global outbound context.
 
 Extension `101` can therefore exist in many parties without collision. A device cannot choose its context or construct a cross-party endpoint name.
 
@@ -80,7 +80,7 @@ On startup, the app regenerates all telephony configuration from the database.
 
 ## One-time Linphone setup
 
-The one-time setup screen keeps the universal registrar, username, password, extension, and transport fields for ATAs, desk phones, and arbitrary SIP apps. It also renders a Linphone-specific QR according to [Linphone's remote-provisioning format](https://wiki.linphone.org/xwiki/wiki/public/view/Linphone/Remote%20Provisioning/). No external QR or provisioning service receives the credentials.
+The one-time setup screen keeps the universal registrar, username, password, extension, and transport fields for ATAs, desk phones, and arbitrary SIP apps. Current numeric credentials are visually grouped in threes and fours, with explicit instructions to omit the display spaces; the local copy helper and Linphone XML use the exact raw digits. The grouping never enters SQLite, Asterisk, a clipboard value, or provisioning XML. The screen also renders a Linphone-specific QR according to [Linphone's remote-provisioning format](https://wiki.linphone.org/xwiki/wiki/public/view/Linphone/Remote%20Provisioning/). No external QR or provisioning service receives the credentials.
 
 The QR contains an HTTPS URL, not the SIP password. Its 32-byte random token is stored only as a SHA-256 digest, expires after 30 minutes, and is consumed transactionally by the first `GET`. `HEAD` does not consume it. The response decrypts only that device's SIP secret and returns a transient Linphone XML document with the generated username, extension, RingRing registrar, TLS port, and password; it contains no member name, party name, host data, or integration key. A second fetch receives a generic gone response. Rotation atomically replaces any prior link, while revocation and cascading device deletion remove it.
 

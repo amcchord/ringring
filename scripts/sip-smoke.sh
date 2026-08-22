@@ -3,7 +3,7 @@ set -eu
 
 repository=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
 network=ringring-sip-smoke
-containers="ringring-sip-smoke-app ringring-sip-smoke-asterisk ringring-sip-smoke-register-a ringring-sip-smoke-register-b ringring-sip-smoke-phone-a ringring-sip-smoke-phone-b"
+containers="ringring-sip-smoke-app ringring-sip-smoke-asterisk ringring-sip-smoke-register-a ringring-sip-smoke-register-b ringring-sip-smoke-register-generated ringring-sip-smoke-phone-a ringring-sip-smoke-phone-b"
 
 if docker network inspect "$network" >/dev/null 2>&1; then
   echo "The isolated Docker network $network already exists; another smoke test may be running." >&2
@@ -102,6 +102,7 @@ mkdir -p "$work_directory/app" "$work_directory/state" \
   "$work_directory/certs" \
   "$work_directory/logs/ringring-sip-smoke-register-a" \
   "$work_directory/logs/ringring-sip-smoke-register-b" \
+  "$work_directory/logs/ringring-sip-smoke-register-generated" \
   "$work_directory/logs/ringring-sip-smoke-phone-a" \
   "$work_directory/logs/ringring-sip-smoke-phone-b"
 openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 30 \
@@ -309,12 +310,26 @@ added_phone_setup=$(docker exec ringring-sip-smoke-app sh -c \
 printf '%s\n' "$added_phone_setup" | grep -q 'Another phone ready'
 printf '%s\n' "$added_phone_setup" | grep -q 'Existing phones stay connected'
 added_sip_username=$(printf '%s\n' "$added_phone_setup" | \
-  sed -n 's/.*id="setup-username"[^>]*>\([^<]*\)<.*/\1/p' | head -n 1)
-printf '%s\n' "$added_sip_username" | grep -Eq '^rrd_[A-Za-z0-9_-]+$'
+  sed -n 's/.*id="setup-username" data-setup-value="\([^"]*\)".*/\1/p' | head -n 1)
+added_sip_password=$(printf '%s\n' "$added_phone_setup" | \
+  sed -n 's/.*id="setup-password" data-setup-value="\([^"]*\)".*/\1/p' | head -n 1)
+printf '%s\n' "$added_sip_username" | grep -Eq '^[1-9][0-9]{14}$'
+printf '%s\n' "$added_sip_password" | grep -Eq '^[1-9][0-9]{23}$'
 grep -Fq "[$added_sip_username-auth]" "$work_directory/state/pjsip.conf"
 shared_extension=$(docker exec ringring-sip-smoke-asterisk asterisk -rx 'dialplan show 102@rr-party-pty_smoke')
 printf '%s\n' "$shared_extension" | grep -q 'PJSIP/rr_smoke_b'
 printf '%s\n' "$shared_extension" | grep -q "PJSIP/$added_sip_username"
+echo "Registering the generated digits-only phone credential..."
+run_and_wait ringring-sip-smoke-register-generated 20 \
+  --network "$network" --ip 172.31.89.50 --volume "$scenario_mount" \
+  --volume "$work_directory/logs/ringring-sip-smoke-register-generated:/logs" --workdir /logs \
+  "$sipp_image" 172.31.89.20:5060 -sf /scenarios/register.xml \
+  -i 172.31.89.50 -p 5064 -s "$added_sip_username" -au "$added_sip_username" -ap "$added_sip_password" \
+  -key branch_tag generated -m 1 -trace_msg -trace_err
+docker rm ringring-sip-smoke-register-generated >/dev/null
+docker exec ringring-sip-smoke-asterisk grep -Eq \
+  "SecurityEvent=\"SuccessfulAuth\".*AccountID=\"$added_sip_username\".*LocalAddress=\"IPV4/UDP/" \
+  /var/log/asterisk/security
 ring_started=$(date +%s)
 docker exec ringring-sip-smoke-app sh -c \
   "curl --fail --silent --show-error --location --cookie /tmp/ringring-smoke-cookies \

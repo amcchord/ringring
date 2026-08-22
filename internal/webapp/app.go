@@ -27,6 +27,7 @@ import (
 	"github.com/amcchord/ringring/internal/provisioning"
 	"github.com/amcchord/ringring/internal/radio"
 	"github.com/amcchord/ringring/internal/secure"
+	"github.com/amcchord/ringring/internal/sipcredentials"
 	"github.com/amcchord/ringring/internal/store"
 	"github.com/amcchord/ringring/internal/telephony"
 	"github.com/amcchord/ringring/internal/weather"
@@ -44,7 +45,7 @@ const (
 	authCSRFCookie      = "ringring_auth_csrf"
 	recoveryFlashCookie = "ringring_recovery_reveal"
 	provisioningTTL     = 30 * time.Minute
-	setupScriptSHA256   = "sha256-GruKwUKa07KAsqw0xgYnF1qSLOdrt0IH4q0ZDqGAMYA="
+	setupScriptSHA256   = "sha256-ca1mTVpmoCW0lQiAqGS537dHQEQsJcQIAEJgz2dcMsE="
 )
 
 var (
@@ -138,6 +139,9 @@ type PageData struct {
 	JoinDeviceLabel          string
 	Claim                    model.ClaimedDevice
 	SIPPublicHost            string
+	SIPUsernameDisplay       string
+	SIPSecretDisplay         string
+	SimpleSIPCredentials     bool
 	LinphoneProvisionURL     string
 	LinphoneOpenURL          template.URL
 	LinphoneQR               template.URL
@@ -2057,19 +2061,15 @@ func (a *App) provisioningGone(w http.ResponseWriter) {
 }
 
 func (a *App) newSIPCredentials(deviceID string) (string, string, string, error) {
-	suffix, err := secure.Token(18)
+	credentials, err := sipcredentials.Generate()
 	if err != nil {
 		return "", "", "", err
 	}
-	secret, err := secure.Token(24)
+	ciphertext, err := a.cipher.Encrypt(credentials.Password, []byte(deviceID))
 	if err != nil {
 		return "", "", "", err
 	}
-	ciphertext, err := a.cipher.Encrypt(secret, []byte(deviceID))
-	if err != nil {
-		return "", "", "", err
-	}
-	return "rrd_" + suffix, secret, ciphertext, nil
+	return credentials.Username, credentials.Password, ciphertext, nil
 }
 
 func newProvisioningToken(now time.Time) (string, store.NewProvisioningToken, error) {
@@ -2083,6 +2083,13 @@ func newProvisioningToken(now time.Time) (string, store.NewProvisioningToken, er
 }
 
 func (a *App) addLinphoneSetup(data *PageData, token string) error {
+	data.SIPUsernameDisplay = data.Claim.Device.SIPUsername
+	data.SIPSecretDisplay = data.Claim.SIPSecret
+	if sipcredentials.ValidUsername(data.Claim.Device.SIPUsername) && sipcredentials.ValidPassword(data.Claim.SIPSecret) {
+		data.SimpleSIPCredentials = true
+		data.SIPUsernameDisplay = groupSetupDigits(data.Claim.Device.SIPUsername, 3)
+		data.SIPSecretDisplay = groupSetupDigits(data.Claim.SIPSecret, 4)
+	}
 	if !provisionTokenPattern.MatchString(token) {
 		return errors.New("invalid provisioning token")
 	}
@@ -2099,6 +2106,21 @@ func (a *App) addLinphoneSetup(data *PageData, token string) error {
 	data.LinphoneOpenURL = template.URL("sip-linphone:?linphone-fetch-config=" + url.QueryEscape(provisionURL))
 	data.LinphoneQR = template.URL(qr)
 	return nil
+}
+
+func groupSetupDigits(value string, width int) string {
+	if width < 1 || len(value) <= width {
+		return value
+	}
+	var grouped strings.Builder
+	grouped.Grow(len(value) + len(value)/width)
+	for index := 0; index < len(value); index++ {
+		if index > 0 && index%width == 0 {
+			grouped.WriteByte(' ')
+		}
+		grouped.WriteByte(value[index])
+	}
+	return grouped.String()
 }
 
 func (a *App) requireUser(next func(http.ResponseWriter, *http.Request, authSession)) http.HandlerFunc {

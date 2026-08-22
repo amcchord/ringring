@@ -351,3 +351,7 @@ Counting and canceling active invitations uses the existing `invitations` owners
 ### Private first-call card upgrade and rollback
 
 The claim-only first-call card reads existing `members`, `devices`, `party_services`, and party readiness fields and adds no schema, secret, environment variable, route, public port, provider request, or background service. Upgrading does not inspect an invitation or family directory until a recipient submits a valid claim. Rolling back removes only the rendered setup aid; memberships, credentials, services, generated telephony state, and invitation lifecycle remain compatible and unchanged.
+
+### Keypad-friendly SIP credential upgrade and rollback
+
+The numeric credential release adds no schema, environment variable, port, or migration. Startup decrypts and renders every existing username/password unchanged, so registered phones do not reconnect or rotate merely because of the upgrade. Only a successful new invitation claim, host-added phone, or deliberate credential rotation receives the 15-digit username and 24-digit password format. Older releases already accept those values as safe Asterisk identifiers/secrets, so rollback preserves and can continue routing them. The setup page's spaces are presentation only; raw database, Asterisk, copy, and Linphone values contain digits without separators. Verify the format with the isolated SIP smoke, which creates and authenticates a generated numeric endpoint; do not rotate a real family phone as a deployment probe.
