@@ -94,13 +94,27 @@ printf '%s\n' "$domain" | grep -Eq '^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?
 install -d -m 0700 "$tls_dir"
 lock_owned=0
 test ! -L "$lock_file" || { echo "The SIP TLS synchronization lock must not be a symlink." >&2; exit 1; }
-if ! mkdir -m 0700 "$lock_file" 2>/dev/null; then
+lock_acquired=0
+for lock_attempt in 1 2 3 4 5; do
+  if mkdir -m 0700 "$lock_file" 2>/dev/null; then
+    lock_acquired=1
+    break
+  fi
+  test -d "$lock_file" && test ! -L "$lock_file" || {
+    echo "The SIP TLS synchronization lock is unsafe." >&2
+    exit 1
+  }
   running_pid=
   if test -f "$lock_file/pid" && test ! -L "$lock_file/pid"; then
     running_pid=$(sed -n '1p' "$lock_file/pid")
   fi
   case "$running_pid" in
-    ''|*[!0-9]*) ;;
+    ''|*[!0-9]*)
+      if test "$lock_attempt" -lt 5; then
+        sleep 1
+        continue
+      fi
+      ;;
     *)
       if kill -0 "$running_pid" 2>/dev/null; then
         echo "Another SIP TLS synchronization is already running."
@@ -108,8 +122,9 @@ if ! mkdir -m 0700 "$lock_file" 2>/dev/null; then
       fi
       ;;
   esac
-  test -d "$lock_file" && test ! -L "$lock_file" || { echo "The SIP TLS synchronization lock is unsafe." >&2; exit 1; }
   find "$lock_file" -depth -delete >/dev/null 2>&1
+done
+if test "$lock_acquired" -ne 1; then
   mkdir -m 0700 "$lock_file" 2>/dev/null || {
     echo "Another SIP TLS synchronization started concurrently."
     exit 0
@@ -129,8 +144,10 @@ cleanup() {
     find "$staging" -depth -delete >/dev/null 2>&1
   fi
   find "$work_directory" -depth -delete >/dev/null 2>&1
-  if test "$lock_owned" -eq 1 && test -d "$lock_file" && test ! -L "$lock_file"; then
-    find "$lock_file" -depth -delete >/dev/null 2>&1
+  if test "$lock_owned" -eq 1 && test -d "$lock_file" && test ! -L "$lock_file" && \
+    test -f "$lock_file/pid" && test ! -L "$lock_file/pid" && \
+    test "$(sed -n '1p' "$lock_file/pid")" = "$$"; then
+      find "$lock_file" -depth -delete >/dev/null 2>&1
   fi
   exit "$exit_code"
 }

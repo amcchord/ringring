@@ -106,6 +106,26 @@ if run_sync >/dev/null 2>&1; then
 fi
 test ! -e "$output/certificate.pem" && test ! -e "$output/private-key.pem" || fail 'unsafe archive material reached the managed output'
 
+new_fixture concurrent-start
+mkdir -m 0700 "$lock"
+(
+  sleep 1
+  printf '%s\n' "$$" >"$lock/pid"
+) &
+lock_writer=$!
+concurrent_output=$(run_sync 2>&1)
+wait "$lock_writer"
+printf '%s\n' "$concurrent_output" | grep -q 'Another SIP TLS synchronization is already running' || fail 'a concurrent lock creation was not recognized safely'
+test ! -e "$output/certificate.pem" && test ! -e "$output/private-key.pem" || fail 'a concurrent run synchronized certificate material'
+find "$lock" -depth -delete
+
+new_fixture stale-lock
+mkdir -m 0700 "$lock"
+printf '99999999\n' >"$lock/pid"
+run_sync >/dev/null
+test -f "$output/certificate.pem" && test -f "$output/private-key.pem" || fail 'a stale lock was not recovered'
+test ! -e "$lock" || fail 'the recovered lock was not released by its new owner'
+
 new_fixture deferred
 export RINGRING_TLS_TEST_REFRESH_EXIT=75
 set +e
@@ -125,4 +145,4 @@ if run_sync >/dev/null 2>&1; then
 fi
 test -z "$(find "$real_output" -mindepth 1 -print -quit)" || fail 'a symlink target received certificate material'
 
-echo "SIP TLS sync tests passed: matching private material, idempotence, reload deferral, mismatch/unsafe-archive rejection, and symlink refusal."
+echo "SIP TLS sync tests passed: private material, lock races/recovery, reload deferral, unsafe input rejection, and symlink refusal."
