@@ -2,6 +2,41 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Host-set hard monthly AI spend limits
+
+### Shipped
+
+- Added a bright **Monthly AI guardrail** to each provisioned party. A host can choose any exact USD-cent amount from `$0.01` through the deployment's `OPENAI_PARTY_SPEND_LIMIT_CENTS` ceiling; that setting remains the new-party default as well as the operator cap.
+- Upgraded automatic provisioning and later host changes to require OpenAI's exact `project.spend_limit` response: requested cents, USD, monthly interval, and `enforcing` status must all match before RingRing calls the amount confirmed.
+- Added three forward-only party columns for the last confirmed amount, one immutable pending amount, and reconciliation status. Existing parties migrate to local `unknown` without contacting OpenAI or changing routing; their first host save explicitly verifies or replaces the selected provider limit.
+- Paused new `*12` weather and `*14` conversation authorizations in both the generated routes and the live voice handlers while a limit result is uncertain. The host can retry the same pending amount, but a concurrent or tampered request cannot substitute another value.
+
+### Decisions
+
+- Treat an Admin API timeout, inactive or mismatched response, restart, or failed local completion as an unknown provider result rather than assuming success or failure. Record the pending amount before the external call, keep the prior confirmed amount for display, and resume with an idempotent post of that exact pending amount.
+- Mirror `spend-updating` and `spend-update-error` into the legacy `openai_status` field. An older binary therefore keeps AI unavailable after rollback instead of ignoring the newer reconciliation columns; only this release can finish the update and restore `ready`.
+- Make spend reconciliation and party-key replacement mutually exclusive. Both are external provider lifecycles with their own retry state, so RingRing never overlaps them or exposes provider IDs, administrator credentials, runtime keys, or internal status names in the browser.
+- Keep provider changes host-initiated. Migration, startup, health checks, backup drills, and deployment verification never call the OpenAI Admin API or submit the real party control.
+
+### Verification
+
+- OpenAI client tests cover the exact request body, provision-time handoff, active enforcement, wrong amounts/currencies/intervals/object types, inactive enforcement, missing configuration, and zero values. Store tests cover additive legacy migration, host/project scope, immutable pending amounts, concurrent changes, failure/retry/completion, legacy-safe status mirroring, and route pause/resumption.
+- The full authenticated web flow covers CSRF, exact decimal parsing, the operator ceiling, an ambiguous provider failure, private retry UI, key-rotation exclusion, a tampered retry amount, provider idempotence, and no identifier/secret/internal-state disclosure. Voice tests prove cached weather or disclosure audio cannot bypass a pending spend pause.
+- `make check` passes formatting, vet, and the complete race-enabled suite. GitHub Actions passed exact feature commit `ff88460` in run `32565230972`.
+- Browser QA covered both ready and fail-closed states at 390×844 and 1280×900. The mobile amount field measures 264×56px, save/retry actions measure 264×54px, the input uses a 16px font and visible focus ring, AI-powered toggles disable during retry, and neither viewport overflows horizontally. The local app, disposable database, tab, viewport override, ports, and test credentials were removed or reset; no provider form was submitted.
+
+### Production
+
+- Created `/root/ringring-backups/ringring-20260822T093322Z-6e50283.tar.gz` before the schema change and passed its full isolated restore drill. A network-disabled image of exact commit `ff88460` migrated an extracted copy with the administrator key explicitly blank, preserved byte-identical generated phone routing and both environment copies, stopped cleanly without warnings/errors, and matched the sealed integrity, foreign-key, credential-decryption, and aggregate family-state report. All candidate resources were removed.
+- Deployed exact commit `ff88460` by rebuilding and recreating only the app container. Asterisk and Caddy identities, both root-readable environment hashes, both generated routing hashes, and every pre-existing database value remained exact. The existing party has zero locally asserted spend, no pending update, and honest `unknown` verification state; no OpenAI project, key, or limit was read or mutated.
+- Public readiness and spend-control styling, native signup, container health, private aggregate-only Asterisk checks, the SIP Fail2Ban jail, and settled logs pass. Created `/root/ringring-backups/ringring-20260822T094018Z-ff88460.tar.gz` after deployment and passed its full restore drill; the sealed report and both environment files match the pre-deploy archive exactly, and no candidate/restore runtime remains.
+
+### Remaining
+
+- Complete the accessibility and real-device usability pass, then scan and call with family phones across two remote networks and verify mobile background ringing and Wi-Fi/cellular transitions.
+- Complete the external child-safety review and confirm OpenAI Zero Data Retention before enabling AI for any caller under 13.
+- Add guided installation/upgrades, a SIP TLS device matrix, privacy-preserving observability, further threat-model tests, and the optional PostgreSQL path.
+
 ## 2026-08-22 — Curated party radio stations
 
 ### Shipped
