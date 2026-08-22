@@ -160,6 +160,17 @@ Image/dependency acquisition happens before the runtime check; the actual client
 
 The official wheel is GPLv3 and intentionally remains outside the MIT-licensed RingRing binary and production images. This headless check does not replace scanning a real QR in the mobile app or testing push, background ringing, Wi-Fi/cellular changes, and remote NAT behavior on family hardware.
 
+## Internet-radio compatibility check
+
+Run the external radio check after changing the station catalog, Asterisk image, or MP3 playback route:
+
+```sh
+cd /opt/ringring
+make radio-smoke
+```
+
+The application image emits only its fixed station IDs and URLs into a disposable production Asterisk image. The runner rejects anything outside the exact SomaFM MP3 host/path shape and requires every catalog entry to deliver decodable MPEG Layer III audio. It receives no deployment environment, production state, family credential, or published port. This is an intentional outbound availability check and is kept outside the default offline test suite.
+
 ## Update
 
 ```sh
@@ -178,3 +189,7 @@ The `*14` release adds `party_services.ai_enabled` with a forward-only startup m
 ### `*15` upgrade and rollback
 
 The voice extension chooser adds no schema, secret, environment variable, public port, or external service. Upgrading the app regenerates each party dialplan with `*15`; the private FastAGI listener already used by weather handles the interaction. Rollback regenerates the dialplan without `*15`. Any extension a member already selected remains an ordinary compatible `members.extension` value, while its SIP username and encrypted password remain unchanged.
+
+### Radio-selection upgrade and rollback
+
+The curated selector adds `party_services.radio_station` with a forward-only startup migration and defaults every existing row to Groove Salad, preserving the prior route. Take and drill the normal app-state backup before upgrading. Older app builds ignore the additive column; rolling back regenerates any enabled `*13` route with their fixed Groove Salad setting, while the chosen catalog ID remains stored for a later return to this release. No secret, environment variable, public port, or new container is added.

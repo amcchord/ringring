@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -308,13 +309,13 @@ func TestPartyServiceSettingsAreHostScopedAndDefaultToTime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !defaults.TimeEnabled || defaults.WeatherEnabled || defaults.RadioEnabled || defaults.AIEnabled {
+	if !defaults.TimeEnabled || defaults.WeatherEnabled || defaults.RadioEnabled || defaults.RadioStation != "groove-salad" || defaults.AIEnabled {
 		t.Fatalf("unexpected service defaults: %#v", defaults)
 	}
 	input := ServiceSettingsInput{
 		TimeEnabled: false, WeatherEnabled: true, WeatherQuery: "Portland, Maine",
 		WeatherLabel: "Portland, Maine", WeatherLatitude: 43.66, WeatherLongitude: -70.25,
-		RadioEnabled: true, AIEnabled: true, UpdatedAt: now.Add(time.Minute),
+		RadioEnabled: true, RadioStation: "drone-zone", AIEnabled: true, UpdatedAt: now.Add(time.Minute),
 	}
 	if _, err := s.UpdatePartyServices(ctx, party.ID, other.ID, input); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("non-host update error = %v", err)
@@ -323,8 +324,11 @@ func TestPartyServiceSettingsAreHostScopedAndDefaultToTime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.TimeEnabled || !updated.WeatherEnabled || !updated.RadioEnabled || !updated.AIEnabled || updated.WeatherLabel != "Portland, Maine" {
+	if updated.TimeEnabled || !updated.WeatherEnabled || !updated.RadioEnabled || updated.RadioStation != "drone-zone" || !updated.AIEnabled || updated.WeatherLabel != "Portland, Maine" {
 		t.Fatalf("unexpected updated settings: %#v", updated)
+	}
+	if _, err := s.UpdatePartyServices(ctx, party.ID, host.ID, ServiceSettingsInput{RadioEnabled: true, RadioStation: "http://example.test/live", UpdatedAt: now}); !errors.Is(err, ErrInvalidRadio) {
+		t.Fatalf("arbitrary radio station error = %v", err)
 	}
 	if err := s.UpdatePartyOpenAI(ctx, party.ID, "project", "service-account", "key-old", "encrypted-key", "ready"); err != nil {
 		t.Fatal(err)
@@ -333,8 +337,14 @@ func TestPartyServiceSettingsAreHostScopedAndDefaultToTime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(routing) != 1 || routing[0].TimeEnabled || !routing[0].WeatherEnabled || !routing[0].RadioEnabled || !routing[0].AIEnabled {
+	if len(routing) != 1 || routing[0].TimeEnabled || !routing[0].WeatherEnabled || !routing[0].RadioEnabled || routing[0].RadioStation != "drone-zone" || !routing[0].AIEnabled {
 		t.Fatalf("unexpected routing services: %#v", routing)
+	}
+	if _, err := s.db.Exec(`UPDATE party_services SET radio_station = '' WHERE party_id = ?`, party.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RoutingServices(ctx); err == nil || strings.Contains(err.Error(), party.ID) {
+		t.Fatalf("corrupt radio routing state was not rejected generically: %v", err)
 	}
 }
 
@@ -484,7 +494,11 @@ func TestOpenAddsCurrentColumnsToLegacyDatabase(t *testing.T) {
 		weather_longitude REAL NOT NULL DEFAULT 0,
 		radio_enabled INTEGER NOT NULL DEFAULT 0,
 		updated_at INTEGER NOT NULL
-	)`)
+	);
+	INSERT INTO parties (id, name, slug, host_user_id, openai_status, created_at)
+	VALUES ('pty_legacy', 'Legacy', 'legacy', 'usr_legacy', 'ready', 1);
+	INSERT INTO party_services (party_id, time_enabled, updated_at)
+	VALUES ('pty_legacy', 1, 1)`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -503,6 +517,19 @@ func TestOpenAddsCurrentColumnsToLegacyDatabase(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("ai_enabled column count = %d", count)
+	}
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('party_services') WHERE name = 'radio_station'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("radio_station column count = %d", count)
+	}
+	var stationID string
+	if err := store.db.QueryRow(`SELECT radio_station FROM party_services WHERE party_id = 'pty_legacy'`).Scan(&stationID); err != nil {
+		t.Fatal(err)
+	}
+	if stationID != "groove-salad" {
+		t.Fatalf("legacy radio station = %q", stationID)
 	}
 	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('parties') WHERE name = 'openai_api_key_id'`).Scan(&count); err != nil {
 		t.Fatal(err)

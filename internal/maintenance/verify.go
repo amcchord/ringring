@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/amcchord/ringring/internal/radio"
 	"github.com/amcchord/ringring/internal/secure"
 	_ "modernc.org/sqlite"
 )
@@ -90,13 +91,35 @@ func VerifyState(ctx context.Context, databasePath string, masterKey []byte) (St
 	}
 
 	currentSchema, err := database.QueryContext(ctx, `
-		SELECT p.openai_api_key_id, s.ai_enabled, t.token_hash, t.device_id, t.expires_at, t.used_at, t.created_at
+		SELECT p.openai_api_key_id, s.ai_enabled, s.radio_station, t.token_hash, t.device_id, t.expires_at, t.used_at, t.created_at
 		FROM parties p CROSS JOIN party_services s CROSS JOIN device_provisioning_tokens t LIMIT 0`)
 	if err != nil {
 		return StateReport{}, errors.New("database schema is not current")
 	}
 	if err := currentSchema.Close(); err != nil {
 		return StateReport{}, fmt.Errorf("close schema check: %w", err)
+	}
+	stationRows, err := database.QueryContext(ctx, `SELECT radio_station FROM party_services`)
+	if err != nil {
+		return StateReport{}, errors.New("verify radio station catalog")
+	}
+	for stationRows.Next() {
+		var stationID string
+		if err := stationRows.Scan(&stationID); err != nil {
+			stationRows.Close()
+			return StateReport{}, errors.New("verify radio station catalog")
+		}
+		if _, ok := radio.Lookup(stationID); !ok {
+			stationRows.Close()
+			return StateReport{}, errors.New("database contains an unsupported radio station")
+		}
+	}
+	if err := stationRows.Err(); err != nil {
+		stationRows.Close()
+		return StateReport{}, errors.New("verify radio station catalog")
+	}
+	if err := stationRows.Close(); err != nil {
+		return StateReport{}, errors.New("verify radio station catalog")
 	}
 	counts := []struct {
 		table string

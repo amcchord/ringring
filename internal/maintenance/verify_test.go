@@ -2,6 +2,7 @@ package maintenance
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,6 +55,26 @@ func TestVerifyStateRejectsCorruptDatabase(t *testing.T) {
 	}
 }
 
+func TestVerifyStateRejectsUnknownRadioStationWithoutEchoingIt(t *testing.T) {
+	path, key, _, _ := verificationFixture(t)
+	database, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const unsupported = "http://private.example.test/radio"
+	if _, err := database.Exec(`UPDATE party_services SET radio_station = ?`, unsupported); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err = VerifyState(context.Background(), path, key)
+	if err == nil || strings.Contains(err.Error(), unsupported) {
+		t.Fatalf("unexpected radio verification error: %v", err)
+	}
+}
+
 func verificationFixture(t *testing.T) (string, []byte, string, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "ringring.db")
@@ -84,6 +105,9 @@ func verificationFixture(t *testing.T) (string, []byte, string, string) {
 		t.Fatal(err)
 	}
 	if err := database.UpdatePartyOpenAI(context.Background(), "pty_backup", "project", "service", "key", partyCiphertext, "ready"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.UpdatePartyServices(context.Background(), "pty_backup", "usr_backup", store.ServiceSettingsInput{TimeEnabled: true, RadioStation: "groove-salad", UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.CreateInvitation(context.Background(), store.NewInvitation{

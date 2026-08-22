@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/amcchord/ringring/internal/model"
+	"github.com/amcchord/ringring/internal/radio"
 )
 
 func TestRenderIsolatesPartyDialplans(t *testing.T) {
@@ -14,7 +15,7 @@ func TestRenderIsolatesPartyDialplans(t *testing.T) {
 		{PartyID: "pty_gold", DeviceID: "dev_c", Extension: "101", SIPUsername: "rrd_gold_c", SIPSecret: "secret-c"},
 	}, []model.RoutingServices{
 		{PartyID: "pty_blue", TimeEnabled: true, WeatherEnabled: true, AIEnabled: true},
-		{PartyID: "pty_gold", TimeEnabled: true, RadioEnabled: true},
+		{PartyID: "pty_gold", TimeEnabled: true, RadioEnabled: true, RadioStation: "drone-zone"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -61,8 +62,9 @@ func TestRenderIsolatesPartyDialplans(t *testing.T) {
 	if strings.Contains(gold, "exten => *12") || !strings.Contains(gold, "exten => *13") {
 		t.Fatal("gold party should contain only its enabled radio service")
 	}
-	if !strings.Contains(gold, "MP3Player(http://ice5.somafm.com/groovesalad-128-mp3)") {
-		t.Fatal("radio route must use the mpg123-compatible fixed HTTP stream")
+	station, _ := radio.Lookup("drone-zone")
+	if !strings.Contains(gold, "MP3Player("+station.StreamURL+")") || strings.Contains(gold, "groovesalad-128-mp3") {
+		t.Fatal("radio route must use only the party's catalog station")
 	}
 	if strings.Contains(blue, "pty_gold") || strings.Contains(gold, "pty_blue") {
 		t.Fatalf("service party ID leaked across contexts:\n%s", dialplan)
@@ -76,6 +78,15 @@ func TestRenderRejectsConfigInjection(t *testing.T) {
 	}}, nil)
 	if err == nil {
 		t.Fatal("expected newline injection to be rejected")
+	}
+}
+
+func TestRenderRejectsUnknownRadioStation(t *testing.T) {
+	_, err := Render([]DialDevice{{
+		PartyID: "pty_safe", DeviceID: "dev_safe", Extension: "101", SIPUsername: "rrd_safe", SIPSecret: "secret",
+	}}, []model.RoutingServices{{PartyID: "pty_safe", RadioEnabled: true, RadioStation: "http://169.254.169.254/latest/meta-data"}})
+	if err == nil {
+		t.Fatal("arbitrary radio address reached the dialplan renderer")
 	}
 }
 

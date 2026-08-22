@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/amcchord/ringring/internal/config"
 	"github.com/amcchord/ringring/internal/maintenance"
 	"github.com/amcchord/ringring/internal/openairuntime"
+	"github.com/amcchord/ringring/internal/radio"
 	"github.com/amcchord/ringring/internal/secure"
 	"github.com/amcchord/ringring/internal/store"
 	"github.com/amcchord/ringring/internal/telephony"
@@ -24,6 +26,12 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "radio-catalog" {
+		for _, station := range radio.All() {
+			fmt.Printf("%s\t%s\n", station.ID, station.StreamURL)
+		}
+		return
+	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 

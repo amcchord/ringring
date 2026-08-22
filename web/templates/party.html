@@ -53,10 +53,17 @@
           <input id="weather-location" name="weather_query" value="{{.Services.WeatherQuery}}" maxlength="80" placeholder="City, state or postal code" autocomplete="postal-code">
           {{if .Services.WeatherLabel}}<small class="resolved-place">Using {{.Services.WeatherLabel}}</small>{{end}}
         </div>
-        <label class="service-toggle">
-          <input type="checkbox" name="radio_enabled" value="1" {{if .Services.RadioEnabled}}checked{{end}}>
-          <span><strong><span class="service-number">*13</span> Groove Salad radio</strong><small>Streams the listener-supported SomaFM station until the phone hangs up.</small></span>
-        </label>
+        <div class="service-choice radio-service-choice">
+          <label class="service-toggle">
+            <input type="checkbox" name="radio_enabled" value="1" {{if .Services.RadioEnabled}}checked{{end}}>
+            <span><strong><span class="service-number">*13</span> Internet radio</strong><small>Plays the host’s station choice until the phone hangs up.</small></span>
+          </label>
+          <label class="radio-field" for="radio-station">Station</label>
+          <select class="radio-select" id="radio-station" name="radio_station" aria-describedby="radio-station-note">
+            {{range .RadioStations}}<option value="{{.ID}}" {{if eq $.Services.RadioStation .ID}}selected{{end}}>{{.Name}} — {{.Description}}</option>{{end}}
+          </select>
+          <small class="radio-station-note" id="radio-station-note">Three fixed, instrumental-leaning SomaFM choices for personal family listening. Live programming is not reviewed by RingRing. <a href="https://somafm.com/support/" rel="external">Support SomaFM</a>.</small>
+        </div>
         <div class="service-choice ai-service-choice">
           <label class="service-toggle">
             <input type="checkbox" name="ai_enabled" value="1" {{if .Services.AIEnabled}}checked{{end}} {{if not $voiceReady}}disabled{{end}}>

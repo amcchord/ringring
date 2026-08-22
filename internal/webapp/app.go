@@ -22,6 +22,7 @@ import (
 	"github.com/amcchord/ringring/internal/model"
 	"github.com/amcchord/ringring/internal/openaiadmin"
 	"github.com/amcchord/ringring/internal/provisioning"
+	"github.com/amcchord/ringring/internal/radio"
 	"github.com/amcchord/ringring/internal/secure"
 	"github.com/amcchord/ringring/internal/store"
 	"github.com/amcchord/ringring/internal/telephony"
@@ -101,6 +102,7 @@ type PageData struct {
 	MemberPresence       map[string]PresenceView
 	PresenceNotice       string
 	Services             model.PartyServices
+	RadioStations        []radio.Station
 	InviteURL            string
 	JoinCSRF             string
 	Claim                model.ClaimedDevice
@@ -825,6 +827,7 @@ func (a *App) party(w http.ResponseWriter, r *http.Request, session authSession)
 	data.Members = members
 	data.DevicePresence, data.MemberPresence, data.PresenceNotice = a.phonePresence(r.Context(), members)
 	data.Services = services
+	data.RadioStations = radio.All()
 	data.InviteURL = a.readInviteFlash(w, r, party.ID)
 	if r.URL.Query().Get("deleted") == "member" {
 		data.Notice = "The member and every phone credential attached to that extension were deleted."
@@ -1049,6 +1052,15 @@ func (a *App) updateServices(w http.ResponseWriter, r *http.Request, session aut
 	query := strings.Join(strings.Fields(r.FormValue("weather_query")), " ")
 	weatherEnabled := r.FormValue("weather_enabled") != ""
 	aiEnabled := r.FormValue("ai_enabled") != ""
+	radioStationID := r.FormValue("radio_station")
+	if radioStationID == "" {
+		radioStationID = existing.RadioStation
+	}
+	radioStation, ok := radio.Resolve(radioStationID)
+	if !ok {
+		a.errorPage(w, http.StatusBadRequest, "Choose a listed radio station", "RingRing only accepts the fixed stations shown on the party page.", "/parties/"+url.PathEscape(partyID), "Back to the party")
+		return
+	}
 	if (weatherEnabled || aiEnabled) && party.OpenAIStatus != "ready" {
 		a.errorPage(w, http.StatusConflict, "The AI lines need their voice", "Wait until this party's AI status says ready, then turn an AI-powered line on.", "/parties/"+url.PathEscape(partyID), "Back to the party")
 		return
@@ -1082,7 +1094,7 @@ func (a *App) updateServices(w http.ResponseWriter, r *http.Request, session aut
 		TimeEnabled: r.FormValue("time_enabled") != "", WeatherEnabled: weatherEnabled,
 		WeatherQuery: location.Query, WeatherLabel: location.Label,
 		WeatherLatitude: location.Latitude, WeatherLongitude: location.Longitude,
-		RadioEnabled: r.FormValue("radio_enabled") != "", AIEnabled: aiEnabled, UpdatedAt: a.now(),
+		RadioEnabled: r.FormValue("radio_enabled") != "", RadioStation: radioStation.ID, AIEnabled: aiEnabled, UpdatedAt: a.now(),
 	})
 	if err != nil {
 		a.internalError(w, r, err)

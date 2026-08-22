@@ -23,7 +23,7 @@
 - [x] Authenticated voice-guided extension selection with DTMF confirmation.
 - [x] Host-controlled time and weather service lines.
 - [x] Internet radio line with a safe fixed station.
-- [ ] Vetted host station selection without arbitrary URL injection.
+- [x] Vetted host station selection without arbitrary URL injection.
 - [ ] Accessibility and real-device usability pass.
 
 ## Milestone 3 — OpenAI voice

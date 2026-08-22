@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/amcchord/ringring/internal/model"
+	"github.com/amcchord/ringring/internal/radio"
 	_ "modernc.org/sqlite"
 )
 
@@ -26,6 +27,7 @@ var (
 	ErrProvisionUsed    = errors.New("provisioning link has already been used")
 	ErrProvisionExpired = errors.New("provisioning link has expired")
 	ErrOpenAIRotation   = errors.New("OpenAI key rotation state changed")
+	ErrInvalidRadio     = errors.New("radio station is not in the catalog")
 )
 
 type Store struct {
@@ -107,6 +109,7 @@ type ServiceSettingsInput struct {
 	WeatherLatitude  float64
 	WeatherLongitude float64
 	RadioEnabled     bool
+	RadioStation     string
 	AIEnabled        bool
 	UpdatedAt        time.Time
 }
@@ -135,11 +138,43 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate AI service setting: %w", err)
 	}
+	if err := ensurePartyServicesRadioStationColumn(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate radio station setting: %w", err)
+	}
 	if err := ensurePartyOpenAIAPIKeyColumn(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate OpenAI key identifier: %w", err)
 	}
 	return &Store{db: db}, nil
+}
+
+func ensurePartyServicesRadioStationColumn(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(party_services)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	found := false
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return err
+		}
+		if name == "radio_station" {
+			found = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if found {
+		return nil
+	}
+	_, err = db.Exec(`ALTER TABLE party_services ADD COLUMN radio_station TEXT NOT NULL DEFAULT 'groove-salad'`)
+	return err
 }
 
 func ensurePartyServicesAIColumn(db *sql.DB) error {
@@ -445,16 +480,16 @@ func (s *Store) PartyServices(ctx context.Context, partyID string) (model.PartyS
 	var updated int64
 	err := s.db.QueryRowContext(ctx, `
 		SELECT party_id, time_enabled, weather_enabled, weather_query, weather_label,
-			weather_latitude, weather_longitude, radio_enabled, ai_enabled, updated_at
+			weather_latitude, weather_longitude, radio_enabled, radio_station, ai_enabled, updated_at
 		FROM party_services WHERE party_id = ?`, partyID).Scan(
 		&services.PartyID, &timeEnabled, &weatherEnabled, &services.WeatherQuery, &services.WeatherLabel,
-		&services.WeatherLatitude, &services.WeatherLongitude, &radioEnabled, &aiEnabled, &updated,
+		&services.WeatherLatitude, &services.WeatherLongitude, &radioEnabled, &services.RadioStation, &aiEnabled, &updated,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		if _, err := s.partyByID(ctx, partyID); err != nil {
 			return model.PartyServices{}, err
 		}
-		return model.PartyServices{PartyID: partyID, TimeEnabled: true}, nil
+		return model.PartyServices{PartyID: partyID, TimeEnabled: true, RadioStation: radio.DefaultStationID}, nil
 	}
 	if err != nil {
 		return model.PartyServices{}, fmt.Errorf("load party services: %w", err)
@@ -468,12 +503,16 @@ func (s *Store) PartyServices(ctx context.Context, partyID string) (model.PartyS
 }
 
 func (s *Store) UpdatePartyServices(ctx context.Context, partyID, hostUserID string, input ServiceSettingsInput) (model.PartyServices, error) {
+	station, ok := radio.Resolve(input.RadioStation)
+	if !ok {
+		return model.PartyServices{}, ErrInvalidRadio
+	}
 	result, err := s.db.ExecContext(ctx, `
 		INSERT INTO party_services (
 			party_id, time_enabled, weather_enabled, weather_query, weather_label,
-			weather_latitude, weather_longitude, radio_enabled, ai_enabled, updated_at
+			weather_latitude, weather_longitude, radio_enabled, radio_station, ai_enabled, updated_at
 		)
-		SELECT id, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM parties WHERE id = ? AND host_user_id = ?
+		SELECT id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM parties WHERE id = ? AND host_user_id = ?
 		ON CONFLICT(party_id) DO UPDATE SET
 			time_enabled = excluded.time_enabled,
 			weather_enabled = excluded.weather_enabled,
@@ -482,10 +521,11 @@ func (s *Store) UpdatePartyServices(ctx context.Context, partyID, hostUserID str
 			weather_latitude = excluded.weather_latitude,
 			weather_longitude = excluded.weather_longitude,
 			radio_enabled = excluded.radio_enabled,
+			radio_station = excluded.radio_station,
 			ai_enabled = excluded.ai_enabled,
 			updated_at = excluded.updated_at`,
 		boolInt(input.TimeEnabled), boolInt(input.WeatherEnabled), input.WeatherQuery, input.WeatherLabel,
-		input.WeatherLatitude, input.WeatherLongitude, boolInt(input.RadioEnabled), boolInt(input.AIEnabled), unix(input.UpdatedAt), partyID, hostUserID,
+		input.WeatherLatitude, input.WeatherLongitude, boolInt(input.RadioEnabled), station.ID, boolInt(input.AIEnabled), unix(input.UpdatedAt), partyID, hostUserID,
 	)
 	if err != nil {
 		return model.PartyServices{}, fmt.Errorf("update party services: %w", err)
@@ -497,7 +537,7 @@ func (s *Store) UpdatePartyServices(ctx context.Context, partyID, hostUserID str
 		PartyID: partyID, TimeEnabled: input.TimeEnabled, WeatherEnabled: input.WeatherEnabled,
 		WeatherQuery: input.WeatherQuery, WeatherLabel: input.WeatherLabel,
 		WeatherLatitude: input.WeatherLatitude, WeatherLongitude: input.WeatherLongitude,
-		RadioEnabled: input.RadioEnabled, AIEnabled: input.AIEnabled, UpdatedAt: input.UpdatedAt.UTC(),
+		RadioEnabled: input.RadioEnabled, RadioStation: station.ID, AIEnabled: input.AIEnabled, UpdatedAt: input.UpdatedAt.UTC(),
 	}, nil
 }
 
@@ -987,6 +1027,7 @@ func (s *Store) RoutingServices(ctx context.Context) ([]model.RoutingServices, e
 			COALESCE(s.time_enabled, 1),
 			CASE WHEN COALESCE(s.weather_enabled, 0) = 1 AND p.openai_status = 'ready' THEN 1 ELSE 0 END,
 			COALESCE(s.radio_enabled, 0),
+			COALESCE(s.radio_station, 'groove-salad'),
 			CASE WHEN COALESCE(s.ai_enabled, 0) = 1 AND p.openai_status = 'ready' THEN 1 ELSE 0 END
 		FROM parties p LEFT JOIN party_services s ON s.party_id = p.id
 		ORDER BY p.id`)
@@ -998,12 +1039,15 @@ func (s *Store) RoutingServices(ctx context.Context) ([]model.RoutingServices, e
 	for rows.Next() {
 		var item model.RoutingServices
 		var timeEnabled, weatherEnabled, radioEnabled, aiEnabled int
-		if err := rows.Scan(&item.PartyID, &timeEnabled, &weatherEnabled, &radioEnabled, &aiEnabled); err != nil {
+		if err := rows.Scan(&item.PartyID, &timeEnabled, &weatherEnabled, &radioEnabled, &item.RadioStation, &aiEnabled); err != nil {
 			return nil, fmt.Errorf("scan routing services: %w", err)
 		}
 		item.TimeEnabled = timeEnabled != 0
 		item.WeatherEnabled = weatherEnabled != 0
 		item.RadioEnabled = radioEnabled != 0
+		if _, ok := radio.Lookup(item.RadioStation); !ok {
+			return nil, errors.New("routing state contains an unsupported radio station")
+		}
 		item.AIEnabled = aiEnabled != 0
 		services = append(services, item)
 	}
@@ -1151,6 +1195,7 @@ CREATE TABLE IF NOT EXISTS party_services (
     weather_latitude REAL NOT NULL DEFAULT 0,
     weather_longitude REAL NOT NULL DEFAULT 0,
 	radio_enabled INTEGER NOT NULL DEFAULT 0 CHECK(radio_enabled IN (0, 1)),
+	radio_station TEXT NOT NULL DEFAULT 'groove-salad',
 	ai_enabled INTEGER NOT NULL DEFAULT 0 CHECK(ai_enabled IN (0, 1)),
 	updated_at INTEGER NOT NULL
 );

@@ -167,6 +167,11 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if !strings.Contains(partyPage, "Cousins Club") || !strings.Contains(partyPage, "AI voice: unavailable") {
 		t.Fatal("party page missing expected details")
 	}
+	for _, stationID := range []string{"groove-salad", "drone-zone", "deep-space-one"} {
+		if !strings.Contains(partyPage, `value="`+stationID+`"`) {
+			t.Fatalf("party page missing catalog station %q", stationID)
+		}
+	}
 	initialPartyKey, err := cipher.Encrypt("sk-old-party", []byte(partyID))
 	if err != nil {
 		t.Fatal(err)
@@ -185,7 +190,8 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	servicePage := postForm(t, client, server.URL+"/parties/"+partyID+"/services", url.Values{
 		"csrf": {csrf}, "time_enabled": {"1"}, "weather_enabled": {"1"},
 		"weather_query": {" Portland,   Maine "}, "radio_enabled": {"1"},
-		"ai_enabled": {"1"}, "ai_safety_confirmed": {"1"},
+		"radio_station": {"drone-zone"},
+		"ai_enabled":    {"1"}, "ai_safety_confirmed": {"1"},
 	})
 	serviceBody := readBody(t, servicePage)
 	if servicePage.StatusCode != http.StatusOK || !strings.Contains(serviceBody, "Using Portland, Maine") || geocoder.query != "Portland, Maine" {
@@ -195,8 +201,21 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !services.TimeEnabled || !services.WeatherEnabled || !services.RadioEnabled || !services.AIEnabled || services.WeatherLatitude != 43.66 {
+	if !services.TimeEnabled || !services.WeatherEnabled || !services.RadioEnabled || services.RadioStation != "drone-zone" || !services.AIEnabled || services.WeatherLatitude != 43.66 {
 		t.Fatalf("unexpected service settings: %#v", services)
+	}
+	if !strings.Contains(serviceBody, `value="drone-zone" selected`) {
+		t.Fatal("party page did not keep the selected radio station")
+	}
+	invalidRadio := postForm(t, client, server.URL+"/parties/"+partyID+"/services", url.Values{
+		"csrf": {csrf}, "radio_enabled": {"1"}, "radio_station": {"http://169.254.169.254/latest/meta-data"},
+	})
+	if invalidRadio.StatusCode != http.StatusBadRequest || !strings.Contains(readBody(t, invalidRadio), "listed radio station") {
+		t.Fatal("arbitrary radio URL did not receive the safe validation error")
+	}
+	services, err = database.PartyServices(t.Context(), partyID)
+	if err != nil || services.RadioStation != "drone-zone" || !services.RadioEnabled {
+		t.Fatalf("invalid radio update changed settings: %#v error=%v", services, err)
 	}
 	routingServices, err := database.RoutingServices(t.Context())
 	if err != nil {

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/amcchord/ringring/internal/model"
+	"github.com/amcchord/ringring/internal/radio"
 )
 
 var (
@@ -28,11 +29,6 @@ type Configuration struct {
 	PJSIP    []byte
 	Dialplan []byte
 }
-
-// Asterisk's MP3Player delegates to mpg123, whose URL reader does not support
-// TLS in the reference image. This is a public, code-controlled audio stream;
-// no credentials or caller data are sent over it.
-const grooveSaladStreamURL = "http://ice5.somafm.com/groovesalad-128-mp3"
 
 func Render(devices []DialDevice, services []model.RoutingServices) (Configuration, error) {
 	ordered := append([]DialDevice(nil), devices...)
@@ -121,9 +117,13 @@ func Render(devices []DialDevice, services []model.RoutingServices) (Configurati
 			dialplan.WriteString(" same => n,Hangup()\n")
 		}
 		if service.RadioEnabled {
+			station, ok := radio.Resolve(service.RadioStation)
+			if !ok {
+				return Configuration{}, errors.New("radio station is not in the catalog")
+			}
 			dialplan.WriteString("exten => *13,1,Answer()\n")
 			dialplan.WriteString(" same => n,Wait(1)\n")
-			fmt.Fprintf(&dialplan, " same => n,MP3Player(%s)\n", grooveSaladStreamURL)
+			fmt.Fprintf(&dialplan, " same => n,MP3Player(%s)\n", station.StreamURL)
 			dialplan.WriteString(" same => n,Hangup()\n")
 		}
 		if service.AIEnabled {
