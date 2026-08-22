@@ -1,4 +1,6 @@
-.PHONY: setup dev test check admin-test backup restore-drill sip-smoke sip-tls-smoke nat-smoke linphone-smoke radio-smoke compose-up compose-down
+.PHONY: setup dev test check security security-contract admin-test backup restore-drill sip-smoke sip-tls-smoke nat-smoke linphone-smoke radio-smoke compose-up compose-down
+
+GOVULNCHECK_VERSION ?= v1.7.0
 
 setup:
 	go mod download
@@ -9,13 +11,19 @@ dev:
 test:
 	go test ./...
 
-check:
+check: security-contract
 	test -z "$$(gofmt -l $$(find . -name '*.go' -not -path './vendor/*'))"
 	sh -n ringringctl $$(find scripts -name '*.sh' -type f)
 	./scripts/ringringctl-test.sh
 	./scripts/sip-tls-sync-test.sh
 	go vet ./...
 	go test -race ./...
+
+security: security-contract
+	go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
+
+security-contract:
+	go test ./internal/securitycontract -count=1
 
 admin-test:
 	sh -n ringringctl $$(find scripts -name '*.sh' -type f)

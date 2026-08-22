@@ -2,6 +2,9 @@
 
 RingRing is designed for family use and may handle children's voices and names. That raises the bar even for a small personal deployment.
 
+The adversaries, trust boundaries, abuse cases, executable controls, and
+accepted preview risks are tracked in the [RingRing threat model](THREAT_MODEL.md).
+
 ## Boundaries
 
 - A party is both a tenant boundary and a call-routing boundary.

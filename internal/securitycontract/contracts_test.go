@@ -1,0 +1,155 @@
+package securitycontract
+
+import (
+	"bufio"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strings"
+	"testing"
+)
+
+func repositoryRoot(t *testing.T) string {
+	t.Helper()
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("locate security contract test")
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(filename), "..", ".."))
+}
+
+func readRepositoryFile(t *testing.T, name string) string {
+	t.Helper()
+	contents, err := os.ReadFile(filepath.Join(repositoryRoot(t), name))
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	return string(contents)
+}
+
+// composePublishedPorts intentionally reads only the small, source-controlled
+// Compose shape RingRing uses. It distinguishes host-published `ports` from
+// private `expose` entries so a future public control-plane port fails CI.
+func composePublishedPorts(t *testing.T, contents string) map[string][]string {
+	t.Helper()
+	result := make(map[string][]string)
+	scanner := bufio.NewScanner(strings.NewReader(contents))
+	service := ""
+	inServices := false
+	inPorts := false
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " "))
+		if indent == 0 {
+			inServices = trimmed == "services:"
+			service = ""
+			inPorts = false
+			continue
+		}
+		if !inServices {
+			continue
+		}
+		if indent == 2 && strings.HasSuffix(trimmed, ":") {
+			service = strings.TrimSuffix(trimmed, ":")
+			result[service] = nil
+			inPorts = false
+			continue
+		}
+		if indent == 4 {
+			inPorts = trimmed == "ports:"
+			continue
+		}
+		if service != "" && inPorts && indent == 6 && strings.HasPrefix(trimmed, "- ") {
+			result[service] = append(result[service], strings.Trim(strings.TrimPrefix(trimmed, "- "), "\"'"))
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func TestOnlyWebSIPAndRTPPortsArePublished(t *testing.T) {
+	compose := readRepositoryFile(t, "compose.yaml")
+	ports := composePublishedPorts(t, compose)
+	want := map[string][]string{
+		"app":      nil,
+		"asterisk": {"5060:5060/udp", "5061:5061/tcp", "10000-10199:10000-10199/udp"},
+		"caddy":    {"80:80", "443:443", "443:443/udp"},
+	}
+	if len(ports) != len(want) {
+		t.Fatalf("Compose services = %#v, want exactly %#v", ports, want)
+	}
+	for service, expected := range want {
+		got, ok := ports[service]
+		if !ok {
+			t.Fatalf("missing Compose service %q", service)
+		}
+		sort.Strings(got)
+		sort.Strings(expected)
+		if strings.Join(got, "\n") != strings.Join(expected, "\n") {
+			t.Fatalf("published ports for %s = %#v, want %#v", service, got, expected)
+		}
+	}
+	for _, forbidden := range []string{"network_mode: host", "privileged: true", "/var/run/docker.sock"} {
+		if strings.Contains(compose, forbidden) {
+			t.Fatalf("Compose contains forbidden privilege or host-boundary escape %q", forbidden)
+		}
+	}
+}
+
+func TestWebProxyCannotReachPrivateMetricsOrControlServices(t *testing.T) {
+	caddy := readRepositoryFile(t, "deploy/Caddyfile")
+	if strings.Count(caddy, "reverse_proxy") != 1 || !strings.Contains(caddy, "reverse_proxy app:8080") {
+		t.Fatalf("Caddy must proxy only the public app listener:\n%s", caddy)
+	}
+	for _, forbidden := range []string{"9090", "4573", "4574", "5038", "asterisk:", "/metrics"} {
+		if strings.Contains(caddy, forbidden) {
+			t.Fatalf("Caddy exposes a private service marker %q", forbidden)
+		}
+	}
+
+	manager := readRepositoryFile(t, "deploy/asterisk/config/manager.conf.in")
+	for _, required := range []string{
+		"webenabled=no",
+		"deny=0.0.0.0/0.0.0.0",
+		"permit=172.31.88.10/255.255.255.255",
+	} {
+		if !strings.Contains(manager, required) {
+			t.Fatalf("AMI boundary lost required rule %q", required)
+		}
+	}
+	if strings.Contains(manager, "permit=0.0.0.0") {
+		t.Fatal("AMI permits every source")
+	}
+}
+
+func TestAsteriskHasNoPSTNOrGlobalOutboundRoute(t *testing.T) {
+	pjsip := readRepositoryFile(t, "deploy/asterisk/config/pjsip.conf.in")
+	if !strings.Contains(pjsip, "endpoint_identifier_order=auth_username,username,ip,anonymous") {
+		t.Fatal("PJSIP must identify an authenticated username before address-based fallbacks")
+	}
+	if strings.Count(pjsip, "#include") != 1 || !strings.Contains(pjsip, "#include /var/lib/ringring/asterisk/pjsip.conf") {
+		t.Fatal("base PJSIP configuration must include only RingRing-generated endpoints")
+	}
+	for _, forbidden := range []string{"type=registration", "outbound_auth=", "outbound_proxy=", "type=identify", "trunk"} {
+		if strings.Contains(strings.ToLower(pjsip), forbidden) {
+			t.Fatalf("base PJSIP configuration contains outbound-provider marker %q", forbidden)
+		}
+	}
+
+	dialplan := readRepositoryFile(t, "deploy/asterisk/config/extensions.conf")
+	if strings.Count(dialplan, "#include") != 1 || !strings.Contains(dialplan, "#include /var/lib/ringring/asterisk/extensions.conf") {
+		t.Fatal("base dialplan must include only the RingRing-generated party dialplan")
+	}
+	for _, forbidden := range []string{"Dial(", "SIP/", "IAX2/", "DAHDI/", "Local/", "Goto("} {
+		if strings.Contains(dialplan, forbidden) {
+			t.Fatalf("base dialplan contains routing primitive %q", forbidden)
+		}
+	}
+}

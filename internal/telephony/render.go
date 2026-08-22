@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	safeIdentifier = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+	safeIdentifier = regexp.MustCompile(`^[A-Za-z0-9_-]{1,48}$`)
 	safeExtension  = regexp.MustCompile(`^[0-9]{2,5}$`)
 )
 
@@ -48,10 +48,20 @@ func Render(devices []DialDevice, services []model.RoutingServices) (Configurati
 
 	parties := make(map[string]map[string][]string)
 	partyIDs := make(map[string]string)
+	deviceIDs := make(map[string]struct{}, len(ordered))
+	sipUsernames := make(map[string]struct{}, len(ordered))
 	for _, device := range ordered {
 		if err := validateDevice(device); err != nil {
 			return Configuration{}, err
 		}
+		if _, exists := deviceIDs[device.DeviceID]; exists {
+			return Configuration{}, errors.New("duplicate device ID in routing configuration")
+		}
+		deviceIDs[device.DeviceID] = struct{}{}
+		if _, exists := sipUsernames[device.SIPUsername]; exists {
+			return Configuration{}, errors.New("duplicate SIP username in routing configuration")
+		}
+		sipUsernames[device.SIPUsername] = struct{}{}
 		contextName := partyContext(device.PartyID)
 		if parties[contextName] == nil {
 			parties[contextName] = make(map[string][]string)
@@ -193,9 +203,8 @@ func validateDevice(device DialDevice) error {
 }
 
 func partyContext(partyID string) string {
-	compact := strings.ReplaceAll(partyID, "_", "-")
-	if len(compact) > 28 {
-		compact = compact[:28]
-	}
-	return "rr-party-" + compact
+	// Party IDs have already been restricted to Asterisk-safe characters and
+	// 48 bytes. Preserve every byte: normalization or truncation could map two
+	// tenants into one dialplan context and break the core call boundary.
+	return "rr-party-" + partyID
 }

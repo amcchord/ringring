@@ -159,7 +159,7 @@ if test "$app_ready" -ne 1; then
   exit 1
 fi
 grep -q '^direct_media=no$' "$work_directory/state/pjsip.conf"
-grep -q '^context=rr-party-pty-smoke$' "$work_directory/state/pjsip.conf"
+grep -q '^context=rr-party-pty_smoke$' "$work_directory/state/pjsip.conf"
 grep -Fq 'exten => *10,1,Answer()' "$work_directory/state/extensions.conf"
 grep -Fq ' same => n,Echo()' "$work_directory/state/extensions.conf"
 grep -Fq 'exten => *15,1,Answer()' "$work_directory/state/extensions.conf"
@@ -354,9 +354,9 @@ grep -q '^exten => 102,1,NoOp(RingRing party call)$' "$work_directory/state/exte
 grep -Fq 'callerid=RingRing 103 <103>' "$work_directory/state/pjsip.conf"
 grep -Fq 'password=smoke-only-a-7Qm4s9Vx' "$work_directory/state/pjsip.conf"
 docker exec ringring-sip-smoke-asterisk \
-  asterisk -rx 'dialplan show 103@rr-party-pty-smoke' | grep -Fq 'Dial(PJSIP/rr_smoke_a,30)'
+  asterisk -rx 'dialplan show 103@rr-party-pty_smoke' | grep -Fq 'Dial(PJSIP/rr_smoke_a,30)'
 if docker exec ringring-sip-smoke-asterisk \
-  asterisk -rx 'dialplan show 101@rr-party-pty-smoke' | grep -Fq 'Dial(PJSIP/rr_smoke_a,30)'; then
+  asterisk -rx 'dialplan show 101@rr-party-pty_smoke' | grep -Fq 'Dial(PJSIP/rr_smoke_a,30)'; then
   echo "Asterisk still routed the previous extension after reload." >&2
   exit 1
 fi

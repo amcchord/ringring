@@ -1,6 +1,7 @@
 package telephony
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -22,14 +23,14 @@ func TestRenderIsolatesPartyDialplans(t *testing.T) {
 	}
 	pjsip := string(config.PJSIP)
 	dialplan := string(config.Dialplan)
-	if !strings.Contains(pjsip, "context=rr-party-pty-blue") || !strings.Contains(pjsip, "context=rr-party-pty-gold") {
+	if !strings.Contains(pjsip, "context=rr-party-pty_blue") || !strings.Contains(pjsip, "context=rr-party-pty_gold") {
 		t.Fatalf("missing party endpoint context:\n%s", pjsip)
 	}
 	if !strings.Contains(pjsip, "[rrd_blue_a]\ntype=aor") || !strings.Contains(pjsip, "aors=rrd_blue_a\n") || strings.Contains(pjsip, "[rrd_blue_a-aor]") {
 		t.Fatalf("registrar AOR must match the SIP username:\n%s", pjsip)
 	}
-	blueStart := strings.Index(dialplan, "[rr-party-pty-blue]")
-	goldStart := strings.Index(dialplan, "[rr-party-pty-gold]")
+	blueStart := strings.Index(dialplan, "[rr-party-pty_blue]")
+	goldStart := strings.Index(dialplan, "[rr-party-pty_gold]")
 	if blueStart < 0 || goldStart < 0 {
 		t.Fatalf("missing party contexts:\n%s", dialplan)
 	}
@@ -68,6 +69,94 @@ func TestRenderIsolatesPartyDialplans(t *testing.T) {
 	}
 	if strings.Contains(blue, "pty_gold") || strings.Contains(gold, "pty_blue") {
 		t.Fatalf("service party ID leaked across contexts:\n%s", dialplan)
+	}
+}
+
+func TestRenderPartyContextMappingIsInjective(t *testing.T) {
+	devices := []DialDevice{
+		{PartyID: "pty_family_a", DeviceID: "dev_underscore", Extension: "101", SIPUsername: "rrd_underscore", SIPSecret: "secret-a"},
+		{PartyID: "pty-family-a", DeviceID: "dev_hyphen", Extension: "101", SIPUsername: "rrd_hyphen", SIPSecret: "secret-b"},
+		{PartyID: "pty_123456789012345678901234567890_a", DeviceID: "dev_long_a", Extension: "101", SIPUsername: "rrd_long_a", SIPSecret: "secret-c"},
+		{PartyID: "pty_123456789012345678901234567890_b", DeviceID: "dev_long_b", Extension: "101", SIPUsername: "rrd_long_b", SIPSecret: "secret-d"},
+	}
+	config, err := Render(devices, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialplan := string(config.Dialplan)
+	pjsip := string(config.PJSIP)
+	for _, device := range devices {
+		contextName := "rr-party-" + device.PartyID
+		if strings.Count(dialplan, "["+contextName+"]") != 1 ||
+			!strings.Contains(pjsip, "["+device.SIPUsername+"]\ntype=endpoint") ||
+			!strings.Contains(pjsip, "context="+contextName+"\n") {
+			t.Fatalf("party %q did not retain its unique context:\n%s\n%s", device.PartyID, pjsip, dialplan)
+		}
+		contextStart := strings.Index(dialplan, "["+contextName+"]")
+		contextEnd := strings.Index(dialplan[contextStart+1:], "\n[")
+		context := dialplan[contextStart:]
+		if contextEnd >= 0 {
+			context = dialplan[contextStart : contextStart+1+contextEnd]
+		}
+		if !strings.Contains(context, "PJSIP/"+device.SIPUsername) {
+			t.Fatalf("party %q lost its endpoint:\n%s", device.PartyID, context)
+		}
+		for _, other := range devices {
+			if other.PartyID != device.PartyID && strings.Contains(context, "PJSIP/"+other.SIPUsername) {
+				t.Fatalf("party %q context contains %q endpoint:\n%s", device.PartyID, other.PartyID, context)
+			}
+		}
+	}
+}
+
+func TestRenderRejectsDuplicateGlobalRoutingIdentities(t *testing.T) {
+	base := DialDevice{PartyID: "pty_one", DeviceID: "dev_one", Extension: "101", SIPUsername: "rrd_one", SIPSecret: "secret-a"}
+	for name, duplicate := range map[string]DialDevice{
+		"device":   {PartyID: "pty_two", DeviceID: base.DeviceID, Extension: "102", SIPUsername: "rrd_two", SIPSecret: "secret-b"},
+		"username": {PartyID: "pty_two", DeviceID: "dev_two", Extension: "102", SIPUsername: base.SIPUsername, SIPSecret: "secret-b"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Render([]DialDevice{base, duplicate}, nil); err == nil {
+				t.Fatal("duplicate global routing identity was accepted")
+			}
+		})
+	}
+}
+
+func TestRenderRejectsOverlongIdentifiers(t *testing.T) {
+	_, err := Render([]DialDevice{{
+		PartyID: strings.Repeat("p", 49), DeviceID: "dev_safe", Extension: "101",
+		SIPUsername: "rrd_safe", SIPSecret: "secret",
+	}}, nil)
+	if err == nil {
+		t.Fatal("overlong party ID reached Asterisk configuration")
+	}
+}
+
+func TestRenderHasNoPSTNOrCrossContextDialPrimitive(t *testing.T) {
+	config, err := Render([]DialDevice{
+		{PartyID: "pty_one", DeviceID: "dev_one", Extension: "101", SIPUsername: "rrd_one", SIPSecret: "secret-a"},
+		{PartyID: "pty_one", DeviceID: "dev_two", Extension: "102", SIPUsername: "rrd_two", SIPSecret: "secret-b"},
+	}, []model.RoutingServices{{PartyID: "pty_one", AIEnabled: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialplan := string(config.Dialplan)
+	allowedPartyDial := regexp.MustCompile(`Dial\(PJSIP/rrd_(one|two)(?:&PJSIP/rrd_(one|two))*,30\)`)
+	for _, line := range strings.Split(dialplan, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.Contains(line, "Dial(") {
+			continue
+		}
+		if allowedPartyDial.MatchString(line) || strings.Contains(line, "Dial(AudioSocket/app:4574/") {
+			continue
+		}
+		t.Fatalf("generated dialplan contains a non-party destination: %q", line)
+	}
+	for _, forbidden := range []string{"Dial(SIP/", "Dial(IAX2/", "Dial(DAHDI/", "Dial(Local/", "PJSIP_DIAL_CONTACTS", "Goto("} {
+		if strings.Contains(dialplan, forbidden) {
+			t.Fatalf("generated dialplan contains global/outbound primitive %q", forbidden)
+		}
 	}
 }
 

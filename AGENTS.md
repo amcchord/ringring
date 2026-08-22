@@ -75,6 +75,7 @@ make setup
 make dev
 make test
 make check
+make security
 make admin-test
 make sip-smoke
 make sip-tls-smoke
