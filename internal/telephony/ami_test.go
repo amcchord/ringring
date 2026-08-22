@@ -82,6 +82,30 @@ func TestAMIContactStatusesFailsClosed(t *testing.T) {
 	}
 }
 
+func TestAMIContactStatusesAcceptsAsterisksEmptyListResponse(t *testing.T) {
+	address, finished := serveAMI(t, func(connection net.Conn, reader *bufio.Reader) error {
+		if err := acceptTestLogin(connection, reader); err != nil {
+			return err
+		}
+		if _, err := readAMIFrame(reader); err != nil {
+			return err
+		}
+		_, err := io.WriteString(connection, "Response: Error\r\nActionID: ringring-contacts\r\nMessage: No Contacts found\r\n\r\n")
+		return err
+	})
+
+	statuses, err := (AMI{Address: address, Username: "ringring", Secret: "test-only-secret", Timeout: time.Second}).ContactStatuses(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(statuses) != 0 {
+		t.Fatalf("statuses = %#v, want empty", statuses)
+	}
+	if serverErr := <-finished; serverErr != nil {
+		t.Fatal(serverErr)
+	}
+}
+
 func TestAMIReload(t *testing.T) {
 	address, finished := serveAMI(t, func(connection net.Conn, reader *bufio.Reader) error {
 		if err := acceptTestLogin(connection, reader); err != nil {

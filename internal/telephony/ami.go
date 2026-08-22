@@ -86,6 +86,12 @@ func (a AMI) ContactStatuses(ctx context.Context) (map[string]ContactState, erro
 		}
 		if response := frame["response"]; response != "" {
 			if !strings.EqualFold(response, "Success") {
+				// Asterisk answers with an error instead of an empty completed
+				// list when no SIP device is currently registered.
+				if strings.EqualFold(response, "Error") && strings.EqualFold(frame["message"], "No Contacts found") {
+					_ = writeAMIAction(connection, "Logoff")
+					return statuses, nil
+				}
 				return nil, fmt.Errorf("AMI contact query response was %s", response)
 			}
 			started = true

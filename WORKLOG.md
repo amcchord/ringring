@@ -19,7 +19,7 @@ This is the durable, chronological project record. Add new entries at the top. C
 
 ### Verification
 
-- Fake AMI protocol tests cover authenticated login, complete event-list parsing, duplicate-contact precedence, known and future statuses, unsafe endpoint rejection, permission errors without secret disclosure, incomplete lists, canceled contexts, line-injection rejection, and the existing reload action.
+- Fake AMI protocol tests cover authenticated login, complete and Asterisk-style empty contact lists, duplicate-contact precedence, known and future statuses, unsafe endpoint rejection, permission errors without secret disclosure, incomplete lists, canceled contexts, line-injection rejection, and the existing reload action.
 - Authenticated web tests cover every rendered state, explicit AMI failure fallback, revocation overriding a previously online contact, accessible member labels, and denial before any presence query for another signed-in host.
 - `make check` passes with formatting, vet, and the full race-enabled suite. A disposable browser flow created and claimed a phone, then verified the unavailable-state directory at desktop and 390×844 widths with no horizontal overflow; its browser tab and all temporary state were removed.
 
