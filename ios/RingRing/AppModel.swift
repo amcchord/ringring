@@ -22,6 +22,7 @@ final class AppModel: ObservableObject {
     private var pushKit: PushKitCoordinator?
     private var pushToken: String?
     private var registeredPushToken: String?
+    private var isPreview = false
 
     init() {
 #if DEBUG
@@ -38,6 +39,7 @@ final class AppModel: ObservableObject {
         }
         let previewsConfiguredPhone = arguments.contains("--preview-call-menu") || arguments.contains("--preview-active-call") || arguments.contains("--preview-settings")
         if previewsConfiguredPhone {
+            isPreview = true
             account = SIPAccount(server: "ringring.live", port: 5061, transport: "tls", username: "preview_phone", password: "preview-only", extension: "103")
             destinations = [
                 DialDestination(kind: .call, label: "Join Kitchen phone + Workshop phone", detail: "2 phones are talking now.", dial: "*16101"),
@@ -210,13 +212,14 @@ final class AppModel: ObservableObject {
     }
 
     func refresh() {
+        guard !isPreview else { return }
         phone.refresh()
         registerPushTokenIfPossible()
         Task { await refreshMenu() }
     }
 
     func refreshMenu() async {
-        guard let currentAccount = account, phone.callPhase == .idle else { return }
+        guard !isPreview, let currentAccount = account, phone.callPhase == .idle else { return }
         do {
             let state = try await phoneAPI.fetchState(for: currentAccount)
             let updatedAccount = SIPAccount(
