@@ -2,7 +2,13 @@
 
 This bundle gives the WP826 a RingRing-flavored idle screen, four original ringtones, friendlier idle softkeys, and an optional one-file SIP setup. The phone does not expose a replaceable system skin, so its built-in icons, menus, fonts, call screens, and boot animation remain Grandstream's.
 
-The recommended arrangement is:
+For one or a few household phones, the recommended arrangement is:
+
+- RingRing generates a one-time `ringring-wp826.xml` from the new phone's setup screen.
+- The owner uploads that file directly through the WP826 web interface and deletes it afterward.
+- RingRing serves the public wallpaper and ringtone files over its existing HTTPS origin.
+
+For a larger fleet, GDMS remains useful:
 
 - GDMS owns the handset, shared model template, and deliberate firmware updates.
 - RingRing serves the public wallpaper and ringtone files over its existing HTTPS origin.
@@ -39,7 +45,22 @@ curl -fsSI https://ringring.example/static/wp826/ringtones/ring4.bin
 
 All three requests should return `200`. These files contain no credential or personal data and are intentionally public. If the RingRing application cannot serve them, host the same directory on another stable HTTPS origin. Keep the ringtone basenames exactly `ring1.bin` through `ring4.bin`.
 
-## Create the GDMS model template
+## Fastest setup: download from RingRing
+
+On the one-time setup screen for a new or rotated phone, choose **Download WP826 setup file**. The attachment configures Account 1 with that device's RingRing SIP credential, verified TLS on port 5061, a five-minute registration interval, PCMU first, RFC2833 DTMF, the day wallpaper, all four ringtones, and Contacts/History/Menu idle keys.
+
+The file is deliberately partial. It does not change Wi-Fi, addressing, administrator access, or Accounts 2–6, and it contains no party, member, host, or device label. It does contain the live Account 1 SIP password and consumes the same one-time token as the RingRing app, Linphone, and phone API links. Upload it directly to the handset and delete the local copy afterward; if it is lost or exposed, rotate that phone in RingRing instead of trying to retrieve the old password.
+
+1. Connect the WP826 to Wi-Fi and find its IP address.
+2. Open that address from a browser on the same network and sign in as the phone administrator.
+3. Open **Maintenance → Upgrade and Provisioning → Config File**.
+4. Beside **Upload Device Configuration**, choose **Upload** and select `ringring-wp826.xml`. Do not use **Restore from Backup Package**; `.uf` backups are device-specific and may contain unrelated private state.
+5. Let the phone apply the XML, then reboot once so it fetches `ring1.bin` through `ring4.bin`.
+6. Confirm Account 1 says **Registered**, dial `*10`, and test an incoming and outgoing same-party call.
+
+The direct upload path and wallpaper alias were validated on a physical WP826 running firmware 1.0.1.61. The server-side renderer is tested against the alias names published by that handset. Firmware changes can alter a vendor template, so repeat the real-phone verification after a major Grandstream update.
+
+## Fleet setup: create the GDMS model template
 
 1. Add the WP826 to GDMS using its MAC address and serial number, then assign it to the intended site.
 2. Open **Device Template → By Model → Add Model Template**. Select **WP826**, give it a name such as `RingRing WP826`, and associate the relevant site.

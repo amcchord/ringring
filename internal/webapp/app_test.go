@@ -230,6 +230,100 @@ func TestNewSIPCredentialsAreNumericGroupedAndEncrypted(t *testing.T) {
 	}
 }
 
+func TestWP826ProvisioningDownloadIsOneTimeAndPrivate(t *testing.T) {
+	database, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	cipher, err := secure.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := t.Context()
+	now := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
+	host, err := database.UpsertGoogleUser(ctx, store.GoogleProfile{Subject: "wp826-host", Email: "host@example.test", Name: "Host"}, now, "usr_wp826")
+	if err != nil {
+		t.Fatal(err)
+	}
+	party, err := database.CreateParty(ctx, store.NewParty{ID: "pty_wp826", Name: "Private party", Slug: "private-party", HostUserID: host.ID, CreatedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invitationToken := strings.Repeat("i", 43)
+	if err := database.CreateInvitation(ctx, store.NewInvitation{
+		ID: "inv_wp826", PartyID: party.ID, CreatedByUserID: host.ID, TokenHash: secure.Hash(invitationToken), ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	password := "123456789012"
+	ciphertext, err := cipher.Encrypt(password, []byte("dev_wp826"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	provisioningToken := strings.Repeat("w", 43)
+	if _, _, _, err := database.ClaimInvitation(ctx, store.NewClaim{
+		TokenHash: secure.Hash(invitationToken), MemberID: "mem_wp826", DisplayName: "Private member", Extension: "103",
+		DeviceID: "dev_wp826", DeviceLabel: "Private handset", SIPUsername: "654321", SIPSecretCiphertext: ciphertext,
+		Provisioning: store.NewProvisioningToken{TokenHash: secure.Hash(provisioningToken), ExpiresAt: now.Add(time.Hour), CreatedAt: now}, Now: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Config{
+		Environment: "development", HTTPAddr: ":0", BaseURL: "https://ringring.live", DatabasePath: ":memory:",
+		MasterKey: make([]byte, 32), SessionSecret: make([]byte, 32), SIPPublicHost: "ringring.live", InviteTTL: time.Hour,
+	}
+	app, err := New(cfg, database, cipher, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.now = func() time.Time { return now }
+	server := httptest.NewServer(app)
+	defer server.Close()
+	downloadURL := server.URL + "/provision/wp826/" + provisioningToken
+
+	headRequest, err := http.NewRequest(http.MethodHead, downloadURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	headResponse, err := server.Client().Do(headRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = headResponse.Body.Close()
+	if headResponse.StatusCode != http.StatusMethodNotAllowed || headResponse.Header.Get("Allow") != http.MethodGet {
+		t.Fatalf("HEAD WP826 provisioning consumed or accepted the link: status=%d", headResponse.StatusCode)
+	}
+
+	download := get(t, server.Client(), downloadURL)
+	body := readBody(t, download)
+	if download.StatusCode != http.StatusOK || !strings.HasPrefix(download.Header.Get("Content-Type"), "application/xml") ||
+		download.Header.Get("Content-Disposition") != `attachment; filename="ringring-wp826.xml"` ||
+		download.Header.Get("Cache-Control") != "no-store, max-age=0" || download.Header.Get("Referrer-Policy") != "no-referrer" ||
+		download.Header.Get("Cross-Origin-Resource-Policy") != "same-origin" || !strings.Contains(download.Header.Get("X-Robots-Tag"), "noindex") {
+		t.Fatalf("WP826 provisioning headers/status were unsafe: status=%d headers=%v", download.StatusCode, download.Header)
+	}
+	for _, required := range []string{
+		`<config version="2">`, `<item name="account.1.sip.server.1">`, `<part name="address">ringring.live:5061</part>`,
+		`<part name="userid">654321</part>`, `<part name="password">` + password + `</part>`,
+		`https://ringring.live/static/wp826/wallpapers/ringring-memphis-day.png`, `ringring.live/static/wp826/ringtones`,
+	} {
+		if !strings.Contains(body, required) {
+			t.Errorf("WP826 download omitted %q", required)
+		}
+	}
+	for _, privateValue := range []string{"Private party", "Private member", "Private handset", "host@example.test"} {
+		if strings.Contains(body, privateValue) {
+			t.Errorf("WP826 download exposed unrelated private data %q", privateValue)
+		}
+	}
+	if reused := get(t, server.Client(), downloadURL); reused.StatusCode != http.StatusGone || !strings.Contains(readBody(t, reused), "used, expired, replaced, or disconnected") {
+		t.Fatalf("WP826 provisioning link was reusable: status=%d", reused.StatusCode)
+	}
+}
+
 func TestSavingSIPCredentialsRetriesOnlyUsernameCollisions(t *testing.T) {
 	cipher, err := secure.NewCipher(make([]byte, 32))
 	if err != nil {
@@ -845,7 +939,7 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 		"csrf": {joinCSRF}, "display_name": {"Blue phone"}, "extension": {"101"}, "device_label": {"ATA"}, "adult_extension": {"1"},
 	})
 	setupBody := readBody(t, setup)
-	if setup.StatusCode != http.StatusOK || !strings.Contains(setupBody, "You are extension 101") || !strings.Contains(setupBody, "sip.example.test") || !strings.Contains(setupBody, "Scan it with the <em>RingRing app.</em>") || !strings.Contains(setupBody, "Scan it with <em>Linphone.</em>") || !strings.Contains(setupBody, "data:image/png;base64,") || !strings.Contains(setupBody, `href="ringring://join?provision=`) || !strings.Contains(setupBody, `id="ios-provision-url"`) || !strings.Contains(setupBody, `id="phone-provision-url"`) || !strings.Contains(setupBody, `/api/v1/phone-provisioning/`) || !strings.Contains(setupBody, `href="/openapi.yaml"`) || !strings.Contains(setupBody, "Use only one setup URL") || !strings.Contains(setupBody, "href=\"sip-linphone:?linphone-fetch-config=http%3A%2F%2F") || strings.Contains(setupBody, "#ZgotmplZ") || !strings.Contains(setupBody, "Use the scanner inside RingRing") || !strings.Contains(setupBody, "Use Linphone’s scanner—not the regular Camera app") || !strings.Contains(setupBody, "TLS · port 5061") || !strings.Contains(setupBody, "UDP · port 5060") || !strings.Contains(setupBody, "TLS protects phone sign-in and call setup") || !strings.Contains(setupBody, "voice audio is still server-relayed RTP, not encrypted media") || !strings.Contains(setupBody, "Test both directions") || !strings.Contains(setupBody, "dial <strong>*10</strong>") || !strings.Contains(setupBody, "Pick a different extension by phone") || !strings.Contains(setupBody, "Dial <strong>*15</strong>") || !strings.Contains(setupBody, "press <strong>1</strong> to save") || !strings.Contains(setupBody, `data-copy-setup`) || !strings.Contains(setupBody, `data-copy-target="setup-password"`) || !strings.Contains(setupBody, "This copies the password too") || !strings.Contains(setupBody, "SIP user, user ID, authentication ID") || !strings.Contains(setupBody, "Do not forward router ports") || !strings.Contains(setupBody, "Digits only") || !strings.Contains(setupBody, "Copy uses the exact unspaced value") {
+	if setup.StatusCode != http.StatusOK || !strings.Contains(setupBody, "You are extension 101") || !strings.Contains(setupBody, "sip.example.test") || !strings.Contains(setupBody, "Scan it with the <em>RingRing app.</em>") || !strings.Contains(setupBody, "Scan it with <em>Linphone.</em>") || !strings.Contains(setupBody, "One file. <em>RingRing ready.</em>") || !strings.Contains(setupBody, "/provision/wp826/") || !strings.Contains(setupBody, "Download WP826 setup file") || !strings.Contains(setupBody, "Maintenance → Upgrade and Provisioning → Config File") || !strings.Contains(setupBody, "data:image/png;base64,") || !strings.Contains(setupBody, `href="ringring://join?provision=`) || !strings.Contains(setupBody, `id="ios-provision-url"`) || !strings.Contains(setupBody, `id="phone-provision-url"`) || !strings.Contains(setupBody, `/api/v1/phone-provisioning/`) || !strings.Contains(setupBody, `href="/openapi.yaml"`) || !strings.Contains(setupBody, "Use only one setup URL") || !strings.Contains(setupBody, "href=\"sip-linphone:?linphone-fetch-config=http%3A%2F%2F") || strings.Contains(setupBody, "#ZgotmplZ") || !strings.Contains(setupBody, "Use the scanner inside RingRing") || !strings.Contains(setupBody, "Use Linphone’s scanner—not the regular Camera app") || !strings.Contains(setupBody, "TLS · port 5061") || !strings.Contains(setupBody, "UDP · port 5060") || !strings.Contains(setupBody, "TLS protects phone sign-in and call setup") || !strings.Contains(setupBody, "voice audio is still server-relayed RTP, not encrypted media") || !strings.Contains(setupBody, "Test both directions") || !strings.Contains(setupBody, "dial <strong>*10</strong>") || !strings.Contains(setupBody, "Pick a different extension by phone") || !strings.Contains(setupBody, "Dial <strong>*15</strong>") || !strings.Contains(setupBody, "press <strong>1</strong> to save") || !strings.Contains(setupBody, `data-copy-setup`) || !strings.Contains(setupBody, `data-copy-target="setup-password"`) || !strings.Contains(setupBody, "This copies the password too") || !strings.Contains(setupBody, "SIP user, user ID, authentication ID") || !strings.Contains(setupBody, "Do not forward router ports") || !strings.Contains(setupBody, "Digits only") || !strings.Contains(setupBody, "Copy uses the exact unspaced value") {
 		t.Fatalf("setup response was not successful: status=%d", setup.StatusCode)
 	}
 	if !strings.Contains(setupBody, ">*14<") {
@@ -1412,6 +1506,11 @@ func TestSecretPathsAreMaskedAndProvisioningIsRateLimited(t *testing.T) {
 	iosProvisioning.Pattern = "GET /provision/ios/{token}"
 	if got := safeRoute(iosProvisioning); got != "/provision/ios/{token}" || requestSurface(iosProvisioning) != "provisioning" {
 		t.Fatalf("safe iOS provisioning route = %q surface=%q", got, requestSurface(iosProvisioning))
+	}
+	wp826Provisioning := httptest.NewRequest(http.MethodGet, "/provision/wp826/provision-secret", nil)
+	wp826Provisioning.Pattern = "GET /provision/wp826/{token}"
+	if got := safeRoute(wp826Provisioning); got != "/provision/wp826/{token}" || requestSurface(wp826Provisioning) != "provisioning" {
+		t.Fatalf("safe WP826 provisioning route = %q surface=%q", got, requestSurface(wp826Provisioning))
 	}
 	phoneProvisioning := httptest.NewRequest(http.MethodGet, "/api/v1/phone-provisioning/provision-secret", nil)
 	phoneProvisioning.Pattern = "GET /api/v1/phone-provisioning/{token}"

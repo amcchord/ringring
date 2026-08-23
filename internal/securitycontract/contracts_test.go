@@ -254,6 +254,43 @@ func TestGrandstreamGuidePreservesCredentialAndRoutingBoundaries(t *testing.T) {
 	}
 }
 
+func TestWP826DownloadKeepsTheOneTimeMinimalConfigBoundary(t *testing.T) {
+	required := map[string][]string{
+		"internal/webapp/app.go": {
+			`GET /provision/wp826/{token}`, "ConsumeProvisioningToken", "provisioning.WP826XML",
+			`attachment; filename="ringring-wp826.xml"`, `AssetBaseURL: a.cfg.BaseURL + "/static/wp826"`,
+		},
+		"internal/provisioning/wp826.go": {
+			`Version: 2`, `item("account.1"`, `part("transport", "Tls Or Tcp")`,
+			`part("certificationChain", "Yes")`, `part("domainCertificates", "Yes")`,
+			`part("numberOfRingtone", "4")`, `ringring-memphis-day.png`,
+			`Custom-Contacts,Custom-History,Custom-Menu`,
+		},
+		"web/templates/setup.html": {
+			`href="{{.WP826ProvisionURL}}"`, "Download WP826 setup file", "Use only one setup link.",
+			"The XML contains this phone’s SIP password", "then delete the file", "Upload Device Configuration",
+		},
+		"docs/SECURITY.md": {
+			"downloadable WP826 XML", "cannot carry Wi-Fi, network, administrator", "delete it afterward",
+		},
+	}
+	for filename, markers := range required {
+		contents := readRepositoryFile(t, filename)
+		for _, marker := range markers {
+			if !strings.Contains(contents, marker) {
+				t.Errorf("%s is missing WP826 boundary %q", filename, marker)
+			}
+		}
+	}
+
+	renderer := readRepositoryFile(t, "internal/provisioning/wp826.go")
+	for _, forbidden := range []string{"wifi", "administrator.password", "network.ipv4", "account.2", "party.Name", "MemberID"} {
+		if strings.Contains(renderer, forbidden) {
+			t.Errorf("WP826 renderer contains out-of-scope setting or private field %q", forbidden)
+		}
+	}
+}
+
 func TestAsteriskHasNoPSTNOrGlobalOutboundRoute(t *testing.T) {
 	pjsip := readRepositoryFile(t, "deploy/asterisk/config/pjsip.conf.in")
 	if !strings.Contains(pjsip, "endpoint_identifier_order=auth_username,username,ip,anonymous") {

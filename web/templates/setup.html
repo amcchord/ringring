@@ -92,6 +92,28 @@
     </div>
   </section>
   {{end}}
+  {{if .WP826ProvisionURL}}
+  <section class="wp826-setup-card" id="wp826-setup" aria-labelledby="wp826-setup-title">
+    <div class="wp826-setup-mark" aria-hidden="true">WP</div>
+    <div>
+      <span class="kicker">Grandstream WP826</span>
+      <h2 id="wp826-setup-title">One file. <em>RingRing ready.</em></h2>
+      <p>Download a private setup file that adds this RingRing account, turns on SIP TLS checks, and installs the Memphis wallpaper, four original ringtones, and friendly idle keys.</p>
+      <a class="button button-primary" href="{{.WP826ProvisionURL}}">Download WP826 setup file <span aria-hidden="true">↓</span></a>
+      <p class="wp826-secret-note"><strong>Use only one setup link.</strong> Downloading this file consumes the same one-time setup used by the app and Linphone links. The XML contains this phone’s SIP password; upload it straight to the WP826, then delete the file.</p>
+      <details class="wp826-upload-steps">
+        <summary>Where to upload it on the phone</summary>
+        <ol>
+          <li>Connect the WP826 to Wi-Fi and open its IP address in a browser on the same network.</li>
+          <li>Sign in as the phone administrator.</li>
+          <li>Open <strong>Maintenance → Upgrade and Provisioning → Config File</strong>.</li>
+          <li>Beside <strong>Upload Device Configuration</strong>, choose <strong>Upload</strong> and select <strong>ringring-wp826.xml</strong>.</li>
+          <li>Let the phone apply the file, then reboot once so it fetches the ringtones. Dial <strong>*10</strong> after Account 1 says Registered.</li>
+        </ol>
+      </details>
+    </div>
+  </section>
+  {{end}}
   <div class="manual-setup-heading" id="manual-setup">
     <span class="kicker">Works with any SIP phone</span>
     <h2>Manual settings</h2>

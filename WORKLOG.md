@@ -2,6 +2,33 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-23 — Add one-file WP826 onboarding
+
+### Shipped
+
+- Added a one-time `ringring-wp826.xml` download to every new/rotated phone setup screen. The partial Grandstream alias document configures Account 1 with the issued SIP-over-TLS credential, PCMU/RFC2833 preferences, certificate and hostname checks, five-minute registration, the Memphis wallpaper, four original ringtones, and friendly idle keys.
+- Reused the existing hashed, expiring provisioning token. The WP826 attachment is no-store, no-referrer, same-origin-resource restricted, generic on failure, refused for `HEAD`, and atomically disables every other format after its first successful fetch.
+- Kept the upload portable and bounded: it contains no Wi-Fi, IP/network, administrator, party/member/device label, provider, or Accounts 2–6 setting. The UI explains that the XML contains the live SIP password, must be uploaded directly, and should be deleted afterward.
+- Reframed GDMS as the fleet option while documenting direct upload as the fastest household path, including the exact WP826 menu and the distinction between portable XML and device-specific `.uf` backups.
+
+### Decisions
+
+- Prefer a minimal partial configuration over exporting or cloning a handset's complete state. This makes first-phone setup substantially easier without copying wireless credentials, administrator access, or stale vendor settings between devices.
+- Use the WP826's alias XML version 2 for the direct browser upload. The format is self-describing, was taken from the handset's own `AliasTemplate.xml`, and was proven through the physical upload UI; the existing P-value renderer remains available for GDMS By CFG.
+- Share the existing one-time provisioning token across WP826, Linphone, RingRing app, and canonical phone API formats. The setup recipient chooses exactly one format, and no additional reusable credential URL is introduced.
+
+### Verification
+
+- A physical WP826 running firmware 1.0.1.61 accepted a minimal alias XML through **Upload Device Configuration** and immediately reported the RingRing wallpaper source and public asset URL, without changing its working extension 103 SIP account.
+- Focused provisioning and web tests cover exact alias/value output, XML escaping, unsafe input rejection, attachment and privacy headers, `HEAD` non-consumption, first-GET token consumption, generic reuse failure, omission of private labels, and the setup-page instructions.
+- Browser QA at 1440×1000 and 390×844 confirms the new setup card, touch-sized download, disclosure, and expandable upload steps remain readable with no horizontal overflow.
+- `make check`, `make security`, and `make admin-test` pass; the race-enabled suite is clean and `govulncheck` reports no reachable vulnerability. The native SIP smoke also passes verified TLS 1.2 and UDP registration, same-extension routing, party calling/joining, `*10`, bidirectional RTP, and authenticated `*15` selection.
+- The optional official-Linphone client stage is blocked on this ARM development host before XML import: its checksum-pinned upstream wheel is x86_64-only, while the legacy Docker builder emits an ARM image. The failure occurs while importing `pylinphone.so`, not in RingRing configuration, registration, or media; the native TLS gate above remains authoritative for this change.
+
+### Remaining
+
+- Reboot the physical handset after the complete theme is applied, verify all four custom ringtone slots, and complete the TLS registration, `*10`, incoming, outgoing, and cross-party hardware matrix.
+
 ## 2026-08-23 — Package a Memphis WP826 handset experience
 
 ### Shipped

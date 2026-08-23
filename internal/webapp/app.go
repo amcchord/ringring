@@ -166,6 +166,7 @@ type PageData struct {
 	LinphoneProvisionURL     string
 	LinphoneOpenURL          template.URL
 	LinphoneQR               template.URL
+	WP826ProvisionURL        string
 	IOSProvisionURL          string
 	IOSOpenURL               template.URL
 	IOSQR                    template.URL
@@ -353,6 +354,7 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 	mux.HandleFunc("GET /join/{token}", app.join)
 	mux.HandleFunc("POST /join/{token}", app.claimInvitation)
 	mux.HandleFunc("GET /provision/linphone/{token}", app.linphoneProvision)
+	mux.HandleFunc("GET /provision/wp826/{token}", app.wp826Provision)
 	mux.HandleFunc("GET /provision/ios/{token}", app.iosProvisionCompatibility)
 	mux.HandleFunc("GET /api/v1/phone-provisioning/{token}", app.phoneProvisionAPI)
 	mux.HandleFunc("GET /api/v1/phone-invitations/{token}", app.phoneInvitationAPI)
@@ -2213,6 +2215,53 @@ func (a *App) linphoneProvision(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (a *App) wp826Provision(w http.ResponseWriter, r *http.Request) {
+	phoneProvisioningHeaders(w)
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	token := r.PathValue("token")
+	if !provisionTokenPattern.MatchString(token) {
+		a.provisioningGone(w)
+		return
+	}
+	device, err := a.store.ConsumeProvisioningToken(r.Context(), secure.Hash(token), a.now())
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrProvisionUsed) || errors.Is(err, store.ErrProvisionExpired) {
+		a.provisioningGone(w)
+		return
+	}
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	password, err := a.cipher.Decrypt(device.SIPSecretCiphertext, []byte(device.DeviceID))
+	if err != nil {
+		a.logger.Error("decrypt one-time WP826 provisioning credential", "error_class", observability.ErrorClass(err))
+		a.errorPage(w, http.StatusInternalServerError, "The setup line went quiet", "Ask the party host to rotate this phone and make fresh settings.", "/", "Back home")
+		return
+	}
+	document, err := provisioning.WP826XML(provisioning.WP826Config{
+		Server:       a.cfg.SIPPublicHost,
+		Username:     device.SIPUsername,
+		Password:     password,
+		Extension:    device.Extension,
+		AssetBaseURL: a.cfg.BaseURL + "/static/wp826",
+	})
+	if err != nil {
+		a.logger.Error("build one-time WP826 provisioning", "error_class", observability.ErrorClass(err))
+		a.errorPage(w, http.StatusInternalServerError, "The setup line went quiet", "Ask the party host to rotate this phone and make fresh settings.", "/", "Back home")
+		return
+	}
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="ringring-wp826.xml"`)
+	if _, err := w.Write(document); err != nil {
+		a.logger.Error("write one-time WP826 provisioning", "error_class", observability.ErrorClass(err))
+	}
+}
+
 func (a *App) phoneOpenAPI(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Cache-Control", "public, max-age=3600")
@@ -2572,6 +2621,7 @@ func (a *App) addLinphoneSetup(data *PageData, token string) error {
 	data.LinphoneProvisionURL = provisionURL
 	data.LinphoneOpenURL = template.URL("sip-linphone:?linphone-fetch-config=" + url.QueryEscape(provisionURL))
 	data.LinphoneQR = template.URL(qr)
+	data.WP826ProvisionURL = a.cfg.BaseURL + "/provision/wp826/" + url.PathEscape(token)
 	data.PhoneProvisionURL = a.cfg.BaseURL + "/api/v1/phone-provisioning/" + url.PathEscape(token)
 	iosProvisionURL := a.cfg.BaseURL + "/provision/ios/" + url.PathEscape(token)
 	openURL := url.URL{Scheme: "ringring", Host: "join"}

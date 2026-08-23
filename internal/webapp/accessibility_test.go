@@ -127,6 +127,8 @@ func TestFormInstructionsAreVisibleAndAssociated(t *testing.T) {
 		{
 			path: "templates/setup.html",
 			wants: []string{
+				`id="wp826-setup" aria-labelledby="wp826-setup-title"`,
+				`<summary>Where to upload it on the phone</summary>`,
 				`<dl class="setup-card">`,
 				`<dt>Password{{if .SimpleSIPCredentials}}<span class="credential-format">12 digits · no spaces</span>{{end}}</dt>`,
 				`aria-describedby="linphone-provision-help"`,
