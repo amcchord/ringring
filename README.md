@@ -20,6 +20,8 @@ The hosted reference instance is live at [ringring.live](https://ringring.live).
 
 See [the architecture](docs/ARCHITECTURE.md), [the phone API](docs/PHONE_API.md), [the security model](docs/SECURITY.md), [privacy-preserving observability](docs/OBSERVABILITY.md), [SIP TLS compatibility](docs/SIP_TLS_COMPATIBILITY.md), [backup and recovery](docs/RECOVERY.md), and [the roadmap](docs/ROADMAP.md).
 
+iPhone users can also read the app's [privacy notice](docs/PRIVACY.md) and [support guide](docs/SUPPORT.md).
+
 ## Self-hosting
 
 On a clean Debian or Ubuntu server with Docker Engine and Compose v2, clone the public repository into `/opt/ringring`, copy the root-only [answers template](deploy/install.answers.example) outside the checkout, and run `sudo ./ringringctl install --answers /root/ringring-install.answers`. Secrets are accepted only through that private file or hidden terminal prompts—not command-line flags. The command generates independent deployment keys, configures the SIP firewall before starting public listeners, starts the full stack, and verifies the private and public health checks.

@@ -2,6 +2,32 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-23 — Give the iPhone app a complete App Store presentation
+
+### Shipped
+
+- Filled the existing iOS `1.0` App Store version with English name, subtitle, promotional text, description, search keywords, marketing/support/privacy URLs, `2026 Austin McChord` copyright, and Utilities / Social Networking categories. The version remains **Prepare for Submission** and was not sent to App Review.
+- Generated and uploaded three native 6.9-inch iPhone screenshots at 1320×2868: one-scan setup, the named one-tap party menu, and an active private Echo test call. All use generic debug-only fixtures; no real family name, invitation, credential, extension owner, phone number, server secret, or call record entered an asset.
+- Kept the existing 1024px Memphis handset icon as the canonical artwork. App Store Connect obtains that icon from the uploaded app build, and the current TestFlight build already displays it; there is no separate metadata icon upload to perform.
+- Added reproducible screenshot capture and App Store Connect synchronization scripts. The sync requests the tracked shared Team key directly from AustinLand, signs API requests in memory, never prints or writes the private key, validates Apple text limits and image properties, uploads assets through Apple's reservation/checksum workflow, and verifies processing completion.
+- Added dedicated iPhone privacy and support documents and version-controlled App Store metadata under `ios/fastlane/metadata/en-US`.
+
+### Decisions
+
+- Use the existing `1.0` App Store shell rather than creating a second version. Keep it unsubmitted while PushKit/APNs and the Linphone SDK public-distribution license remain open release gates.
+- Leave age rating, App Privacy nutrition labels, pricing/availability, review contact, and release timing untouched. Those require explicit compliance and business decisions and should not be inferred from visual presentation work.
+- Upload only the highest-resolution current iPhone set. Apple scales that set for smaller iPhones, while the repository can regenerate the source screens from the real SwiftUI app whenever the interface changes.
+
+### Verification
+
+- The iPhone 17 Pro Max simulator generated three opaque JPEG screenshots at exactly 1320×2868; visual inspection confirmed complete, unclipped Memphis layouts and neutral fixtures. The App Store metadata validator confirms the 1024×1024 opaque build icon, Apple's text limits, HTTPS URLs, and all three screenshot properties.
+- The iOS simulator test suite passes all 11 Swift tests. `make check`, `make security`, and `make admin-test` pass; the race suite is clean and `govulncheck` reports no reachable vulnerability.
+- App Store Connect API readback reports **UTILITIES / SOCIAL_NETWORKING**, copyright **2026 Austin McChord**, version **1.0 · PREPARE_FOR_SUBMISSION**, and **APP_IPHONE_67: 3/3 complete**. The AustinLand credential remained in memory and no `.p8`, JWT, archive, IPA, or secret entered the worktree.
+
+### Remaining
+
+- Complete the physical TestFlight call matrix, PushKit/APNs wake path, Linphone licensing decision, age-rating questionnaire, App Privacy labels, review contact, and availability choices before considering App Review. A public `1.0` submission will also need a release build whose marketing version matches the App Store version.
+
 ## 2026-08-23 — Let a party phone teach `*12` its ZIP
 
 ### Shipped

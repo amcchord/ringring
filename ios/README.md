@@ -18,6 +18,18 @@ xcodebuild -project RingRing.xcodeproj -scheme RingRing \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 ```
 
+## App Store presentation
+
+The English App Store copy lives under `fastlane/metadata/en-US`. Generate the three privacy-safe 6.9-inch iPhone screenshots with:
+
+```sh
+./scripts/capture-app-store-screenshots.sh
+```
+
+The script boots an iPhone 17 Pro Max simulator, uses debug-only generic fixtures, captures the real SwiftUI screens at 1320×2868, and validates every output size. Generated screenshots remain gitignored; upload them with `node ../scripts/appstore-connect.mjs sync`. That command obtains the tracked shared Team credential directly from AustinLand, keeps the private key in memory, and never prints or writes it.
+
+App Store Connect gets the app icon from the uploaded build's `AppIcon` asset. The canonical 1024px source is `RingRing/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png`; changing it therefore requires a new build, not a metadata-only upload.
+
 The simulator can exercise onboarding and UI tests, but a physical iPhone is required to prove registration, two-way audio, route switching, incoming ringing, and CallKit behavior. After connecting, tap **Echo test** for RingRing's two-way audio check; the app keeps the underlying `*10` code out of the main call menu.
 
 ## Provisioning contract

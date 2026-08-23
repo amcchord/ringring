@@ -100,6 +100,13 @@ final class PhoneService: NSObject, ObservableObject {
     func usePreviewReadyState() {
         registration = .ready
     }
+
+    func usePreviewActiveCall(to destination: String) {
+        registration = .ready
+        remoteExtension = destination
+        callPhase = .active
+        connectedAt = Date(timeIntervalSinceNow: -42)
+    }
 #endif
 
     func placeCall(to destination: String, named displayName: String? = nil) {

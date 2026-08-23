@@ -17,8 +17,10 @@ final class AppModel: ObservableObject {
 
     init() {
 #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--preview-call-menu") {
-            account = SIPAccount(server: "preview.invalid", port: 5061, transport: "tls", username: "preview_phone", password: "preview-only", extension: "103")
+        let arguments = ProcessInfo.processInfo.arguments
+        let previewsConfiguredPhone = arguments.contains("--preview-call-menu") || arguments.contains("--preview-active-call")
+        if previewsConfiguredPhone {
+            account = SIPAccount(server: "ringring.live", port: 5061, transport: "tls", username: "preview_phone", password: "preview-only", extension: "103")
             destinations = [
                 DialDestination(kind: .person, label: "Kitchen phone", detail: nil, dial: "101"),
                 DialDestination(kind: .person, label: "Workshop phone", detail: nil, dial: "102"),
@@ -26,7 +28,12 @@ final class AppModel: ObservableObject {
                 DialDestination(kind: .service, label: "Local weather", detail: "Hear the host’s chosen forecast.", dial: "*12"),
                 DialDestination(kind: .service, label: "Internet radio", detail: "Play the host’s chosen station.", dial: "*13"),
             ]
-            phone.usePreviewReadyState()
+            phone.setCallDirectory(destinations)
+            if arguments.contains("--preview-active-call") {
+                phone.usePreviewActiveCall(to: "*10")
+            } else {
+                phone.usePreviewReadyState()
+            }
             return
         }
 #endif
