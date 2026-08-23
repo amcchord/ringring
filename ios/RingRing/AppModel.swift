@@ -11,12 +11,17 @@ final class AppModel: ObservableObject {
     @Published var showingScanner = false
     @Published var showingSettings = false
     @Published var pendingInvitation: PendingInvitation?
+    @Published private(set) var backgroundCalls: BackgroundCallStatus = .settingUp
 
     let phone = PhoneService()
 
     private let store = CredentialStore()
     private let client = ProvisioningClient()
     private let invitationClient = InvitationClient()
+    private let phoneAPI = PhoneAPIClient()
+    private var pushKit: PushKitCoordinator?
+    private var pushToken: String?
+    private var registeredPushToken: String?
 
     init() {
 #if DEBUG
@@ -31,10 +36,11 @@ final class AppModel: ObservableObject {
             )
             return
         }
-        let previewsConfiguredPhone = arguments.contains("--preview-call-menu") || arguments.contains("--preview-active-call")
+        let previewsConfiguredPhone = arguments.contains("--preview-call-menu") || arguments.contains("--preview-active-call") || arguments.contains("--preview-settings")
         if previewsConfiguredPhone {
             account = SIPAccount(server: "ringring.live", port: 5061, transport: "tls", username: "preview_phone", password: "preview-only", extension: "103")
             destinations = [
+                DialDestination(kind: .call, label: "Join Kitchen phone + Workshop phone", detail: "2 phones are talking now.", dial: "*16101"),
                 DialDestination(kind: .person, label: "Kitchen phone", detail: nil, dial: "101"),
                 DialDestination(kind: .person, label: "Workshop phone", detail: nil, dial: "102"),
                 DialDestination(kind: .service, label: "Echo test", detail: "Hear your own voice come back.", dial: "*10"),
@@ -47,6 +53,8 @@ final class AppModel: ObservableObject {
             } else {
                 phone.usePreviewReadyState()
             }
+            backgroundCalls = .ready
+            showingSettings = arguments.contains("--preview-settings")
             return
         }
 #endif
@@ -61,6 +69,7 @@ final class AppModel: ObservableObject {
         } catch {
             errorMessage = "RingRing couldn’t restore this phone’s secure setup. Scan a fresh setup code."
         }
+        startPushKit()
     }
 
     func join(using value: URL) {
@@ -177,16 +186,23 @@ final class AppModel: ObservableObject {
         destinations = provisioned.destinations
         phone.setCallDirectory(provisioned.destinations)
         try phone.configure(with: provisioned.sip)
+        registerPushTokenIfPossible()
+        Task { await refreshMenu() }
     }
 
     func disconnect() {
         do {
+            if let account {
+                Task { try? await phoneAPI.deletePushToken(for: account) }
+            }
             try store.delete()
             phone.disconnect()
             account = nil
             destinations = []
             pendingInvitation = nil
             invitationErrorMessage = nil
+            registeredPushToken = nil
+            backgroundCalls = .settingUp
             showingSettings = false
         } catch {
             errorMessage = "RingRing couldn’t remove this phone’s secure setup."
@@ -195,9 +211,81 @@ final class AppModel: ObservableObject {
 
     func refresh() {
         phone.refresh()
+        registerPushTokenIfPossible()
+        Task { await refreshMenu() }
+    }
+
+    func refreshMenu() async {
+        guard let currentAccount = account, phone.callPhase == .idle else { return }
+        do {
+            let state = try await phoneAPI.fetchState(for: currentAccount)
+            let updatedAccount = SIPAccount(
+                server: currentAccount.server, port: currentAccount.port, transport: currentAccount.transport,
+                username: currentAccount.username, password: currentAccount.password, extension: state.extension
+            )
+            let updated = ProvisionedPhone(sip: updatedAccount, destinations: state.destinations)
+            try store.save(updated)
+            account = updatedAccount
+            destinations = state.destinations
+            phone.setCallDirectory(state.destinations)
+        } catch PhoneAPIError.credentialsRevoked {
+            errorMessage = PhoneAPIError.credentialsRevoked.errorDescription
+        } catch {
+            // A menu refresh is opportunistic. Keep the last validated buttons
+            // through a brief server or network outage.
+        }
     }
 
     func callLabel(for dialTarget: String) -> String? {
         destinations.first(where: { $0.dial == dialTarget })?.label
+    }
+
+    private func startPushKit() {
+        let coordinator = PushKitCoordinator(phone: phone)
+        coordinator.onToken = { [weak self] token in
+            self?.pushToken = token
+            self?.registerPushTokenIfPossible()
+        }
+        coordinator.onTokenInvalidated = { [weak self] in
+            guard let self else { return }
+            if let account = self.account {
+                Task { try? await self.phoneAPI.deletePushToken(for: account) }
+            }
+            self.pushToken = nil
+            self.registeredPushToken = nil
+            self.backgroundCalls = .unavailable
+        }
+        pushKit = coordinator
+        coordinator.start()
+    }
+
+    private func registerPushTokenIfPossible() {
+        guard let account, let pushToken, registeredPushToken != pushToken else { return }
+        backgroundCalls = .settingUp
+        Task {
+            do {
+                try await phoneAPI.registerPushToken(pushToken, environment: .current, for: account)
+                guard self.account?.username == account.username, self.pushToken == pushToken else { return }
+                registeredPushToken = pushToken
+                backgroundCalls = .ready
+            } catch {
+                guard self.account?.username == account.username else { return }
+                backgroundCalls = .unavailable
+            }
+        }
+    }
+}
+
+enum BackgroundCallStatus: Equatable {
+    case settingUp
+    case ready
+    case unavailable
+
+    var label: String {
+        switch self {
+        case .settingUp: "Setting up…"
+        case .ready: "Ready"
+        case .unavailable: "Needs attention"
+        }
     }
 }

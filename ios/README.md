@@ -8,6 +8,7 @@ RingRing is a native SwiftUI SIP endpoint for the private RingRing family phone 
 - XcodeGen (`brew install xcodegen`)
 - An iPhone running iOS 17 or newer for microphone, camera, and real SIP testing
 - A reachable RingRing deployment with trusted SIP TLS on port 5061
+- For background incoming calls, a server configured with a production APNs provider key for this app
 
 ## Generate and test
 
@@ -42,11 +43,15 @@ The reference build supports `applinks:ringring.live`, so tapping a `https://rin
 
 The vendor-neutral client contract, error semantics, examples, and implementation checklist live in [the phone API guide](../docs/PHONE_API.md). Every running server also exposes its embedded OpenAPI description at `/openapi.yaml`.
 
-The named menu is the default phone screen. Tapping a button places the corresponding party-scoped call without showing or asking for its extension. A manual keypad remains behind **Dial manually** for compatibility. The initial menu is a setup-time snapshot; party changes require fresh phone settings until an authenticated directory-refresh channel is added.
+The named menu is the default phone screen. Tapping a button places the corresponding party-scoped call without showing or asking for its extension. A **Happening now** section appears when another extension has an active party call and joins it through the same party-scoped conference route. A manual keypad remains behind **Dial manually** for compatibility. The app refreshes the authenticated menu after setup and every few seconds while it is active; the last safe snapshot stays visible across brief network failures.
 
-## Incoming-call limitation in this first TestFlight build
+## Background incoming calls
 
-Calls arrive while the app's SIP core remains active, including during an active call and ordinary short background periods. Reliable ringing after iOS fully suspends or terminates the app requires a RingRing-controlled PushKit/APNs wake path and Asterisk call holding. That server feature is deliberately not faked in this build and is documented as follow-up work before a public release.
+The Release build registers a PushKit VoIP token with the configured RingRing server using the phone's existing SIP credential over HTTPS. On an incoming party call, the server sends Apple only an opaque UUID, waits briefly, and then dials the SIP endpoint. The app immediately reports the wake as a generic CallKit call, refreshes SIP registration, and replaces the generic label only after the authenticated SIP invitation arrives. Push tokens are encrypted at rest, removed on phone revocation, rotation, disconnect, or APNs invalidation, and never enter logs or analytics.
+
+Choose one of the bundled RingRing ringtones in **Settings → Ringtone**. Preview playback stays local; the selected sound is also supplied to CallKit for incoming calls.
+
+PushKit delivery and the real locked-screen answer path cannot be proved in Simulator. Before promoting a TestFlight build, use a physical iPhone to verify an incoming call with the app foregrounded, backgrounded, and behind the lock screen. Also verify that answering before SIP finishes reconnecting still connects audio. iOS may suppress launches after a person explicitly force-quits the app, so RingRing describes background/locked-screen support without promising force-quit delivery.
 
 ## Linphone SDK license
 

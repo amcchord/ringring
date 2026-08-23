@@ -6,6 +6,7 @@ repository=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
 backup_root_input=${1:-/root/ringring-backups}
 app_environment=${RINGRING_APP_ENV_FILE:-/etc/ringring/app.env}
 asterisk_environment=${RINGRING_ASTERISK_ENV_FILE:-/etc/ringring/asterisk.env}
+apns_directory=${RINGRING_APNS_DIR:-/etc/ringring/apns}
 app_image=${RINGRING_APP_IMAGE:-ringring-app}
 
 if test "$(id -u)" -ne 0; then
@@ -93,13 +94,30 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
-install -d -m 0700 "$payload" "$payload/secrets"
+install -d -m 0700 "$payload" "$payload/secrets" "$payload/secrets/apns"
 echo "Stopping only the RingRing app for a consistent WAL-mode snapshot..."
 docker compose stop app >/dev/null
 app_stopped=1
 cp -a deploy/state/app "$payload/app"
 install -m 0600 "$app_environment" "$payload/secrets/app.env"
 install -m 0600 "$asterisk_environment" "$payload/secrets/asterisk.env"
+apns_key_id=$(sed -n 's/^APNS_KEY_ID=//p' "$app_environment")
+if test -n "$apns_key_id"; then
+  printf '%s\n' "$apns_key_id" | grep -Eq '^[A-Z0-9]{10}$' || {
+    echo "APNS_KEY_ID is invalid in the application environment." >&2
+    exit 1
+  }
+  apns_key="$apns_directory/AuthKey_${apns_key_id}.p8"
+  if test ! -f "$apns_key" || test -L "$apns_key"; then
+    echo "The configured APNs provider key is missing or is a symbolic link." >&2
+    exit 1
+  fi
+  case "$(stat -c %a "$apns_key")" in 400|600) ;; *)
+    echo "The APNs provider key must have mode 0400 or 0600." >&2
+    exit 1
+  esac
+  install -m 0400 "$apns_key" "$payload/secrets/apns/AuthKey_${apns_key_id}.p8"
+fi
 test -f "$payload/app/ringring.db"
 if test -e "$payload/app/ringring.db-wal" || test -e "$payload/app/ringring.db-shm"; then
   echo "SQLite left a WAL or SHM sidecar after clean shutdown; refusing an immutable snapshot." >&2
@@ -111,6 +129,7 @@ printf '%s\n' \
   "git_commit=$commit" \
   'database=app/ringring.db' \
   'includes_deployment_secrets=true' \
+  "includes_apns_provider_key=$(test -n "$apns_key_id" && echo true || echo false)" \
   'generated_asterisk_state=false' >"$payload/manifest.txt"
 chmod 0600 "$payload/manifest.txt"
 

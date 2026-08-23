@@ -2,6 +2,33 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-23 — Wake the iPhone for calls and bring the party menu to life
+
+### Shipped
+
+- Added a RingRing-controlled PushKit/APNs wake path for the iOS endpoint. The configured phone registers its VoIP token with the server using its existing device credential; the server encrypts that token, authenticates the calling Asterisk endpoint inside the party, sends Apple only an opaque call UUID, and then continues the ordinary same-party SIP dial.
+- Integrated PushKit with CallKit so a background or locked iPhone reports the system call immediately, refreshes SIP registration, attaches the authenticated Linphone invitation to the existing call UUID, and safely handles an answer that arrives before SIP reconnects.
+- Added an authenticated, no-store configured-phone API that refreshes current same-party people and services and includes friendly `Happening now` buttons for active party conferences. The iOS app keeps the last validated menu through transient failures and never renders the hidden join number.
+- Bundled the four original RingRing ringtone WAVs, added a local preview/selector in Phone settings, and supplies the selected sound to CallKit. Updated the app/server privacy, security, architecture, recovery, OpenAPI, deployment, App Store, and TestFlight documentation.
+- Added `ringringctl configure-apns`, a read-only Compose key mount, and verified-backup support for the root-only provider key. The command validates the P-256 key and identifiers, atomically installs configuration, recreates only the app, and runs the complete deployment doctor.
+
+### Decisions
+
+- Keep APNs content-minimized and non-authoritative. A wake contains no family label, extension, SIP identity, credential, or audio; the later authenticated SIP invitation remains the only call-signaling authority and supplies any friendly name.
+- Reuse the revocable SIP device credential for HTTPS menu/push operations instead of creating a second persistent bearer. Rotation, revocation, deletion, disconnect, PushKit invalidation, and permanent APNs rejection remove the push registration.
+- Treat background and locked-screen calls as supported only after physical TestFlight acceptance. Explicit force-quit delivery remains controlled by iOS and is not promised.
+
+### Verification
+
+- Focused APNs, configuration, provisioning, storage, telephony, FastAGI, web API, and executable security-contract tests pass. A live provider-authentication check used an all-zero invalid token: Apple accepted the team-scoped production key and `com.mcchord.ringring.voip` topic without waking a real device.
+- `make check`, `make security`, and `make admin-test` pass locally; the race-enabled suite and `go vet` are clean, the installer/APNs lifecycle tests pass, and `govulncheck` finds no called vulnerability.
+- The Docker-shareable `make sip-smoke` gate passes TLS/UDP registration, same-extension fan-out, a live three-phone join, party calls, operator fallbacks, RTP echo, and authenticated extension selection with the new pre-dial hook. The first macOS `/tmp` attempt hit the known Docker bind-mount limitation before startup; the documented state-directory rerun passed.
+- The iPhone 17 Pro simulator passes all 16 Swift tests. Visual QA on a 1320×2868 iPhone surface covers the live-call menu and settings; all four 4.05–4.85 second WAVs are present in the built app and the call menu respects the bottom safe area.
+
+### Remaining
+
+- Publish and deploy the exact release commit, install the existing root-only production APNs provider key, upload build 5 to TestFlight, and complete the foreground/background/locked-screen matrix on a physical iPhone.
+
 ## 2026-08-23 — Add one-file WP826 onboarding
 
 ### Shipped

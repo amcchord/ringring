@@ -1,8 +1,8 @@
 openapi: 3.1.2
 info:
   title: RingRing Phone API
-  version: 1.1.0
-  summary: One-time party joining, SIP setup, and private call-menu provisioning.
+  version: 1.2.0
+  summary: One-time party joining, SIP setup, live call menus, and background-call registration.
   description: |
     This API lets a trusted native phone application either finish a general
     RingRing invitation or consume an already-configured phone setup link. Both
@@ -15,7 +15,9 @@ info:
     phone provisioning token is consumed by its one successful GET. Clients must
     not log, crawl, or disclose token-bearing URLs. Store returned SIP passwords
     only in device-protected secret storage. Token and credential responses
-    intentionally do not enable browser CORS.
+    intentionally do not enable browser CORS. After setup, a native phone may
+    use that SIP username and password as HTTP Basic credentials over HTTPS to
+    refresh its private call menu and register its Apple VoIP device token.
   license:
     name: MIT
     url: https://github.com/amcchord/ringring/blob/main/LICENSE
@@ -25,6 +27,7 @@ servers:
 tags:
   - name: Phone invitations
   - name: Phone provisioning
+  - name: Configured phones
 paths:
   /openapi.yaml:
     get:
@@ -175,7 +178,85 @@ paths:
             text/html:
               schema:
                 type: string
+  /api/v1/phone/state:
+    get:
+      operationId: getPhoneState
+      tags: [Configured phones]
+      summary: Refresh a configured phone's private menu and live-call buttons.
+      description: |
+        Authenticates one active device with its SIP username and password, then
+        returns a bounded current directory and currently joinable party calls.
+        The response is a menu snapshot, not presence or call history.
+      security:
+        - phoneCredential: []
+      responses:
+        "200":
+          description: Current extension and private call buttons.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhoneState"
+        "401":
+          $ref: "#/components/responses/PhoneUnauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/phone/push:
+    put:
+      operationId: registerAppleVoIPToken
+      tags: [Configured phones]
+      summary: Register or replace this device's Apple VoIP push token.
+      description: |
+        Stores the token encrypted at rest for this authenticated active device.
+        RingRing sends Apple only an opaque call UUID; party names, member names,
+        extensions, SIP credentials, and call audio never enter the APNs payload.
+      security:
+        - phoneCredential: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PhonePushRegistration"
+      responses:
+        "204":
+          description: The current token is registered.
+        "400":
+          description: The token or APNs environment is invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          $ref: "#/components/responses/PhoneUnauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          description: This server has not configured Apple background-call delivery.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+    delete:
+      operationId: unregisterAppleVoIPToken
+      tags: [Configured phones]
+      summary: Stop background-call pushes to this configured device.
+      security:
+        - phoneCredential: []
+      responses:
+        "204":
+          description: Any stored token for this device is removed.
+        "401":
+          $ref: "#/components/responses/PhoneUnauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 components:
+  securitySchemes:
+    phoneCredential:
+      type: http
+      scheme: basic
+      description: The configured device's globally unique SIP username and SIP password, sent only over HTTPS.
   parameters:
     InvitationToken:
       name: token
@@ -238,6 +319,16 @@ components:
             $ref: "#/components/schemas/Problem"
     InvitationUnavailable:
       description: The invitation token cannot be used. No reason is disclosed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    PhoneUnauthorized:
+      description: The device credential is invalid or revoked.
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
       content:
         application/problem+json:
           schema:
@@ -312,9 +403,42 @@ components:
         destinations:
           type: array
           maxItems: 128
-          description: A setup-time snapshot. It is not presence and does not refresh automatically.
+          description: An initial setup snapshot. Configured clients can refresh it through the authenticated state endpoint.
           items:
             $ref: "#/components/schemas/Destination"
+    PhoneState:
+      type: object
+      additionalProperties: false
+      required: [version, extension, destinations]
+      properties:
+        version:
+          type: integer
+          const: 1
+        extension:
+          type: string
+          pattern: "^[0-9]{2,5}$"
+          description: This member's current extension, including changes made with the phone keypad.
+        destinations:
+          type: array
+          maxItems: 128
+          description: Current same-party people, enabled services, and live calls this phone may join.
+          items:
+            $ref: "#/components/schemas/Destination"
+    PhonePushRegistration:
+      type: object
+      additionalProperties: false
+      required: [token, environment]
+      properties:
+        token:
+          type: string
+          minLength: 64
+          maxLength: 64
+          pattern: "^[a-f0-9]{64}$"
+          description: Lowercase hexadecimal encoding of the 32-byte PushKit VoIP token.
+        environment:
+          type: string
+          enum: [production, development]
+          description: Must match the server's configured APNs environment. TestFlight uses production.
     SIPAccount:
       type: object
       required: [server, port, transport, username, password, extension]
@@ -351,7 +475,7 @@ components:
       properties:
         kind:
           type: string
-          enum: [person, service]
+          enum: [person, service, call]
         label:
           type: string
           minLength: 1
@@ -363,8 +487,8 @@ components:
           description: Optional explanatory text with no leading/trailing whitespace or control characters.
         dial:
           type: string
-          pattern: "^(?:[0-9]{2,5}|\\*[0-9]{2})$"
-          description: Hidden same-party extension or explicit RingRing service code. It is never a public telephone number.
+          pattern: "^(?:[0-9]{2,5}|\\*[0-9]{2}|\\*16[0-9]{2,5})$"
+          description: Hidden same-party extension, explicit RingRing service code, or party-conference join code for a kind=call entry. It is never a public telephone number.
     Problem:
       type: object
       required: [type, title, status, detail]

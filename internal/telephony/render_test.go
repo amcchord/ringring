@@ -71,7 +71,7 @@ func TestRenderIsolatesPartyDialplans(t *testing.T) {
 	if strings.Contains(blue, "pty_gold") || strings.Contains(gold, "pty_blue") {
 		t.Fatalf("service party ID leaked across contexts:\n%s", dialplan)
 	}
-	if !strings.Contains(blue, "exten => 101,1,NoOp(RingRing party call)\n same => n,Set(__RINGRING_CONFERENCE=rrc-pty_blue-101)\n same => n,Dial(PJSIP/rrd_blue_a&PJSIP/rrd_blue_a_tablet,30,G(rr-party-bridge^s^1))") {
+	if !strings.Contains(blue, "exten => 101,1,NoOp(RingRing party call)\n same => n,Set(__RINGRING_CONFERENCE=rrc-pty_blue-101)\n same => n,Set(RINGRING_CALL_ID=${UUID()})\n same => n,Set(RINGRING_PUSH_SENT=0)\n same => n,AGI(agi://app:4573/incoming-call,pty_blue,${CHANNEL(endpoint)},101,${RINGRING_CALL_ID})\n same => n,ExecIf($[\"${RINGRING_PUSH_SENT}\"=\"1\"]?Wait(3))\n same => n,Dial(PJSIP/rrd_blue_a&PJSIP/rrd_blue_a_tablet,30,G(rr-party-bridge^s^1))") {
 		t.Fatalf("same-extension phones must ring together with explicit party endpoints:\n%s", blue)
 	}
 	if !strings.Contains(blue, "exten => *16101,1,Answer()\n same => n,Set(CDR_PROP(disable)=1)\n same => n,Set(RINGRING_CONFERENCE=rrc-pty_blue-101)") ||

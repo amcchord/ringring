@@ -86,6 +86,12 @@ AI_CALL_MAX_DURATION=3m
 AI_MAX_CONCURRENT=2
 # Set true only when intentionally offering the adults-only *14 preview.
 AI_ADULT_ONLY_ENABLED=false
+# Optional; configure with ringringctl rather than pasting the .p8 here.
+APNS_TEAM_ID=
+APNS_KEY_ID=
+APNS_PRIVATE_KEY_FILE=
+APNS_BUNDLE_ID=com.mcchord.ringring
+APNS_ENVIRONMENT=production
 VOICE_AUDIO_DIR=/asterisk/audio
 VOICE_PLAYBACK_DIR=/var/lib/ringring/asterisk/audio
 TZ=America/New_York
@@ -105,7 +111,31 @@ Native username/password login is always available. In production, new-account s
 
 Google OAuth is optional. If desired, create a web application and register `https://ringring.live/auth/google/callback` as an authorized redirect URI, then set the two Google fields. Leaving them empty does not affect native login.
 
-Phone-app, Linphone QR, and WP826 file setup require no additional environment variable. Their one-time URLs point back to the deployment's `APP_BASE_URL`, so production must keep that origin on trusted HTTPS; generated accounts use verified SIP TLS on public port `5061`, while the WP826 downloads its public wallpaper and ringtone files from the same origin. The canonical JSON contract is published at `/openapi.yaml` and documented in [Phone provisioning API](PHONE_API.md). It is safe to health-check the OpenAPI document and public `/static/wp826/` assets, but never place a real `/api/v1/phone-provisioning/{token}`, `/provision/ios/{token}`, `/provision/linphone/{token}`, or `/provision/wp826/{token}` URL into a monitor because a successful `GET` intentionally consumes it. The additive `device_provisioning_tokens` table remains rollback-compatible: an older binary ignores it, and rotating a device after returning to this release creates a fresh link.
+Phone-app and Linphone QR setup require no additional environment variable. Their one-time URLs point back to the deployment's `APP_BASE_URL`, so production must keep that origin on trusted HTTPS; generated accounts use verified SIP TLS on public port `5061`. The canonical JSON contract is published at `/openapi.yaml` and documented in [Phone API](PHONE_API.md). It is safe to health-check the OpenAPI document, but never place a real `/api/v1/phone-provisioning/{token}`, `/provision/ios/{token}`, or `/provision/linphone/{token}` URL into a monitor because a successful `GET` intentionally consumes it. The additive `device_provisioning_tokens` table remains rollback-compatible: an older binary ignores it, and rotating a device after returning to this release creates a fresh link.
+
+Background incoming calls for the iOS app additionally require an Apple Push Notification service provider key authorized for the app bundle. Keep the downloaded `.p8` in a root-only file outside the checkout, enable the Push Notifications capability for the bundle identifier, and install it with the source-controlled helper:
+
+```sh
+sudo install -m 0600 /private/path/AuthKey_<KEY_ID>.p8 /root/AuthKey_<KEY_ID>.p8
+sudo /opt/ringring/ringringctl configure-apns \
+  --key-file /root/AuthKey_<KEY_ID>.p8 \
+  --team-id <APPLE_TEAM_ID> \
+  --key-id <KEY_ID> \
+  --bundle-id com.mcchord.ringring \
+  --environment production \
+  --dry-run
+sudo /opt/ringring/ringringctl configure-apns \
+  --key-file /root/AuthKey_<KEY_ID>.p8 \
+  --team-id <APPLE_TEAM_ID> \
+  --key-id <KEY_ID> \
+  --bundle-id com.mcchord.ringring \
+  --environment production \
+  --yes
+```
+
+The command validates the P-256 key and identifiers, copies the key to `/etc/ringring/apns` as root mode `0400`, atomically writes the five `APNS_…` variables, recreates only the app container, and runs the complete deployment checks. Compose mounts only that directory read-only at `/run/secrets/ringring-apns`. TestFlight and App Store builds use `production`; a separately signed debug build and sandbox key may deliberately use `development`. Do not put the `.p8`, APNs token, SIP credential, or a real phone API response in the repository, shell output, or support logs.
+
+The new `phone_push_registrations` table is additive and device-cascading. It stores a token hash, encrypted token ciphertext, environment, and update time—no call record or Apple account data. An older rollback ignores the table and stops sending wake pushes; the next current app resumes using surviving registrations. Rotation and revocation deliberately delete a phone's registration. Verified backups include the active APNs provider key because the archived environment references it; treat those already root-only archives as deployment secrets and private data.
 
 Real-phone acceptance adds an additive `device_readiness` table containing only a device foreign key, three nullable host-confirmation timestamps, and an update timestamp. Startup creates the empty table without changing an existing member, device, credential, route, or provider resource. Older app builds ignore it, so an application rollback remains database-compatible; confirmations made before rollback reappear if this release returns. Credential rotation on this release intentionally clears that phone's confirmations. Verify the empty schema and host page after upgrade, but do not submit a real family's checklist merely as a deployment probe.
 
@@ -345,6 +375,10 @@ The incoming setup ring adds no schema, stored call state, secret, public port, 
 ### Joinable party-call upgrade and rollback
 
 Joinable calls add no schema, durable call record, environment variable, secret, public port, or new provider credential. The release replaces ordinary answered member calls with source-controlled ConfBridge profiles and exact generated `*16{extension}` routes, adds bounded AMI conference reads and a fixed announcement Originate, and adds a host-authenticated no-store polling fragment. A normal upgrade or rollback recreates the app and Asterisk, so any call already in progress is intentionally disconnected; phone registrations and every persisted party/member/device record remain compatible. Rolling back removes live-call display and join routes without migrating or deleting data. Run the isolated three-phone SIP gate before promotion, verify the ConfBridge module and fixed announcement context after deployment, and wait for a deliberate family-hardware test rather than joining an existing production call as a probe.
+
+### iPhone background calls and live menu upgrade and rollback
+
+This release adds the device-cascading `phone_push_registrations` table, two authenticated HTTPS endpoints, a private FastAGI wake route, and an optional root-only APNs provider key. It adds no public port, call-detail record, audio storage, or new container. Upgrade and verify the code first, then use `ringringctl configure-apns` so a failed app build never strands the existing deployment on new secret configuration. The next telephony reconcile places the minimized wake before ordinary member dialing; a successful APNs request adds only a short pre-dial delay. Rollback ignores the additive rows, regenerates member routes without the wake step, and leaves the root-only key in place for a later forward return. Remove or revoke that provider key only as a deliberate credential-retirement operation, never as part of a routine application rollback. A physical TestFlight iPhone must pass foreground, background, and lock-screen calls before this path is promoted beyond preview.
 
 ### Additional member phones upgrade and rollback
 

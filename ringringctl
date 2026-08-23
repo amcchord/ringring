@@ -89,6 +89,7 @@ Usage:
   $program upgrade [--target GIT_REF] [--yes] [--skip-public-check] [--dry-run]
   $program doctor [--skip-public-check]
   $program openai-retention
+  $program configure-apns --key-file FILE --team-id ID --key-id ID [--bundle-id ID] [--environment production|development] [--yes] [--dry-run]
 
 Secrets are read from a root-only answers file or hidden interactive prompts.
 They are never accepted as command-line arguments.
@@ -240,6 +241,18 @@ validate_spend_limit() {
   value=$1
   printf '%s\n' "$value" | grep -Eq '^[0-9]+$' || die "The AI spend ceiling must be whole USD cents."
   test "$value" -ge 1 && test "$value" -le 100000 || die "Choose an AI spend ceiling from 1 to 100000 cents."
+}
+
+validate_apple_identifier() {
+  label=$1
+  value=$2
+  printf '%s\n' "$value" | grep -Eq '^[A-Z0-9]{10}$' || die "$label must be 10 uppercase letters or digits."
+}
+
+validate_bundle_identifier() {
+  value=$1
+  test "${#value}" -le 255 || die "The Apple bundle identifier is too long."
+  printf '%s\n' "$value" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9.-]{2,254}$' || die "The Apple bundle identifier is invalid."
 }
 
 validate_answers_file() {
@@ -444,6 +457,24 @@ validate_installed_configuration() {
     ''|true|false) ;;
     *) die "AI_ADULT_ONLY_ENABLED must be true or false." ;;
   esac
+  apns_team_id=$(optional_env_value "$config_dir/app.env" APNS_TEAM_ID)
+  apns_key_id=$(optional_env_value "$config_dir/app.env" APNS_KEY_ID)
+  apns_private_key=$(optional_env_value "$config_dir/app.env" APNS_PRIVATE_KEY_FILE)
+  apns_bundle_id=$(optional_env_value "$config_dir/app.env" APNS_BUNDLE_ID)
+  apns_environment=$(optional_env_value "$config_dir/app.env" APNS_ENVIRONMENT)
+  apns_count=0
+  for apns_value in "$apns_team_id" "$apns_key_id" "$apns_private_key"; do
+    test -z "$apns_value" || apns_count=$((apns_count + 1))
+  done
+  test "$apns_count" -eq 0 || test "$apns_count" -eq 3 || die "APNS_TEAM_ID, APNS_KEY_ID, and APNS_PRIVATE_KEY_FILE must be configured together."
+  if test "$apns_count" -eq 3; then
+    validate_apple_identifier "APNS_TEAM_ID" "$apns_team_id"
+    validate_apple_identifier "APNS_KEY_ID" "$apns_key_id"
+    test "$apns_private_key" = "/run/secrets/ringring-apns/AuthKey_${apns_key_id}.p8" || die "APNS_PRIVATE_KEY_FILE must use the managed read-only key path."
+    validate_bundle_identifier "$apns_bundle_id"
+    case "$apns_environment" in production|development) ;; *) die "APNS_ENVIRONMENT must be production or development." ;; esac
+    require_private_file "$config_dir/apns/AuthKey_${apns_key_id}.p8" "The APNs provider key"
+  fi
 }
 
 wait_for_health() {
@@ -864,6 +895,93 @@ openai_retention_command() {
   docker compose exec -T app ringring verify-openai-retention </dev/null
 }
 
+configure_apns_command() {
+  require_root
+  validate_managed_paths
+  key_file=
+  team_id=
+  key_id=
+  bundle_id=com.mcchord.ringring
+  environment=production
+  yes=0
+  dry_run=0
+  while test "$#" -gt 0; do
+    case "$1" in
+      --key-file) test "$#" -ge 2 || die "--key-file needs a file."; key_file=$2; shift 2 ;;
+      --team-id) test "$#" -ge 2 || die "--team-id needs an identifier."; team_id=$2; shift 2 ;;
+      --key-id) test "$#" -ge 2 || die "--key-id needs an identifier."; key_id=$2; shift 2 ;;
+      --bundle-id) test "$#" -ge 2 || die "--bundle-id needs an identifier."; bundle_id=$2; shift 2 ;;
+      --environment) test "$#" -ge 2 || die "--environment needs production or development."; environment=$2; shift 2 ;;
+      --yes) yes=1; shift ;;
+      --dry-run) dry_run=1; shift ;;
+      -h|--help) usage; exit 0 ;;
+      *) die "Unknown configure-apns option: $1" ;;
+    esac
+  done
+  test -n "$key_file" && test -n "$team_id" && test -n "$key_id" || die "--key-file, --team-id, and --key-id are required."
+  case "$key_file" in /*) ;; *) die "--key-file must be an absolute path." ;; esac
+  require_private_file "$key_file" "The source APNs provider key"
+  validate_apple_identifier "APNS_TEAM_ID" "$team_id"
+  validate_apple_identifier "APNS_KEY_ID" "$key_id"
+  validate_bundle_identifier "$bundle_id"
+  case "$environment" in production|development) ;; *) die "--environment must be production or development." ;; esac
+  require_command openssl
+  openssl pkey -in "$key_file" -check -noout >/dev/null 2>&1 || die "The APNs provider key is not a valid private key."
+  openssl pkey -in "$key_file" -text -noout 2>/dev/null | grep -q 'ASN1 OID: prime256v1' || die "The APNs provider key must use the P-256 curve."
+  paths_match "$source_checkout" "$checkout" || die "Run APNs configuration with $checkout/ringringctl."
+  require_git_checkout "$checkout"
+  validate_installed_configuration
+
+  echo "APNs configuration plan:"
+  echo "  Apple team: $team_id"
+  echo "  key ID: $key_id"
+  echo "  bundle/topic: $bundle_id / $bundle_id.voip"
+  echo "  environment: $environment"
+  echo "  provider key: copied to a root-only managed file"
+  echo "  app: recreated and fully verified"
+  if test "$dry_run" -eq 1; then
+    echo "Dry run passed. No key, environment, container, or service state was changed."
+    return
+  fi
+  confirm "Install this APNs provider key and restart the RingRing app?" "$yes"
+
+  apns_directory="$config_dir/apns"
+  test ! -L "$apns_directory" || die "The managed APNs directory must not be a symlink."
+  install -d -m 0700 "$apns_directory"
+  if test "$test_mode" != 1; then
+    chown root:root "$apns_directory"
+  fi
+  destination="$apns_directory/AuthKey_${key_id}.p8"
+  test ! -L "$destination" || die "The managed APNs provider key must not be a symlink."
+  staged_key=$(mktemp "$apns_directory/.AuthKey_${key_id}.XXXXXX")
+  remember_temporary "$staged_key"
+  install -m 0400 "$key_file" "$staged_key"
+  mv -f -- "$staged_key" "$destination"
+
+  staged_environment=$(mktemp "$config_dir/.app.env.XXXXXX")
+  remember_temporary "$staged_environment"
+  awk -F= '$1 !~ /^(APNS_TEAM_ID|APNS_KEY_ID|APNS_PRIVATE_KEY_FILE|APNS_BUNDLE_ID|APNS_ENVIRONMENT)$/' "$config_dir/app.env" >"$staged_environment"
+  {
+    printf 'APNS_TEAM_ID=%s\n' "$team_id"
+    printf 'APNS_KEY_ID=%s\n' "$key_id"
+    printf 'APNS_PRIVATE_KEY_FILE=/run/secrets/ringring-apns/AuthKey_%s.p8\n' "$key_id"
+    printf 'APNS_BUNDLE_ID=%s\n' "$bundle_id"
+    printf 'APNS_ENVIRONMENT=%s\n' "$environment"
+  } >>"$staged_environment"
+  chmod 0600 "$staged_environment"
+  install -m 0600 "$staged_environment" "$config_dir/app.env"
+
+  failure_note="APNs configuration was written, but verification did not finish. Fix the reported problem and re-run the same configure-apns command."
+  validate_installed_configuration
+  cd "$checkout"
+  docker compose config --quiet
+  docker compose up -d --force-recreate app
+  wait_for_health app
+  verify_deployment 0
+  failure_note=
+  echo "RingRing background-call delivery is configured for $bundle_id in $environment."
+}
+
 test "$#" -ge 1 || {
   usage
   exit 2
@@ -875,6 +993,7 @@ case "$command_name" in
   upgrade) upgrade_command "$@" ;;
   doctor) doctor_command "$@" ;;
   openai-retention) openai_retention_command "$@" ;;
+  configure-apns) configure_apns_command "$@" ;;
   -h|--help|help) usage ;;
   *) usage >&2; die "Unknown command: $command_name" ;;
 esac

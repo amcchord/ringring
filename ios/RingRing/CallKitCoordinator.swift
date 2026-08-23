@@ -32,6 +32,7 @@ final class CallKitCoordinator: NSObject {
         configuration.maximumCallGroups = 1
         configuration.maximumCallsPerCallGroup = 1
         configuration.iconTemplateImageData = nil
+        configuration.ringtoneSound = RingRingRingtone.saved.filename
         provider = CXProvider(configuration: configuration)
         super.init()
         provider.setDelegate(self, queue: .main)
@@ -46,12 +47,15 @@ final class CallKitCoordinator: NSObject {
         request(CXTransaction(action: action))
     }
 
-    func reportIncoming(from caller: String, displayName: String?, completion: @escaping (Error?) -> Void) {
+    func reportIncoming(from caller: String, displayName: String?, uuid: UUID = UUID(), completion: @escaping (Error?) -> Void) {
+        if activeUUID == uuid {
+            completion(nil)
+            return
+        }
         guard activeUUID == nil else {
             completion(CallKitError.alreadyInCall)
             return
         }
-        let uuid = UUID()
         activeUUID = uuid
         isIncoming = true
         let update = CXCallUpdate()
@@ -67,6 +71,25 @@ final class CallKitCoordinator: NSObject {
             }
             completion(error)
         }
+    }
+
+    func reportIncomingPush(uuid: UUID, completion: @escaping (Error?) -> Void) {
+        reportIncoming(from: "RingRing", displayName: "RingRing call", uuid: uuid, completion: completion)
+    }
+
+    func updateIncoming(from caller: String, displayName: String?) {
+        guard let activeUUID, isIncoming else { return }
+        let update = CXCallUpdate()
+        update.remoteHandle = CXHandle(type: displayName == nil ? .phoneNumber : .generic, value: displayName ?? caller)
+        update.localizedCallerName = displayName ?? "Extension \(caller)"
+        update.hasVideo = false
+        provider.reportCall(with: activeUUID, updated: update)
+    }
+
+    func setRingtone(_ ringtone: RingRingRingtone) {
+        let configuration = provider.configuration
+        configuration.ringtoneSound = ringtone.filename
+        provider.configuration = configuration
     }
 
     func requestEnd() {

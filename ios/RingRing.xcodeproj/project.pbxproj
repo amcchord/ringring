@@ -11,14 +11,21 @@
 		0C8B2310DC327D9A6BE50281 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4FA845F8618DA40AD2D8FFF /* Theme.swift */; };
 		2053721B6D0AA126D676DC77 /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B19867B1C613ACBC1E6C8DD /* QRScannerView.swift */; };
 		22C0D3A1B72DE156A9528455 /* linphonesw in Frameworks */ = {isa = PBXBuildFile; productRef = ED97F22315A8D59D4DB15781 /* linphonesw */; };
+		272E7DE92B14C61C32837017 /* ring1-ringring-double.wav in Resources */ = {isa = PBXBuildFile; fileRef = E86AB25EFCBC9E261E5E9D6D /* ring1-ringring-double.wav */; };
 		38275C8F90AB49342E64135D /* RingRingApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27225ABF4FE03C8504B19AC /* RingRingApp.swift */; };
 		38A4D89DE5A5B4954DEA7D33 /* PhoneService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26287E4B948CCBB7069F817F /* PhoneService.swift */; };
 		5B55AD5074DE874313120F2F /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A728D7A87F53ADBD3AEFA5D6 /* AppModel.swift */; };
+		63DC2CFEDB6AB1F97CE121E2 /* Ringtone.swift in Sources */ = {isa = PBXBuildFile; fileRef = C440F22EE6A6CFCF37D361A7 /* Ringtone.swift */; };
 		640EA0451BDDD9F6C9364FA0 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 306D5DC14719FC4F79F0FBF5 /* Assets.xcassets */; };
 		64A3B0B66859CCB0E9B5F0EB /* ProvisioningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65A3EB8565A88D29751F66BE /* ProvisioningTests.swift */; };
 		73E83AC4D18104D80BBD2395 /* Views.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46D995B0C4B55F78449B842B /* Views.swift */; };
+		7E50C7F85D7374C502F9685D /* ring2-memphis-bounce.wav in Resources */ = {isa = PBXBuildFile; fileRef = 1BA957E0B28F80DE8B673E48 /* ring2-memphis-bounce.wav */; };
+		9D771607B9A4F03543F834FC /* ring4-soft-hello.wav in Resources */ = {isa = PBXBuildFile; fileRef = 8F47900505FCB8DECE00B5E2 /* ring4-soft-hello.wav */; };
+		AF7C65F6E5B9BFA2ABDD280D /* ring3-confetti-call.wav in Resources */ = {isa = PBXBuildFile; fileRef = 98F1D354FBEA37510E7336FB /* ring3-confetti-call.wav */; };
 		C271175D6241D219217E887F /* Provisioning.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5B408CFA8F7BFC35FF49C4E /* Provisioning.swift */; };
 		DD40D3175EA3C5FD2A18F569 /* CallKitCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F9526B441901472A601BC25 /* CallKitCoordinator.swift */; };
+		DE466FCE81E794572FFEDA90 /* PushKitCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 201F74828BC994E1910B5B06 /* PushKitCoordinator.swift */; };
+		E5FBF0CAAB0F72683023A4FB /* PhoneAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0907C08B209890E82C0755C /* PhoneAPI.swift */; };
 		F5BD9EB660EAD2FAAC4B04DA /* Invitation.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF9268D66C8D2D39CBC4DFB1 /* Invitation.swift */; };
 /* End PBXBuildFile section */
 
@@ -35,18 +42,25 @@
 /* Begin PBXFileReference section */
 		0A98C6E4A669DDE41D93BC82 /* RingRingTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = RingRingTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1B19867B1C613ACBC1E6C8DD /* QRScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerView.swift; sourceTree = "<group>"; };
+		1BA957E0B28F80DE8B673E48 /* ring2-memphis-bounce.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "ring2-memphis-bounce.wav"; sourceTree = "<group>"; };
+		201F74828BC994E1910B5B06 /* PushKitCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushKitCoordinator.swift; sourceTree = "<group>"; };
 		26287E4B948CCBB7069F817F /* PhoneService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneService.swift; sourceTree = "<group>"; };
 		306D5DC14719FC4F79F0FBF5 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		46D995B0C4B55F78449B842B /* Views.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views.swift; sourceTree = "<group>"; };
 		5571D5896C258F8379DA8483 /* CredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialStore.swift; sourceTree = "<group>"; };
 		65A3EB8565A88D29751F66BE /* ProvisioningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProvisioningTests.swift; sourceTree = "<group>"; };
 		6F9526B441901472A601BC25 /* CallKitCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallKitCoordinator.swift; sourceTree = "<group>"; };
+		8F47900505FCB8DECE00B5E2 /* ring4-soft-hello.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "ring4-soft-hello.wav"; sourceTree = "<group>"; };
+		98F1D354FBEA37510E7336FB /* ring3-confetti-call.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "ring3-confetti-call.wav"; sourceTree = "<group>"; };
 		A4FA845F8618DA40AD2D8FFF /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		A728D7A87F53ADBD3AEFA5D6 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		B5B408CFA8F7BFC35FF49C4E /* Provisioning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Provisioning.swift; sourceTree = "<group>"; };
+		C440F22EE6A6CFCF37D361A7 /* Ringtone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Ringtone.swift; sourceTree = "<group>"; };
 		CF8B03AED4EDB7F865DDE982 /* RingRing.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RingRing.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		DD5A6A0AB59C6E04A1924518 /* RingRing.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = RingRing.entitlements; sourceTree = "<group>"; };
+		E0907C08B209890E82C0755C /* PhoneAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneAPI.swift; sourceTree = "<group>"; };
 		E27225ABF4FE03C8504B19AC /* RingRingApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RingRingApp.swift; sourceTree = "<group>"; };
+		E86AB25EFCBC9E261E5E9D6D /* ring1-ringring-double.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "ring1-ringring-double.wav"; sourceTree = "<group>"; };
 		FF9268D66C8D2D39CBC4DFB1 /* Invitation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Invitation.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -76,8 +90,21 @@
 			children = (
 				DDEA692A4FD46103D00F4F47 /* RingRing */,
 				F5E79A71AB3E4EF31111073A /* RingRingTests */,
+				C7A8543202F2AE0560468583 /* ringtones */,
 				52A285CD11A705115ACDAF86 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		C7A8543202F2AE0560468583 /* ringtones */ = {
+			isa = PBXGroup;
+			children = (
+				E86AB25EFCBC9E261E5E9D6D /* ring1-ringring-double.wav */,
+				1BA957E0B28F80DE8B673E48 /* ring2-memphis-bounce.wav */,
+				98F1D354FBEA37510E7336FB /* ring3-confetti-call.wav */,
+				8F47900505FCB8DECE00B5E2 /* ring4-soft-hello.wav */,
+			);
+			name = ringtones;
+			path = ../deploy/grandstream/wp826/ringtones;
 			sourceTree = "<group>";
 		};
 		DDEA692A4FD46103D00F4F47 /* RingRing */ = {
@@ -88,11 +115,14 @@
 				6F9526B441901472A601BC25 /* CallKitCoordinator.swift */,
 				5571D5896C258F8379DA8483 /* CredentialStore.swift */,
 				FF9268D66C8D2D39CBC4DFB1 /* Invitation.swift */,
+				E0907C08B209890E82C0755C /* PhoneAPI.swift */,
 				26287E4B948CCBB7069F817F /* PhoneService.swift */,
 				B5B408CFA8F7BFC35FF49C4E /* Provisioning.swift */,
+				201F74828BC994E1910B5B06 /* PushKitCoordinator.swift */,
 				1B19867B1C613ACBC1E6C8DD /* QRScannerView.swift */,
 				DD5A6A0AB59C6E04A1924518 /* RingRing.entitlements */,
 				E27225ABF4FE03C8504B19AC /* RingRingApp.swift */,
+				C440F22EE6A6CFCF37D361A7 /* Ringtone.swift */,
 				A4FA845F8618DA40AD2D8FFF /* Theme.swift */,
 				46D995B0C4B55F78449B842B /* Views.swift */,
 			);
@@ -196,6 +226,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				640EA0451BDDD9F6C9364FA0 /* Assets.xcassets in Resources */,
+				272E7DE92B14C61C32837017 /* ring1-ringring-double.wav in Resources */,
+				7E50C7F85D7374C502F9685D /* ring2-memphis-bounce.wav in Resources */,
+				AF7C65F6E5B9BFA2ABDD280D /* ring3-confetti-call.wav in Resources */,
+				9D771607B9A4F03543F834FC /* ring4-soft-hello.wav in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -218,10 +252,13 @@
 				DD40D3175EA3C5FD2A18F569 /* CallKitCoordinator.swift in Sources */,
 				014B6FFB67A65FCBAEECFCF1 /* CredentialStore.swift in Sources */,
 				F5BD9EB660EAD2FAAC4B04DA /* Invitation.swift in Sources */,
+				E5FBF0CAAB0F72683023A4FB /* PhoneAPI.swift in Sources */,
 				38A4D89DE5A5B4954DEA7D33 /* PhoneService.swift in Sources */,
 				C271175D6241D219217E887F /* Provisioning.swift in Sources */,
+				DE466FCE81E794572FFEDA90 /* PushKitCoordinator.swift in Sources */,
 				2053721B6D0AA126D676DC77 /* QRScannerView.swift in Sources */,
 				38275C8F90AB49342E64135D /* RingRingApp.swift in Sources */,
+				63DC2CFEDB6AB1F97CE121E2 /* Ringtone.swift in Sources */,
 				0C8B2310DC327D9A6BE50281 /* Theme.swift in Sources */,
 				73E83AC4D18104D80BBD2395 /* Views.swift in Sources */,
 			);
@@ -278,6 +315,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				APS_ENVIRONMENT = production;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
@@ -310,7 +348,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 7PTN7E8EDS;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -374,6 +412,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				APS_ENVIRONMENT = development;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
@@ -406,7 +445,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 7PTN7E8EDS;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;

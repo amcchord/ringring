@@ -226,6 +226,23 @@ assert_successful_install() {
   retention_output=$(run_ctl openai-retention 2>&1) || fail "retention check rejected the installed fixture: $retention_output"
   printf '%s\n' "$retention_output" | grep -q '"organization_type":"zero_data_retention"' || fail 'retention check omitted the verified organization type'
   printf '%s\n' "$retention_output" | grep -q '"projects_verified":1' || fail 'retention check omitted the verified project count'
+  apns_source="$fixture/AuthKey_ABCDEFGHIJ.p8"
+  openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$apns_source" >/dev/null 2>&1
+  chmod 0600 "$apns_source"
+  : >"$log"
+  apns_dry_run=$(run_ctl configure-apns --key-file "$apns_source" --team-id 7PTN7E8EDS --key-id ABCDEFGHIJ --dry-run --yes 2>&1) || fail "APNs dry run failed: $apns_dry_run"
+  printf '%s\n' "$apns_dry_run" | grep -q 'Dry run passed' || fail 'APNs dry run did not report success'
+  test ! -e "$config/apns/AuthKey_ABCDEFGHIJ.p8" || fail 'APNs dry run copied the provider key'
+  test ! -s "$log" || fail 'APNs dry run invoked a service command'
+  apns_output=$(run_ctl configure-apns --key-file "$apns_source" --team-id 7PTN7E8EDS --key-id ABCDEFGHIJ --yes 2>&1) || fail "APNs configuration failed: $apns_output"
+  printf '%s\n' "$apns_output" | grep -q 'background-call delivery is configured' || fail 'APNs configuration success message is missing'
+  grep -qx 'APNS_TEAM_ID=7PTN7E8EDS' "$config/app.env" || fail 'APNs team ID was not rendered'
+  grep -qx 'APNS_KEY_ID=ABCDEFGHIJ' "$config/app.env" || fail 'APNs key ID was not rendered'
+  grep -qx 'APNS_PRIVATE_KEY_FILE=/run/secrets/ringring-apns/AuthKey_ABCDEFGHIJ.p8' "$config/app.env" || fail 'APNs key path was not rendered'
+  grep -qx 'APNS_BUNDLE_ID=com.mcchord.ringring' "$config/app.env" || fail 'APNs bundle ID was not rendered'
+  grep -qx 'APNS_ENVIRONMENT=production' "$config/app.env" || fail 'APNs environment was not rendered'
+  assert_private "$config/apns/AuthKey_ABCDEFGHIJ.p8"
+  grep -q '^docker compose up -d --force-recreate app$' "$log" || fail 'APNs configuration did not recreate the app'
   sed 's/^AI_ADULT_ONLY_ENABLED=false$/AI_ADULT_ONLY_ENABLED=true/' "$config/app.env" >"$fixture/app.approved.env"
   chmod 0600 "$fixture/app.approved.env"
   mv "$fixture/app.approved.env" "$config/app.env"

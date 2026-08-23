@@ -35,6 +35,11 @@ type Config struct {
 	AICallMaxDuration          time.Duration
 	AIMaxConcurrent            int
 	AIAdultOnlyEnabled         bool
+	APNSTeamID                 string
+	APNSKeyID                  string
+	APNSPrivateKeyFile         string
+	APNSBundleID               string
+	APNSEnvironment            string
 	VoiceAudioDir              string
 	VoicePlaybackDir           string
 	InviteTTL                  time.Duration
@@ -68,6 +73,11 @@ func Load() (Config, error) {
 		AICallMaxDuration:          envDuration("AI_CALL_MAX_DURATION", 3*time.Minute),
 		AIMaxConcurrent:            envInt("AI_MAX_CONCURRENT", 2),
 		AIAdultOnlyEnabled:         aiAdultOnlyEnabled,
+		APNSTeamID:                 os.Getenv("APNS_TEAM_ID"),
+		APNSKeyID:                  os.Getenv("APNS_KEY_ID"),
+		APNSPrivateKeyFile:         os.Getenv("APNS_PRIVATE_KEY_FILE"),
+		APNSBundleID:               env("APNS_BUNDLE_ID", "com.mcchord.ringring"),
+		APNSEnvironment:            env("APNS_ENVIRONMENT", "production"),
 		VoiceAudioDir:              env("VOICE_AUDIO_DIR", "/asterisk/audio"),
 		VoicePlaybackDir:           env("VOICE_PLAYBACK_DIR", "/var/lib/ringring/asterisk/audio"),
 		InviteTTL:                  48 * time.Hour,
@@ -105,6 +115,19 @@ func Load() (Config, error) {
 	if cfg.AIMaxConcurrent < 1 || cfg.AIMaxConcurrent > 20 {
 		return Config{}, errors.New("AI_MAX_CONCURRENT must be between 1 and 20")
 	}
+	apnsRequired := []string{cfg.APNSTeamID, cfg.APNSKeyID, cfg.APNSPrivateKeyFile}
+	apnsValues := 0
+	for _, value := range apnsRequired {
+		if value != "" {
+			apnsValues++
+		}
+	}
+	if apnsValues != 0 && apnsValues != len(apnsRequired) {
+		return Config{}, errors.New("APNS_TEAM_ID, APNS_KEY_ID, and APNS_PRIVATE_KEY_FILE must be configured together")
+	}
+	if cfg.APNSEnvironment != "production" && cfg.APNSEnvironment != "development" {
+		return Config{}, errors.New("APNS_ENVIRONMENT must be production or development")
+	}
 
 	if len(cfg.MasterKey) == 0 {
 		cfg.MasterKey = make([]byte, 32)
@@ -126,6 +149,10 @@ func (c Config) HostSignupEnabled() bool {
 
 func (c Config) OpenAIProvisioningConfigured() bool {
 	return c.OpenAIAdminKey != ""
+}
+
+func (c Config) APNSConfigured() bool {
+	return c.APNSTeamID != "" && c.APNSKeyID != "" && c.APNSPrivateKeyFile != ""
 }
 
 func env(name, fallback string) string {

@@ -210,6 +210,10 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate member weather locations: %w", err)
 	}
+	if err := ensurePhonePushTable(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate phone push registrations: %w", err)
+	}
 	if err := migrateReservedMemberExtensions(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate reserved member extensions: %w", err)
@@ -1658,6 +1662,9 @@ func (s *Store) RotateDevice(ctx context.Context, partyID, hostUserID, deviceID,
 	if _, err := tx.ExecContext(ctx, `DELETE FROM device_readiness WHERE device_id = ?`, deviceID); err != nil {
 		return RotatedDevice{}, fmt.Errorf("clear device readiness after credential rotation: %w", err)
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM phone_push_registrations WHERE device_id = ?`, deviceID); err != nil {
+		return RotatedDevice{}, fmt.Errorf("clear phone push registration after credential rotation: %w", err)
+	}
 	if err := replaceProvisioningTokenTx(ctx, tx, deviceID, provisioning); err != nil {
 		return RotatedDevice{}, err
 	}
@@ -1690,6 +1697,9 @@ func (s *Store) RevokeDevice(ctx context.Context, partyID, hostUserID, deviceID 
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM device_provisioning_tokens WHERE device_id = ?`, deviceID); err != nil {
 		return fmt.Errorf("remove revoked device provisioning: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM phone_push_registrations WHERE device_id = ?`, deviceID); err != nil {
+		return fmt.Errorf("remove revoked device push registration: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit device revocation: %w", err)

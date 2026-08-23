@@ -94,6 +94,7 @@ for required in manifest.txt verification.json app/ringring.db secrets/app.env s
     exit 1
   fi
 done
+install -d -m 0700 "$payload/secrets/apns"
 if test -n "$(find "$payload" ! -type f ! -type d -print -quit)"; then
   echo "Backup contains a symbolic link or special file." >&2
   exit 1
@@ -131,6 +132,7 @@ docker run -d --name "$container" --network none --read-only --cap-drop ALL \
   --env SIP_PUBLIC_HOST=restore.invalid --env ASTERISK_AMI_SECRET= \
   --env HTTP_ADDR=:8080 --env FASTAGI_ADDR=:4573 --env AI_AUDIO_ADDR=:4574 \
   --volume "$payload/app:/data" --volume "$work_directory/asterisk:/asterisk" \
+  --volume "$payload/secrets/apns:/run/secrets/ringring-apns:ro" \
   "$app_image" >/dev/null
 ready=0
 for _ in $(seq 1 30); do

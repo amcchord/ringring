@@ -46,6 +46,13 @@ struct RootView: View {
                 .presentationDragIndicator(.visible)
                 .interactiveDismissDisabled(model.isProvisioning)
         }
+        .task(id: model.account?.username) {
+            guard model.account != nil else { return }
+            while !Task.isCancelled, model.account != nil {
+                await model.refreshMenu()
+                try? await Task.sleep(for: .seconds(6))
+            }
+        }
         .alert(
             "Couldn’t finish that",
             isPresented: Binding(
@@ -376,6 +383,10 @@ private struct DialerView: View {
         model.destinations.filter { $0.kind == .service }
     }
 
+    private var liveCalls: [DialDestination] {
+        model.destinations.filter { $0.kind == .call }
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
@@ -404,6 +415,12 @@ private struct DialerView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
+
+                if !liveCalls.isEmpty {
+                    CallMenuSection(title: "Happening now", destinations: liveCalls, enabled: phone.registration == .ready) {
+                        requestMicrophoneThenCall($0)
+                    }
+                }
 
                 if !people.isEmpty {
                     CallMenuSection(title: "People", destinations: people, enabled: phone.registration == .ready) {
@@ -455,6 +472,7 @@ private struct DialerView: View {
             .frame(maxWidth: 520)
             .frame(maxWidth: .infinity)
         }
+        .safeAreaPadding(.bottom, 24)
         .sheet(isPresented: $showingManualDialer) {
             ManualDialerView(model: model, phone: phone)
                 .presentationDetents([.large])
@@ -544,13 +562,14 @@ private struct CallMenuSection: View {
                 .buttonStyle(.plain)
                 .disabled(!enabled)
                 .opacity(enabled ? 1 : 0.52)
-                .accessibilityLabel("Call \(destination.label)")
+                .accessibilityLabel(destination.kind == .call ? destination.label : "Call \(destination.label)")
                 .accessibilityHint(destination.detail ?? "Starts a private party call")
             }
         }
     }
 
     private func symbol(for destination: DialDestination) -> String {
+        if destination.kind == .call { return "person.3.fill" }
         guard destination.kind == .service else { return "person.fill" }
         return switch destination.dial {
         case "*10": "waveform"
@@ -855,6 +874,8 @@ private struct SettingsView: View {
     @ObservedObject var phone: PhoneService
     @Environment(\.dismiss) private var dismiss
     @State private var confirmingDisconnect = false
+    @StateObject private var ringtonePreview = RingtonePreviewPlayer()
+    @AppStorage(RingRingRingtone.defaultsKey) private var ringtoneRaw = RingRingRingtone.ringRingDouble.rawValue
 
     var body: some View {
         NavigationStack {
@@ -874,9 +895,42 @@ private struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Section("TestFlight note") {
-                    Text("Incoming calls work while RingRing is active and for a short time in the background. Reliable ringing after the app is force-quit requires the planned push-notification bridge.")
+                Section("Background calls") {
+                    LabeledContent("Incoming calls", value: model.backgroundCalls.label)
+                    Text("RingRing uses Apple’s VoIP wake-up service and the system call screen so calls can ring while the app is in the background or the iPhone is locked.")
                         .font(.footnote)
+                    if model.backgroundCalls == .unavailable {
+                        Button("Try background setup again") { model.refresh() }
+                    }
+                }
+
+                Section("Ringtone") {
+                    ForEach(RingRingRingtone.allCases) { ringtone in
+                        Button {
+                            ringtoneRaw = ringtone.rawValue
+                            phone.setRingtone(ringtone)
+                            ringtonePreview.play(ringtone)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: ringtonePreview.playing == ringtone ? "speaker.wave.2.fill" : "music.note")
+                                    .foregroundStyle(RingRingTheme.purple)
+                                    .frame(width: 26)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(ringtone.title)
+                                        .foregroundStyle(RingRingTheme.ink)
+                                    Text(ringtone.detail)
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if ringtoneRaw == ringtone.rawValue {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(RingRingTheme.mint)
+                                }
+                            }
+                            .frame(minHeight: 48)
+                        }
+                    }
                 }
 
                 Section("Open source") {
@@ -903,6 +957,7 @@ private struct SettingsView: View {
             } message: {
                 Text("This removes its private calling credentials from the Keychain.")
             }
+            .onDisappear { ringtonePreview.stop() }
         }
     }
 }

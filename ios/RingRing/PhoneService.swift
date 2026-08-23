@@ -42,6 +42,9 @@ final class PhoneService: NSObject, ObservableObject {
     private var account: SIPAccount?
     private var callNames: [String: String] = [:]
     private var currentCall: Call?
+    private var pendingPushCallID: UUID?
+    private var pendingAnswer = false
+    private var pushTimeoutTask: Task<Void, Never>?
     private lazy var callKit = CallKitCoordinator(handler: self)
 
     override init() {
@@ -96,6 +99,33 @@ final class PhoneService: NSObject, ObservableObject {
         callNames = names
     }
 
+    func receiveIncomingPush(callID: UUID, completion: @escaping () -> Void) {
+        lastError = nil
+        remoteExtension = ""
+        callPhase = .incoming
+        pendingPushCallID = callID
+        callKit.reportIncomingPush(uuid: callID) { [weak self] error in
+            defer { completion() }
+            guard let self else { return }
+            guard error == nil else {
+                Task { @MainActor in
+                    self.lastError = "This incoming call couldn’t be shown."
+                    self.finishCall()
+                }
+                return
+            }
+            Task { @MainActor in
+                self.core?.refreshRegisters()
+                self.schedulePushTimeout(callID: callID)
+            }
+        }
+    }
+
+    func setRingtone(_ ringtone: RingRingRingtone) {
+        UserDefaults.standard.set(ringtone.rawValue, forKey: RingRingRingtone.defaultsKey)
+        callKit.setRingtone(ringtone)
+    }
+
 #if DEBUG
     func usePreviewReadyState() {
         registration = .ready
@@ -148,6 +178,9 @@ final class PhoneService: NSObject, ObservableObject {
         resetRegistration()
         account = nil
         callNames = [:]
+        pushTimeoutTask?.cancel()
+        pendingPushCallID = nil
+        pendingAnswer = false
         registration = .idle
         resetCallState()
     }
@@ -203,10 +236,20 @@ final class PhoneService: NSObject, ObservableObject {
         currentCall = call
         switch state {
         case .IncomingReceived, .PushIncomingReceived:
-            guard callKit.activeUUID == nil else { return }
             let caller = call.remoteAddress?.username ?? "RingRing"
             remoteExtension = caller
             callPhase = .incoming
+            if callKit.activeUUID != nil, callKit.isIncoming {
+                pendingPushCallID = nil
+                pushTimeoutTask?.cancel()
+                callKit.updateIncoming(from: caller, displayName: callNames[caller])
+                if pendingAnswer {
+                    pendingAnswer = false
+                    core?.configureAudioSession()
+                    try? call.accept()
+                }
+                return
+            }
             callKit.reportIncoming(from: caller, displayName: callNames[caller]) { [weak self] error in
                 guard error != nil else { return }
                 Task { @MainActor in
@@ -242,6 +285,9 @@ final class PhoneService: NSObject, ObservableObject {
     }
 
     private func finishCall() {
+        pushTimeoutTask?.cancel()
+        pendingPushCallID = nil
+        pendingAnswer = false
         callPhase = .ended
         currentCall = nil
         isMuted = false
@@ -261,6 +307,16 @@ final class PhoneService: NSObject, ObservableObject {
         isSpeakerOn = false
         connectedAt = nil
     }
+
+    private func schedulePushTimeout(callID: UUID) {
+        pushTimeoutTask?.cancel()
+        pushTimeoutTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(35))
+            guard !Task.isCancelled, let self, self.pendingPushCallID == callID, self.currentCall == nil else { return }
+            self.callKit.reportEnded(reason: .unanswered)
+            self.finishCall()
+        }
+    }
 }
 
 extension PhoneService: RingRingCallHandling {
@@ -278,7 +334,13 @@ extension PhoneService: RingRingCallHandling {
     }
 
     func answerCall() throws {
-        guard let currentCall else { throw PhoneError.noCall }
+        guard let currentCall else {
+            if pendingPushCallID != nil {
+                pendingAnswer = true
+                return
+            }
+            throw PhoneError.noCall
+        }
         core?.configureAudioSession()
         try currentCall.accept()
     }
@@ -287,6 +349,9 @@ extension PhoneService: RingRingCallHandling {
         if let currentCall, currentCall.state != .End, currentCall.state != .Released {
             try currentCall.terminate()
         }
+        pendingPushCallID = nil
+        pendingAnswer = false
+        pushTimeoutTask?.cancel()
         resetCallState()
     }
 
@@ -310,7 +375,7 @@ extension PhoneService: RingRingCallHandling {
 
 enum DialString {
     static func isCallable(_ value: String) -> Bool {
-        value.range(of: #"^(?:[0-9]{2,5}|\*[0-9]{2})$"#, options: .regularExpression) != nil
+        value.range(of: #"^(?:[0-9]{2,5}|\*[0-9]{2}|\*16[0-9]{2,5})$"#, options: .regularExpression) != nil
     }
 }
 

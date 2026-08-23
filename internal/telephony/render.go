@@ -172,6 +172,10 @@ func Render(devices []DialDevice, services []model.RoutingServices) (Configurati
 			}
 			fmt.Fprintf(&dialplan, "exten => %s,1,NoOp(RingRing party call)\n", extension)
 			fmt.Fprintf(&dialplan, " same => n,Set(__RINGRING_CONFERENCE=%s)\n", conference)
+			dialplan.WriteString(" same => n,Set(RINGRING_CALL_ID=${UUID()})\n")
+			dialplan.WriteString(" same => n,Set(RINGRING_PUSH_SENT=0)\n")
+			fmt.Fprintf(&dialplan, " same => n,AGI(agi://app:4573/incoming-call,%s,${CHANNEL(endpoint)},%s,${RINGRING_CALL_ID})\n", partyIDs[contextName], extension)
+			dialplan.WriteString(" same => n,ExecIf($[\"${RINGRING_PUSH_SENT}\"=\"1\"]?Wait(3))\n")
 			fmt.Fprintf(&dialplan, " same => n,Dial(%s,30,G(rr-party-bridge^s^1))\n", strings.Join(endpoints, "&"))
 			dialplan.WriteString(" same => n,GotoIf($[\"${DIALSTATUS}\"=\"ANSWER\"]?rr-phone-done:unavailable)\n")
 			dialplan.WriteString(" same => n(unavailable),Answer()\n")

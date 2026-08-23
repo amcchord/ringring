@@ -99,13 +99,14 @@ struct ProvisioningTests {
             extension: "203"
         )
         let document = ProvisioningDocument(version: 1, sip: account, destinations: [
+            DialDestination(kind: .call, label: "Join Green + Gold", detail: "2 phones are talking now.", dial: "*16204"),
             DialDestination(kind: .person, label: "Green phone", detail: nil, dial: "204"),
             DialDestination(kind: .service, label: "Local weather", detail: "Hear the host’s chosen forecast.", dial: "*12"),
         ])
 
         let phone = try document.validated()
-        #expect(phone.destinations.map(\.label) == ["Green phone", "Local weather"])
-        #expect(phone.destinations.map(\.dial) == ["204", "*12"])
+        #expect(phone.destinations.map(\.label) == ["Join Green + Gold", "Green phone", "Local weather"])
+        #expect(phone.destinations.map(\.dial) == ["*16204", "204", "*12"])
     }
 
     @Test func olderProvisioningPayloadGetsSafeDefaultButtons() throws {
@@ -161,13 +162,33 @@ struct ProvisioningTests {
         #expect(throws: ProvisioningError.invalidAccount) { try invalidExtension.validate() }
     }
 
-    @Test(arguments: ["10", "203", "99999", "*98"])
+    @Test(arguments: ["10", "203", "99999", "*98", "*16102", "*1699999"])
     func callableDialStrings(value: String) {
         #expect(DialString.isCallable(value))
     }
 
-    @Test(arguments: ["", "1", "123456", "#", "*9", "20#", "person"])
+    @Test(arguments: ["", "1", "123456", "#", "*9", "*161", "*16123456", "20#", "person"])
     func rejectedDialStrings(value: String) {
         #expect(!DialString.isCallable(value))
+    }
+
+    @Test func validatesRefreshedPhoneStateAndLiveCalls() throws {
+        let payload = """
+        {
+          "version": 1,
+          "extension": "203",
+          "destinations": [
+            {"kind":"call","label":"Join Green + Gold","detail":"2 phones are talking now.","dial":"*16204"},
+            {"kind":"person","label":"Green phone","dial":"204"}
+          ]
+        }
+        """
+        let state = try JSONDecoder().decode(PhoneStateDocument.self, from: Data(payload.utf8))
+        #expect(try state.validated().destinations.first?.kind == .call)
+
+        let invalid = PhoneStateDocument(version: 1, extension: "203", destinations: [
+            DialDestination(kind: .call, label: "Wrong join", detail: nil, dial: "*10")
+        ])
+        #expect(throws: PhoneAPIError.invalidResponse) { try invalid.validated() }
     }
 }

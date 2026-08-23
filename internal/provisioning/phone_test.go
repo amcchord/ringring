@@ -12,6 +12,7 @@ func TestPhoneJSONContainsVersionedAccountAndCallDestinations(t *testing.T) {
 	}, []PhoneDestination{
 		{Kind: "person", Label: "Studio phone", Dial: "102"},
 		{Kind: "service", Label: "Echo test", Detail: "Hear your own voice come back.", Dial: "*10"},
+		{Kind: "call", Label: "Join Studio + Library", Detail: "2 phones are talking now.", Dial: "*16102"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -30,7 +31,7 @@ func TestPhoneJSONContainsVersionedAccountAndCallDestinations(t *testing.T) {
 	if document.SIP != want {
 		t.Fatalf("SIP account = %#v, want %#v", document.SIP, want)
 	}
-	if len(document.Destinations) != 2 || document.Destinations[0].Label != "Studio phone" || document.Destinations[0].Dial != "102" || document.Destinations[1].Dial != "*10" {
+	if len(document.Destinations) != 3 || document.Destinations[0].Label != "Studio phone" || document.Destinations[0].Dial != "102" || document.Destinations[1].Dial != "*10" || document.Destinations[2].Dial != "*16102" {
 		t.Fatalf("call destinations = %#v", document.Destinations)
 	}
 	for _, privateField := range []string{"party", "member", "device", "display_name", "email", "host_user"} {
@@ -62,6 +63,7 @@ func TestPhoneJSONRejectsUnsafeCallDestinations(t *testing.T) {
 		{{Kind: "person", Label: "Studio\nphone", Dial: "102"}},
 		{{Kind: "person", Label: "Studio phone", Dial: "911911"}},
 		{{Kind: "service", Label: "Echo test", Dial: "*1"}},
+		{{Kind: "call", Label: "Wrong join", Dial: "*10"}},
 		{{Kind: "person", Label: "Studio phone", Dial: "102"}, {Kind: "service", Label: "Duplicate", Dial: "102"}},
 	}
 	for _, destinations := range tests {
@@ -83,6 +85,10 @@ func TestPhoneOpenAPITracksTheRuntimeContract(t *testing.T) {
 		"/provision/ios/{token}:",
 		"deprecated: true",
 		"PhoneProvisioningDocument:",
+		"/api/v1/phone/state:",
+		"/api/v1/phone/push:",
+		"phoneCredential:",
+		"PhonePushRegistration:",
 		"const: 5061",
 		"const: tls",
 		"maxItems: 128",

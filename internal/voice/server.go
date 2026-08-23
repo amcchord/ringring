@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/amcchord/ringring/internal/apns"
 	extensionrules "github.com/amcchord/ringring/internal/extension"
 	"github.com/amcchord/ringring/internal/model"
 	"github.com/amcchord/ringring/internal/observability"
@@ -81,6 +82,16 @@ type ConferenceAnnouncer interface {
 	AnnounceJoin(context.Context, string, string) error
 }
 
+type PhonePushSource interface {
+	PartyMemberForDevice(context.Context, string, string) (model.Member, error)
+	PhonePushRegistrationsForExtension(context.Context, string, string) ([]store.PhonePushRegistration, error)
+	DeletePhonePushRegistrationByHash(context.Context, []byte) error
+}
+
+type PhonePushNotifier interface {
+	SendVoIP(context.Context, string, string) (apns.SendResult, error)
+}
+
 type Server struct {
 	Source             PartySource
 	AIAdultAccess      AIAdultAccessSource
@@ -93,6 +104,9 @@ type Server struct {
 	Speech             SpeechSource
 	JoinMembers        JoinMemberSource
 	ConferenceAnnounce ConferenceAnnouncer
+	PhonePushes        PhonePushSource
+	PushNotifier       PhonePushNotifier
+	PushEnvironment    string
 	AudioDir           string
 	PlaybackDir        string
 	Logger             *slog.Logger
@@ -150,6 +164,8 @@ func (s *Server) handle(connection net.Conn) {
 		s.handleChooseExtension(reader, writer, environment)
 	case "join-party":
 		s.handleJoinParty(reader, writer, environment)
+	case "incoming-call":
+		s.handleIncomingCallPush(reader, writer, environment)
 	default:
 		_ = agiCommand(reader, writer, "EXEC Playback ss-noservice")
 	}

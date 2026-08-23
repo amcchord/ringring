@@ -10,6 +10,7 @@ services:
     volumes:
       - ./deploy/state/app:/data
       - ./deploy/state/asterisk:/asterisk
+      - ${RINGRING_APNS_DIR:-/etc/ringring/apns}:/run/secrets/ringring-apns:ro
     networks:
       ringring:
         ipv4_address: 172.31.88.10

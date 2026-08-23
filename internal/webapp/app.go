@@ -363,6 +363,9 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 	mux.HandleFunc("GET /api/v1/phone-provisioning/{token}", app.phoneProvisionAPI)
 	mux.HandleFunc("GET /api/v1/phone-invitations/{token}", app.phoneInvitationAPI)
 	mux.HandleFunc("POST /api/v1/phone-invitations/{token}", app.phoneInvitationAPI)
+	mux.HandleFunc("GET /api/v1/phone/state", app.phoneStateAPI)
+	mux.HandleFunc("PUT /api/v1/phone/push", app.phonePushAPI)
+	mux.HandleFunc("DELETE /api/v1/phone/push", app.phonePushAPI)
 	mux.HandleFunc("GET /", app.home)
 
 	app.handler = app.securityHeaders(app.requestLog(app.recoverPanic(app.rateLimit(mux))))

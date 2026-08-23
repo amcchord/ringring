@@ -561,7 +561,7 @@ func TestPhoneProvisioningAPIKeepsTheOneTimePartyBoundary(t *testing.T) {
 		},
 		"docs/PHONE_API.md": {
 			"disable redirects", "cap the body at 256 KiB", "device-protected secret storage",
-			"do not add PSTN, emergency, trunk", "setup-time snapshot, not live presence",
+			"do not add PSTN, emergency, trunk", "setup list is an initial snapshot",
 		},
 	}
 	for filename, markers := range required {
@@ -587,6 +587,54 @@ func TestPhoneProvisioningAPIKeepsTheOneTimePartyBoundary(t *testing.T) {
 	for _, forbidden := range []string{"email:", "party_id", "member_id", "device_id", "openai", "presence:"} {
 		if strings.Contains(strings.ToLower(spec), forbidden) {
 			t.Errorf("OpenAPI contract exposes forbidden private field marker %q", forbidden)
+		}
+	}
+}
+
+func TestPhoneBackgroundWakeKeepsSIPAndPartyAuthorizationAuthoritative(t *testing.T) {
+	required := map[string][]string{
+		"compose.yaml": {
+			"${RINGRING_APNS_DIR:-/etc/ringring/apns}:/run/secrets/ringring-apns:ro",
+		},
+		"internal/apns/client.go": {
+			`json:"call_id"`, `json:"aps"`, `request.Header.Set("apns-push-type", "voip")`,
+			`request.Header.Set("apns-topic", c.topic)`, `failure.Reason == "Unregistered"`,
+		},
+		"internal/store/phone_push.go": {
+			"phone_push_registrations", "token_hash", "token_ciphertext", "PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE",
+		},
+		"internal/voice/incoming.go": {
+			"PartyMemberForDevice", "PhonePushRegistrationsForExtension", `[]byte("phone-push:"+registration.DeviceID)`,
+		},
+		"internal/webapp/phone_mobile.go": {
+			"authenticatePhoneAPI", "subtle.ConstantTimeCompare", "SavePhonePushRegistration", "phoneMobileHeaders",
+		},
+		"ios/RingRing/PushKitCoordinator.swift": {
+			"PKPushRegistry", "didReceiveIncomingPushWith", "receiveIncomingPush", "completion: completion",
+		},
+		"ios/RingRing/PhoneService.swift": {
+			"reportIncomingPush", "refreshRegisters", "pendingAnswer", "schedulePushTimeout",
+		},
+		"ringringctl": {
+			"configure-apns", "AuthKey_${key_id}.p8", "install -m 0400", "--force-recreate app",
+		},
+		"docs/PHONE_API.md": {
+			"opaque call UUID", "the later authenticated SIP invitation remains authoritative",
+		},
+	}
+	for filename, markers := range required {
+		contents := readRepositoryFile(t, filename)
+		for _, marker := range markers {
+			if !strings.Contains(contents, marker) {
+				t.Errorf("%s is missing phone background-wake boundary %q", filename, marker)
+			}
+		}
+	}
+
+	apnsClient := readRepositoryFile(t, "internal/apns/client.go")
+	for _, forbidden := range []string{"party_name", "member_name", "extension\"", "sip_username", "password\""} {
+		if strings.Contains(strings.ToLower(apnsClient), forbidden) {
+			t.Errorf("APNs client contains forbidden payload field marker %q", forbidden)
 		}
 	}
 }

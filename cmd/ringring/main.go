@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/amcchord/ringring/internal/apns"
 	"github.com/amcchord/ringring/internal/config"
 	"github.com/amcchord/ringring/internal/maintenance"
 	"github.com/amcchord/ringring/internal/openaiadmin"
@@ -159,6 +160,17 @@ func main() {
 		logger.Error("create credential cipher", "error", err)
 		os.Exit(1)
 	}
+	var pushNotifier *apns.Client
+	if cfg.APNSConfigured() {
+		pushNotifier, err = apns.New(apns.Config{
+			TeamID: cfg.APNSTeamID, KeyID: cfg.APNSKeyID, PrivateKeyFile: cfg.APNSPrivateKeyFile,
+			BundleID: cfg.APNSBundleID, Environment: cfg.APNSEnvironment,
+		})
+		if err != nil {
+			logger.Error("configure Apple background calls", "error", err)
+			os.Exit(1)
+		}
+	}
 	app, err := webapp.New(cfg, database, cipher, logger)
 	if err != nil {
 		logger.Error("create application", "error", err)
@@ -200,6 +212,7 @@ func main() {
 		JoinMembers: database, ConferenceAnnounce: telephony.AMI{
 			Address: cfg.AsteriskAMIAddr, Username: cfg.AsteriskAMIUser, Secret: cfg.AsteriskAMISecret,
 		},
+		PhonePushes: database, PushNotifier: pushNotifier, PushEnvironment: cfg.APNSEnvironment,
 		Cipher: cipher, Weather: weather.New(nil), Speech: openairuntime.New(nil),
 		AudioDir: cfg.VoiceAudioDir, PlaybackDir: cfg.VoicePlaybackDir, Logger: logger,
 		AIModel: cfg.AIRealtimeModel, AICallMaxDuration: cfg.AICallMaxDuration, AIMaxConcurrent: cfg.AIMaxConcurrent,

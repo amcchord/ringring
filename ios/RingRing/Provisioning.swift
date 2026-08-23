@@ -70,6 +70,7 @@ struct ProvisionedPhone: Codable, Equatable, Sendable {
 enum DialDestinationKind: String, Codable, Sendable {
     case person
     case service
+    case call
 }
 
 struct DialDestination: Codable, Equatable, Identifiable, Sendable {
@@ -84,6 +85,10 @@ struct DialDestination: Codable, Equatable, Identifiable, Sendable {
         guard Self.validText(label, maximum: 80, optional: false),
               Self.validText(detail ?? "", maximum: 160, optional: true),
               DialString.isCallable(dial) else {
+            throw ProvisioningError.invalidDestination
+        }
+        if kind == .call,
+           dial.range(of: #"^\*16[0-9]{2,5}$"#, options: .regularExpression) == nil {
             throw ProvisioningError.invalidDestination
         }
     }

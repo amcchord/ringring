@@ -4,14 +4,12 @@ JOIN IN ONE SCAN
 Ask your party host for a one-time setup card, scan its RingRing QR, and the app securely configures itself. You can paste the private setup link instead.
 
 TAP A NAME, NOT A NUMBER
-Your party menu shows big, friendly buttons for the people and services this phone can call. RingRing handles the private extension behind each button, with a manual keypad still available when you need it.
+Your party menu shows big, friendly buttons for the people and services this phone can call. When a party call is already happening, one bright button lets you join in. RingRing handles the private extension behind each button, with a manual keypad still available when you need it.
 
 FEELS LIKE A PHONE
-Place and receive private VoIP calls with native CallKit controls. Mute, use the speaker, send keypad tones, and hang up from a colorful, uncluttered call screen.
+Place and receive private VoIP calls with native CallKit controls, including background and lock-screen ringing through Apple’s VoIP wake-up service. Pick one of four playful RingRing ringtones, mute, use the speaker, send keypad tones, and hang up from a colorful, uncluttered call screen.
 
 PRIVATE BY DEFAULT
 SIP credentials stay in the iPhone Keychain. The app has no ads, tracking, call recording, or transcripts. Calls remain inside the RingRing party and are carried through its server.
 
-RingRing requires access to a compatible self-hosted RingRing server. It never connects to the public telephone network and cannot place emergency calls. Keep another way to contact emergency services available.
-
-In this preview, incoming calls work while RingRing is active and during ordinary short background periods. Reliable ringing after iOS suspends or force-quits the app requires the planned RingRing push-notification bridge.
+RingRing requires access to a compatible self-hosted RingRing server with iPhone background calling configured. It never connects to the public telephone network and cannot place emergency calls. Keep another way to contact emergency services available. iOS may suppress background launch after you explicitly force-quit RingRing; open the app once to reconnect.

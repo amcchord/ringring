@@ -1,5 +1,24 @@
 # TestFlight notes
 
+## 0.1.0 (5) — Background calls, live joins, and ringtones
+
+What to test on a physical iPhone:
+
+1. Install build 5, open it once, and confirm **Settings → Background calls** says the iPhone is ready. If it offers **Try again**, tap it once on a stable network.
+2. Put RingRing in the background, wait at least one minute, then call its extension from another party phone. Confirm the normal iPhone incoming-call screen appears and answering connects two-way audio.
+3. Lock the iPhone and repeat. Answer directly from the lock screen; confirm the friendly caller label appears when SIP finishes reconnecting and that audio works in both directions.
+4. In **Settings → Ringtone**, preview and select each of the four RingRing sounds. Background the app and confirm the selected sound is used for the next incoming call.
+5. Start a party call between two other phones. Confirm **Happening now** appears in the app within a few seconds, tap its friendly join button, and verify all participants share the same call. Hang up and confirm the live button disappears.
+6. Rename or add a party phone and confirm the main call menu refreshes without rescanning setup. Briefly disable the network and confirm the last safe menu remains usable rather than being replaced by an empty one.
+7. Recheck a direct person button, **Echo test**, manual dialing, mute, speaker, keypad tones, incoming decline, and disconnect/reset.
+
+Known limits:
+
+- PushKit and CallKit delivery require a real iPhone and the production server; Simulator only verifies UI and deterministic app logic.
+- iOS can suppress background launch after the person explicitly force-quits the app. Relaunch RingRing once before testing.
+- Live-call buttons are a current snapshot, not call history or public presence, and appear only to authenticated phones in the same party.
+- Universal-link taps are enabled for `ringring.live`; other self-hosted domains continue to work through scan and paste unless their own signed build includes that associated domain.
+
 ## 0.1.0 (4) — Finish invitations in the app
 
 What to test:
