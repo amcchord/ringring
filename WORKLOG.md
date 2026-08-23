@@ -2,6 +2,33 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-23 — Package a Memphis WP826 handset experience
+
+### Shipped
+
+- Added three RingRing Memphis wallpapers at the WP826's native 240×320 resolution: cream/day, purple/twilight, and yellow/party. The application embeds public deployment copies under `/static/wp826/` so the existing HTTPS origin can serve them without another file server.
+- Added four original, sample-free ringtone compositions with auditionable WAV files and Grandstream `ring1.bin` through `ring4.bin` handset binaries. The deterministic generator writes mono 8 kHz G.711 μ-law audio, the vendor header/checksum, and enforces the 64 KiB phone limit.
+- Added a reusable GDMS WP826 model-template block for wallpaper, ringtone resources, friendlier Contacts/History/Menu idle softkeys, HTTPS validation, and deliberate-only firmware updates.
+- Added an optional GDMS By CFG renderer for a complete TLS-first RingRing account and theme. It prompts for the SIP password, emits the exact lowercase MAC filename GDMS requires with mode `0600`, refuses overwrite, prefers PCMU and RFC2833 DTMF, and enables certificate chain/domain checks.
+- Documented deployment, account assignment, real-handset verification, credential handling, asset rebuilding, and rollback alongside the bundle. Recorded the exact built-in image-generation prompts used for the wallpaper masters.
+
+### Decisions
+
+- Keep the shared visual template separate from per-device SIP accounts by default. GDMS SIP Account is the easiest rotation path; the secret-bearing XML is an explicit one-file alternative and must be deleted locally after upload.
+- Serve non-secret theme resources from RingRing's existing public static path. This keeps wallpaper versions and the WP826's fixed-name ringtone downloads reproducible from the deployed revision.
+- Use the firmware-resource path for WP826 ringtones because the current GDMS guide describes its direct custom-ringtone picker only for GXP/DP models, while the WP826 configuration template exposes custom ringtone count and slots.
+
+### Verification
+
+- `make check`, `make security`, and `make admin-test` pass on the trusted development machine, including formatting, shell and administrative lifecycle checks, `go vet`, the race-enabled full Go suite, and `govulncheck` with no called vulnerabilities.
+- Embedded-asset tests decode all three PNGs at exactly 240×320 and validate every Grandstream ringtone's size, header word count, format version, μ-law codec marker, and checksum.
+- The ringtone encoder matches the standard-library G.711 μ-law implementation for every PCM16 input. FFprobe confirms mono 8 kHz PCM previews from 4.05 to 4.85 seconds; peak levels are intentionally bounded from -4.0 dB to -6.9 dB.
+- A generated MAC-specific configuration parses as XML, contains the expected 27 settings and asset paths, and is created with mode `0600`. Deployment and static copies of every PNG/BIN are byte-identical.
+
+### Remaining
+
+- Push the model template and one SIP account to a physical WP826 on the deployed firmware. Verify wallpaper and ringtone download after reboot, TLS registration, `*10` bidirectional audio, same-party extension calling, and cross-party denial before promoting WP826 from expected to verified in the hardware compatibility matrix.
+
 ## 2026-08-23 — Make live party calls visible and joinable
 
 ### Shipped

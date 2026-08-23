@@ -1,0 +1,25 @@
+# RingRing WP826 theme model-template values.
+# Replace YOUR_RINGRING_HOST, then paste the P-value lines into the GDMS text editor.
+
+# Wallpaper: 0 default, 1 download, 3 uploaded.
+P2916 = 1
+P2917 = https://YOUR_RINGRING_HOST/static/wp826/wallpapers/ringring-memphis-day.png
+
+# Download ring1.bin through ring4.bin from the HTTPS firmware-resource path.
+P6767 = 2
+P192 = YOUR_RINGRING_HOST/static/wp826/ringtones
+P8509 = 4
+
+# Use RingRing Double for Account 1. Change 1 to 2, 3, or 4 to use another tune.
+P104 = 1
+
+# Friendly idle screen: Contacts, recent calls, and Menu.
+P2939 = 1
+P8348 = Custom-Contacts,Custom-History,Custom-Menu
+
+# Verify the HTTPS asset host's public certificate and hostname.
+P8463 = 1
+P22030 = 1
+
+# Leave automatic firmware upgrades off. GDMS can still push deliberate upgrades.
+P194 = 0
