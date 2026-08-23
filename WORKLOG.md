@@ -23,9 +23,16 @@ This is the durable, chronological project record. Add new entries at the top. C
 - The local SIP smoke suite passes for TLS and UDP registrations, same-extension and mixed-transport calls, friendly invalid/disabled routes, `*10`, RTP, and `*15`. The Colima run used the documented host-shared temporary-root override and left the source tree unchanged.
 - The invitation page was inspected at 1280×900 and 390×844. The single yellow adult-extension choice has a 44px-or-larger target, clear focus styling, and no mobile horizontal overflow.
 
+### Production
+
+- Published commit `cb39dd716a7c0dbf35adbb63b313dcadc17bc7f1` to the public repository after validating that exact isolated commit. The guarded fast-forward upgrade created and restore-drilled checksummed pre/post archives before completing at the same commit.
+- Added the adults-only operator gate to the root-readable environment file, retained a mode-0600 pre-change copy, classified the one existing test extension as adult, and enabled its party's AI service. The database now reports one adult member, one enabled AI party, and one ready party-scoped provider key.
+- Public health and readiness return 200; the app, Asterisk, and Caddy are running; `ringringctl doctor` passes with one live SIP contact; the generated and live Asterisk dialplans each contain the endpoint-authenticated `*14` route; and the post-deploy app log has no warnings or errors.
+
 ### Remaining
 
-- Publish and deploy the isolated server release, mark the existing test extension adult, open the operator and party gates, and verify production health plus the generated `*14` route. A real adult handset call remains the final end-to-end Realtime check.
+- Dial `*14` from the adult Grandstream handset to complete the physical Realtime audio check. Child and shared extensions remain unable to authorize, and the separate under-18 review remains open.
+- `*12` still needs a host-chosen weather location before it can be enabled; that unrelated configuration was left unchanged.
 
 ## 2026-08-22 — Give failed calls a friendly voice
 
