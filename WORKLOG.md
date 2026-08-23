@@ -2,6 +2,31 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-23 — Remember the operator introduction per extension
+
+### Shipped
+
+- Made the RingRing operator's AI-voice introduction a once-per-extension message. The first successfully played operator greeting identifies the voice as AI-generated; later operator calls from any active phone on that same extension use the shorter greeting.
+- Bound the decision to Asterisk's authenticated PJSIP endpoint and the caller's party. The web app records only a disclosure timestamp for the owning member, not a call, reason, destination, recording, transcript, or caller-ID history; unknown, revoked, and cross-party endpoints fail closed to the full introduction.
+- Changed the tested Grandstream HT801 V2 guidance and device configuration to delayed `*0`. This firmware accepts manual `0` but handles bare zero specially in Off Hook Auto Dial; the adapter applied and read back `*0` with an eight-second delay.
+
+### Decisions
+
+- Mark disclosure only after Asterisk successfully streams the complete first greeting. Database lookup or playback failures do not silently suppress the required introduction.
+- Share one disclosure bit across all active devices belonging to the same member extension so replacing or adding a phone does not repeatedly announce the same information.
+- Keep weather disabled until the host supplies an intentional city/state. The production dialplan has no `*12` route because the party has no weather location; this is configuration, not an OpenAI voice failure.
+
+### Verification
+
+- Store tests cover first use, repeat use across two devices, revocation, party isolation, and additive migration of an older database. Voice tests cover first/repeat prompt selection, successful marking, playback failure, and private-line omission; renderer and SIP smoke assertions cover the authenticated endpoint argument.
+- `make check`, `make security`, `make admin-test`, and the complete local TLS/UDP/media/operator `make sip-smoke` gate pass. `govulncheck` reports no reachable vulnerability.
+- The changed setup guidance was inspected at 1280×900 and 390×844. The Grandstream card remains readable, its controls retain touch-sized targets, and the mobile document has no horizontal overflow.
+
+### Remaining
+
+- Publish and deploy the exact validated commit, initialize the already-heard production extension's disclosure state, and verify both delayed off-hook routing and the shorter repeat greeting on the physical handset.
+- Collect the host's city/state, enable weather for that party, and then physically verify `*12`.
+
 ## 2026-08-23 — Publish an open phone provisioning API
 
 ### Shipped

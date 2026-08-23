@@ -30,7 +30,7 @@ const (
 	operatorReasonMisdial            = "misdial"
 	operatorReasonPhoneUnavailable   = "phone-unavailable"
 	operatorReasonServiceUnavailable = "service-unavailable"
-	operatorCacheVersion             = "v1"
+	operatorCacheVersion             = "v2"
 )
 
 type PartySource interface {
@@ -43,6 +43,11 @@ type ExtensionManager interface {
 
 type AIAdultAccessSource interface {
 	AIAdultAccessForDevice(context.Context, string, string) (bool, error)
+}
+
+type OperatorDisclosureStore interface {
+	OperatorDisclosureForDevice(context.Context, string, string) (bool, error)
+	MarkOperatorDisclosureForDevice(context.Context, string, string, time.Time) error
 }
 
 type SecretDecryptor interface {
@@ -60,6 +65,7 @@ type SpeechSource interface {
 type Server struct {
 	Source             PartySource
 	AIAdultAccess      AIAdultAccessSource
+	OperatorDisclosure OperatorDisclosureStore
 	Extensions         ExtensionManager
 	Reconcile          func(context.Context) error
 	Cipher             SecretDecryptor
@@ -129,13 +135,35 @@ func (s *Server) handleOperator(reader *bufio.Reader, writer *bufio.Writer, envi
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	path, err := s.operatorAudio(ctx, environment["agi_arg_1"], environment["agi_arg_2"])
+	partyID := environment["agi_arg_1"]
+	endpoint := environment["agi_arg_3"]
+	discloseAI := true
+	markDisclosure := false
+	if s.OperatorDisclosure != nil && safePartyID.MatchString(partyID) && safePartyID.MatchString(endpoint) {
+		disclosed, err := s.OperatorDisclosure.OperatorDisclosureForDevice(ctx, partyID, endpoint)
+		if err != nil {
+			s.logger().Warn("check RingRing operator disclosure", "error_class", observability.ErrorClass(err))
+		} else {
+			discloseAI = !disclosed
+			markDisclosure = !disclosed
+		}
+	}
+	path, err := s.operatorAudio(ctx, partyID, environment["agi_arg_2"], discloseAI)
 	if err != nil {
 		s.logger().Warn("prepare RingRing operator", "error_class", observability.ErrorClass(err))
 		return
 	}
 	if err := agiCommand(reader, writer, `STREAM FILE "`+path+`" ""`); err != nil {
 		return
+	}
+	if markDisclosure {
+		now := time.Now()
+		if s.Now != nil {
+			now = s.Now()
+		}
+		if err := s.OperatorDisclosure.MarkOperatorDisclosureForDevice(ctx, partyID, endpoint, now); err != nil {
+			s.logger().Warn("mark RingRing operator disclosure", "error_class", observability.ErrorClass(err))
+		}
 	}
 	if err := agiCommand(reader, writer, "SET VARIABLE RINGRING_OPERATOR_READY 1"); err != nil {
 		return
@@ -248,7 +276,7 @@ func (s *Server) handleWeather(reader *bufio.Reader, writer *bufio.Writer, envir
 	}
 }
 
-func (s *Server) operatorAudio(ctx context.Context, partyID, reason string) (string, error) {
+func (s *Server) operatorAudio(ctx context.Context, partyID, reason string, discloseAI bool) (string, error) {
 	if s.Source == nil || s.Cipher == nil || s.Speech == nil || s.AudioDir == "" || s.PlaybackDir == "" {
 		return "", errors.New("RingRing operator is not fully configured")
 	}
@@ -262,11 +290,15 @@ func (s *Server) operatorAudio(ctx context.Context, partyID, reason string) (str
 	if party.OpenAIStatus != "ready" || party.OpenAIUsagePausedForSpendLimit() || party.OpenAIKeyCiphertext == "" {
 		return "", errors.New("party operator voice is unavailable")
 	}
-	promptName, phrase, err := operatorPrompt(reason, services)
+	promptName, phrase, err := operatorPrompt(reason, services, discloseAI)
 	if err != nil {
 		return "", err
 	}
-	filename := "operator-" + operatorCacheVersion + "-" + promptName + "-" + partyID + ".wav"
+	disclosureVariant := "repeat"
+	if discloseAI {
+		disclosureVariant = "first"
+	}
+	filename := "operator-" + operatorCacheVersion + "-" + promptName + "-" + disclosureVariant + "-" + partyID + ".wav"
 	localPath := filepath.Join(s.AudioDir, filename)
 	if info, err := os.Stat(localPath); err == nil && info.Size() > 44 &&
 		(services.UpdatedAt.IsZero() || !info.ModTime().Before(services.UpdatedAt)) {
@@ -294,7 +326,11 @@ func (s *Server) operatorAudio(ctx context.Context, partyID, reason string) (str
 	return filepath.Join(s.PlaybackDir, strings.TrimSuffix(filename, ".wav")), nil
 }
 
-func operatorPrompt(reason string, services model.PartyServices) (string, string, error) {
+func operatorPrompt(reason string, services model.PartyServices, discloseAI bool) (string, string, error) {
+	disclosure := ""
+	if discloseAI {
+		disclosure = " I'm an AI-generated voice, not a person."
+	}
 	switch reason {
 	case operatorReasonHelp:
 		features := []string{
@@ -310,14 +346,14 @@ func operatorPrompt(reason string, services model.PartyServices) (string, string
 		if services.RadioEnabled {
 			features = append(features, "For radio, dial star one three")
 		}
-		return reason, "Ring ring! Hi! I'm the RingRing operator, an AI-generated voice, not a person. Dial a family extension to ring someone. " +
+		return reason, "Ring ring! Hi! I'm the RingRing operator." + disclosure + " Dial a family extension to ring someone. " +
 			strings.Join(features, ". ") + ". Dial zero whenever you need this tour. RingRing cannot call regular or emergency numbers, so keep another way to get help.", nil
 	case operatorReasonMisdial:
-		return reason, "Oops-a-daisy! I'm the RingRing operator, an AI-generated voice, not a person. That number doesn't live in this party. Check the RingRing phonebook and try again, or dial zero for a quick tour. RingRing cannot call regular or emergency numbers.", nil
+		return reason, "Oops-a-daisy! RingRing operator here." + disclosure + " That number doesn't live in this party. Check the RingRing phonebook and try again, or dial zero for a quick tour. RingRing cannot call regular or emergency numbers.", nil
 	case operatorReasonPhoneUnavailable:
-		return reason, "Ring ring, operator here! I'm an AI-generated voice, not a person. That phone couldn't answer right now. Try again in a bit, or dial zero if you need help.", nil
+		return reason, "Ring ring, operator here!" + disclosure + " That phone couldn't answer right now. Try again in a bit, or dial zero if you need help.", nil
 	case operatorReasonServiceUnavailable:
-		return reason, "Ring ring, operator here! I'm an AI-generated voice, not a person. That special line is taking a quick break. Try again soon, or dial zero if you need help.", nil
+		return reason, "Ring ring, operator here!" + disclosure + " That special line is taking a quick break. Try again soon, or dial zero if you need help.", nil
 	default:
 		return "", "", errors.New("invalid operator prompt")
 	}

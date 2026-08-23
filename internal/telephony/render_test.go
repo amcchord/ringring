@@ -235,11 +235,11 @@ func TestRenderAnswersInvalidAndUnavailableCallsWithFriendlyPrompts(t *testing.T
 	dialplan := string(config.Dialplan)
 	for _, required := range []string{
 		"same => n,GotoIf($[\"${DIALSTATUS}\"=\"ANSWER\"]?rr-phone-done:unavailable)",
-		"same => n,AGI(agi://app:4573/operator,pty_one,phone-unavailable)",
-		"exten => _X!,1,Answer()\n same => n,Wait(0.5)\n same => n,Set(RINGRING_OPERATOR_READY=0)\n same => n,AGI(agi://app:4573/operator,pty_one,misdial)",
-		"exten => _*X!,1,Answer()\n same => n,Wait(0.5)\n same => n,Set(RINGRING_OPERATOR_READY=0)\n same => n,AGI(agi://app:4573/operator,pty_two,misdial)",
+		"same => n,AGI(agi://app:4573/operator,pty_one,phone-unavailable,${CHANNEL(endpoint)})",
+		"exten => _X!,1,Answer()\n same => n,Wait(0.5)\n same => n,Set(RINGRING_OPERATOR_READY=0)\n same => n,AGI(agi://app:4573/operator,pty_one,misdial,${CHANNEL(endpoint)})",
+		"exten => _*X!,1,Answer()\n same => n,Wait(0.5)\n same => n,Set(RINGRING_OPERATOR_READY=0)\n same => n,AGI(agi://app:4573/operator,pty_two,misdial,${CHANNEL(endpoint)})",
 		"same => n,GotoIf($[\"${AGISTATUS}\"=\"SUCCESS\"]?rr-agi-done:rr-agi-unavailable)",
-		"same => n,AGI(agi://app:4573/operator,pty_one,service-unavailable)",
+		"same => n,AGI(agi://app:4573/operator,pty_one,service-unavailable,${CHANNEL(endpoint)})",
 		"same => n(rr-operator-fallback),NoOp(OpenAI operator unavailable - using bundled prompts)",
 		"same => n,Playback(cannot-complete-as-dialed)",
 	} {
@@ -249,6 +249,9 @@ func TestRenderAnswersInvalidAndUnavailableCallsWithFriendlyPrompts(t *testing.T
 	}
 	if strings.Contains(dialplan, "NoOp(OpenAI operator unavailable;") {
 		t.Fatal("an Asterisk comment delimiter truncated the operator fallback application")
+	}
+	if strings.Contains(dialplan, "operator,pty_one,misdial,${CALLERID") {
+		t.Fatal("operator disclosure state must use the authenticated endpoint, not caller ID")
 	}
 	if strings.Count(dialplan, "exten => _X!,1,Answer()") != 2 || strings.Count(dialplan, "exten => _*X!,1,Answer()") != 2 {
 		t.Fatalf("each party must own its numeric and star-code fallbacks:\n%s", dialplan)

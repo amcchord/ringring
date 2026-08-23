@@ -36,6 +36,29 @@ func (f fakeAIAdultAccess) AIAdultAccessForDevice(context.Context, string, strin
 	return bool(f), nil
 }
 
+type fakeOperatorDisclosure struct {
+	disclosed bool
+	checks    int
+	marks     int
+	partyID   string
+	endpoint  string
+}
+
+func (f *fakeOperatorDisclosure) OperatorDisclosureForDevice(_ context.Context, partyID, endpoint string) (bool, error) {
+	f.checks++
+	f.partyID = partyID
+	f.endpoint = endpoint
+	return f.disclosed, nil
+}
+
+func (f *fakeOperatorDisclosure) MarkOperatorDisclosureForDevice(_ context.Context, partyID, endpoint string, _ time.Time) error {
+	f.marks++
+	f.partyID = partyID
+	f.endpoint = endpoint
+	f.disclosed = true
+	return nil
+}
+
 func (f failingPartySource) PartyVoiceSettings(context.Context, string) (model.Party, model.PartyServices, error) {
 	return model.Party{}, model.PartyServices{}, f.err
 }
@@ -111,11 +134,11 @@ func TestOperatorAudioUsesPartyKeyDisclosesAIAndCaches(t *testing.T) {
 		Cipher: cipher, Speech: speech, AudioDir: t.TempDir(), PlaybackDir: "/voice",
 	}
 
-	path, err := server.operatorAudio(t.Context(), "pty_operator", operatorReasonHelp)
+	path, err := server.operatorAudio(t.Context(), "pty_operator", operatorReasonHelp, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if path != "/voice/operator-v1-help-pty_operator" || speech.key != "party-operator-key" || speech.calls != 1 {
+	if path != "/voice/operator-v2-help-first-pty_operator" || speech.key != "party-operator-key" || speech.calls != 1 {
 		t.Fatalf("unexpected operator output: path=%q key=%q calls=%d", path, speech.key, speech.calls)
 	}
 	for _, phrase := range []string{"RingRing operator", "AI-generated voice", "not a person", "star one zero", "star one one", "star one two", "star one three", "star one five", "regular or emergency"} {
@@ -129,7 +152,7 @@ func TestOperatorAudioUsesPartyKeyDisclosesAIAndCaches(t *testing.T) {
 		}
 	}
 
-	if _, err := server.operatorAudio(t.Context(), "pty_operator", operatorReasonHelp); err != nil {
+	if _, err := server.operatorAudio(t.Context(), "pty_operator", operatorReasonHelp, true); err != nil {
 		t.Fatal(err)
 	}
 	if speech.calls != 1 {
@@ -138,16 +161,23 @@ func TestOperatorAudioUsesPartyKeyDisclosesAIAndCaches(t *testing.T) {
 }
 
 func TestOperatorPromptMentionsOnlyEnabledFamilySafeLines(t *testing.T) {
-	_, prompt, err := operatorPrompt(operatorReasonHelp, model.PartyServices{})
+	_, prompt, err := operatorPrompt(operatorReasonHelp, model.PartyServices{}, false)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if strings.Contains(prompt, "AI-generated") || strings.Contains(prompt, "not a person") {
+		t.Fatalf("repeat operator prompt retained its AI disclosure: %q", prompt)
 	}
 	for _, disabled := range []string{"star one one", "star one two", "star one three", "star one four"} {
 		if strings.Contains(prompt, disabled) {
 			t.Fatalf("disabled or adult-only line %q appeared in operator tour: %q", disabled, prompt)
 		}
 	}
-	if _, _, err := operatorPrompt("caller-supplied-value", model.PartyServices{}); err == nil {
+	_, firstPrompt, err := operatorPrompt(operatorReasonHelp, model.PartyServices{}, true)
+	if err != nil || !strings.Contains(firstPrompt, "AI-generated voice, not a person") {
+		t.Fatalf("first operator prompt lacked its disclosure: %q, %v", firstPrompt, err)
+	}
+	if _, _, err := operatorPrompt("caller-supplied-value", model.PartyServices{}, true); err == nil {
 		t.Fatal("unrecognized operator reason was accepted")
 	}
 }
@@ -161,24 +191,77 @@ func TestOperatorFastAGISetsReadyOnlyAfterPlayback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	disclosures := &fakeOperatorDisclosure{}
 	server := &Server{
 		Source: fakePartySource{
 			party:    model.Party{ID: "pty_operator", OpenAIStatus: "ready", OpenAIKeyCiphertext: ciphertext},
 			services: model.PartyServices{PartyID: "pty_operator"},
 		},
-		Cipher: cipher, Speech: &fakeSpeech{}, AudioDir: t.TempDir(), PlaybackDir: "/voice",
+		OperatorDisclosure: disclosures,
+		Cipher:             cipher, Speech: &fakeSpeech{}, AudioDir: t.TempDir(), PlaybackDir: "/voice",
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Metrics: observability.New(),
 	}
 	reader := scriptedAGI("0", "0", "0")
 	var commands bytes.Buffer
 	server.handleOperator(reader, bufio.NewWriter(&commands), map[string]string{
-		"agi_arg_1": "pty_operator", "agi_arg_2": operatorReasonMisdial,
+		"agi_arg_1": "pty_operator", "agi_arg_2": operatorReasonMisdial, "agi_arg_3": "123456",
 	})
 	want := "SET VARIABLE RINGRING_OPERATOR_READY 0\n" +
-		`STREAM FILE "/voice/operator-v1-misdial-pty_operator" ""` + "\n" +
+		`STREAM FILE "/voice/operator-v2-misdial-first-pty_operator" ""` + "\n" +
 		"SET VARIABLE RINGRING_OPERATOR_READY 1\n"
 	if commands.String() != want {
 		t.Fatalf("unexpected operator FastAGI exchange:\n%s", commands.String())
+	}
+	if disclosures.checks != 1 || disclosures.marks != 1 || disclosures.partyID != "pty_operator" || disclosures.endpoint != "123456" {
+		t.Fatalf("unexpected first disclosure state: %#v", disclosures)
+	}
+
+	reader = scriptedAGI("0", "0", "0")
+	commands.Reset()
+	server.handleOperator(reader, bufio.NewWriter(&commands), map[string]string{
+		"agi_arg_1": "pty_operator", "agi_arg_2": operatorReasonMisdial, "agi_arg_3": "123456",
+	})
+	want = "SET VARIABLE RINGRING_OPERATOR_READY 0\n" +
+		`STREAM FILE "/voice/operator-v2-misdial-repeat-pty_operator" ""` + "\n" +
+		"SET VARIABLE RINGRING_OPERATOR_READY 1\n"
+	if commands.String() != want || disclosures.checks != 2 || disclosures.marks != 1 {
+		t.Fatalf("repeat operator exchange or disclosure state was wrong:\n%s\n%#v", commands.String(), disclosures)
+	}
+}
+
+func TestOperatorDoesNotMarkDisclosureWhenPlaybackFails(t *testing.T) {
+	cipher, err := secure.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ciphertext, err := cipher.Encrypt("party-operator-key", []byte("pty_operator"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	disclosures := &fakeOperatorDisclosure{}
+	server := &Server{
+		Source: fakePartySource{
+			party:    model.Party{ID: "pty_operator", OpenAIStatus: "ready", OpenAIKeyCiphertext: ciphertext},
+			services: model.PartyServices{PartyID: "pty_operator"},
+		},
+		OperatorDisclosure: disclosures,
+		Cipher:             cipher,
+		Speech:             &fakeSpeech{},
+		AudioDir:           t.TempDir(),
+		PlaybackDir:        "/voice",
+		Logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Metrics:            observability.New(),
+	}
+	reader := scriptedAGI("0", "-1")
+	var commands bytes.Buffer
+	server.handleOperator(reader, bufio.NewWriter(&commands), map[string]string{
+		"agi_arg_1": "pty_operator", "agi_arg_2": operatorReasonHelp, "agi_arg_3": "123456",
+	})
+	if disclosures.checks != 1 || disclosures.marks != 0 || disclosures.disclosed {
+		t.Fatalf("failed playback changed disclosure state: %#v", disclosures)
+	}
+	if strings.Contains(commands.String(), "SET VARIABLE RINGRING_OPERATOR_READY 1") {
+		t.Fatalf("failed playback marked the operator ready:\n%s", commands.String())
 	}
 }
 

@@ -771,6 +771,63 @@ func (s *Store) AIAdultAccessForDevice(ctx context.Context, partyID, sipUsername
 	return allowed == 1, nil
 }
 
+// OperatorDisclosureForDevice reports whether the member extension belonging
+// to an active authenticated device has already heard the RingRing operator's
+// AI-voice disclosure. Devices on the same extension deliberately share this
+// one bit of state; no call, destination, reason, or audio data is retained.
+func (s *Store) OperatorDisclosureForDevice(ctx context.Context, partyID, sipUsername string) (bool, error) {
+	var disclosed int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM operator_disclosures o WHERE o.member_id = m.id
+		)
+		FROM devices d
+		JOIN members m ON m.id = d.member_id
+		WHERE m.party_id = ? AND d.sip_username = ? AND d.revoked_at IS NULL`,
+		partyID, sipUsername,
+	).Scan(&disclosed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrNotFound
+	}
+	if err != nil {
+		return false, fmt.Errorf("check operator disclosure: %w", err)
+	}
+	return disclosed == 1, nil
+}
+
+// MarkOperatorDisclosureForDevice records only that the member extension has
+// successfully heard the disclosure. The active device and party join keeps
+// the update inside the authenticated caller's party boundary.
+func (s *Store) MarkOperatorDisclosureForDevice(ctx context.Context, partyID, sipUsername string, disclosedAt time.Time) error {
+	result, err := s.db.ExecContext(ctx, `
+		INSERT INTO operator_disclosures (member_id, disclosed_at)
+		SELECT m.id, ?
+		FROM devices d
+		JOIN members m ON m.id = d.member_id
+		WHERE m.party_id = ? AND d.sip_username = ? AND d.revoked_at IS NULL
+		ON CONFLICT(member_id) DO NOTHING`, unix(disclosedAt), partyID, sipUsername)
+	if err != nil {
+		return fmt.Errorf("mark operator disclosure: %w", err)
+	}
+	if rows, err := result.RowsAffected(); err != nil {
+		return fmt.Errorf("count marked operator disclosures: %w", err)
+	} else if rows == 0 {
+		var active int
+		if err := s.db.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM devices d
+				JOIN members m ON m.id = d.member_id
+				WHERE m.party_id = ? AND d.sip_username = ? AND d.revoked_at IS NULL
+			)`, partyID, sipUsername).Scan(&active); err != nil {
+			return fmt.Errorf("verify operator disclosure device: %w", err)
+		}
+		if active == 0 {
+			return ErrNotFound
+		}
+	}
+	return nil
+}
+
 // ListOpenAIProjectIDs returns the provider projects that could supply a party
 // model call. The explicit retention audit uses this narrow list; identifiers
 // are never logged or rendered.
@@ -1769,6 +1826,11 @@ CREATE TABLE IF NOT EXISTS devices (
     revoked_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS devices_member ON devices(member_id);
+
+CREATE TABLE IF NOT EXISTS operator_disclosures (
+    member_id TEXT PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+    disclosed_at INTEGER NOT NULL CHECK(disclosed_at > 0)
+);
 
 CREATE TABLE IF NOT EXISTS device_readiness (
     device_id TEXT PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,

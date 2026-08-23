@@ -191,7 +191,7 @@ func writeAGIFailureFallback(dialplan *bytes.Buffer, partyID string) {
 
 func writeRingRingOperator(dialplan *bytes.Buffer, partyID, reason string, fallback func(*bytes.Buffer)) {
 	dialplan.WriteString(" same => n,Set(RINGRING_OPERATOR_READY=0)\n")
-	fmt.Fprintf(dialplan, " same => n,AGI(agi://app:4573/operator,%s,%s)\n", partyID, reason)
+	fmt.Fprintf(dialplan, " same => n,AGI(agi://app:4573/operator,%s,%s,${CHANNEL(endpoint)})\n", partyID, reason)
 	dialplan.WriteString(" same => n,GotoIf($[\"${RINGRING_OPERATOR_READY}\"=\"1\"]?rr-operator-done:rr-operator-fallback)\n")
 	dialplan.WriteString(" same => n(rr-operator-fallback),NoOp(OpenAI operator unavailable - using bundled prompts)\n")
 	fallback(dialplan)

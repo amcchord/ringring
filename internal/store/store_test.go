@@ -137,6 +137,68 @@ func TestAdultExtensionAuthorizesOnlyItsActiveAuthenticatedDevices(t *testing.T)
 	}
 }
 
+func TestOperatorDisclosureIsSharedOnlyByActiveDevicesOnOneExtension(t *testing.T) {
+	ctx := t.Context()
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	now := time.Date(2026, 8, 23, 18, 0, 0, 0, time.UTC)
+	host, err := s.UpsertGoogleUser(ctx, GoogleProfile{Subject: "operator-host", Email: "host@example.test", Name: "Host"}, now, "usr_operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	party, err := s.CreateParty(ctx, NewParty{ID: "pty_operator", Name: "Party", Slug: "operator", HostUserID: host.ID, CreatedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateInvitation(ctx, NewInvitation{
+		ID: "inv_operator", PartyID: party.ID, CreatedByUserID: host.ID, TokenHash: secure.Hash("operator-token"),
+		ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := s.ClaimInvitation(ctx, NewClaim{
+		TokenHash: secure.Hash("operator-token"), MemberID: "mem_operator", DisplayName: "Phone", Extension: "101",
+		DeviceID: "dev_operator_one", DeviceLabel: "ATA", SIPUsername: "123456", SIPSecretCiphertext: "cipher-one",
+		Provisioning: testProvisioning("provision-operator", now), Now: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO devices (id, member_id, label, sip_username, sip_secret_ciphertext, created_at)
+		VALUES ('dev_operator_two', 'mem_operator', 'Second phone', '234567', 'cipher-two', ?)`, unix(now)); err != nil {
+		t.Fatal(err)
+	}
+
+	if disclosed, err := s.OperatorDisclosureForDevice(ctx, party.ID, "123456"); err != nil || disclosed {
+		t.Fatalf("new extension disclosure = %t, %v", disclosed, err)
+	}
+	if err := s.MarkOperatorDisclosureForDevice(ctx, party.ID, "123456", now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	for _, username := range []string{"123456", "234567"} {
+		if disclosed, err := s.OperatorDisclosureForDevice(ctx, party.ID, username); err != nil || !disclosed {
+			t.Fatalf("shared extension disclosure for %q = %t, %v", username, disclosed, err)
+		}
+	}
+	if err := s.MarkOperatorDisclosureForDevice(ctx, "pty_other", "123456", now); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-party disclosure mark error = %v", err)
+	}
+	if err := s.RevokeDevice(ctx, party.ID, host.ID, "dev_operator_two", now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.OperatorDisclosureForDevice(ctx, party.ID, "234567"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoked device disclosure error = %v", err)
+	}
+	var count int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM operator_disclosures`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("operator disclosure rows = %d, %v", count, err)
+	}
+}
+
 func TestExistingMembersMigrateToNonAdultExtensions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.db")
 	legacy, err := sql.Open("sqlite", path)
@@ -169,6 +231,13 @@ func TestExistingMembersMigrateToNonAdultExtensions(t *testing.T) {
 	}
 	if adult != 0 {
 		t.Fatalf("legacy extension defaulted to adult: %d", adult)
+	}
+	var disclosureTable int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'operator_disclosures'`).Scan(&disclosureTable); err != nil {
+		t.Fatal(err)
+	}
+	if disclosureTable != 1 {
+		t.Fatalf("operator disclosure migration table count = %d", disclosureTable)
 	}
 }
 

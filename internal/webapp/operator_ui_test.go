@@ -19,7 +19,7 @@ func TestOperatorSetupGuidanceStaysDiscoverable(t *testing.T) {
 	for _, required := range []string{
 		"Ask the RingRing operator",
 		"Dial <strong>0</strong> or <strong>*0</strong>",
-		"Off Hook Auto Dial</dt><dd><strong>0</strong>",
+		"Off Hook Auto Dial</dt><dd><strong>*0</strong>",
 		"Off Hook Auto Dial Delay</dt><dd><strong>8 seconds</strong>",
 		"delayed off-hook, hotline, or warmline dialing",
 	} {
