@@ -759,7 +759,14 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	}
 	oldUsername := firstMatch(t, setupBody, `id="setup-username" data-setup-value="([1-9][0-9]{5})"`)
 	oldPassword := firstMatch(t, setupBody, `id="setup-password" data-setup-value="([1-9][0-9]{11})"`)
-	for _, guidance := range []string{"6 digits · no spaces", "12 digits · no spaces", "Phone keeps showing 401?", "The first 401 is the normal sign-in challenge", "for both SIP User ID and Authentication ID", "Use your extension only as the display number"} {
+	for _, guidance := range []string{
+		"6 digits · no spaces", "12 digits · no spaces", "Phone keeps showing 401?", "The first 401 is the normal sign-in challenge",
+		"for both SIP User ID and Authentication ID", "Use your extension only as the display number",
+		"Grandstream HT801 V2", "Port Settings → FXS PORT → General Settings", "sip.example.test:5061",
+		"SIP Authenticate ID", "SIP Authentication Password", "NAT Traversal", "Keep-alive", "SIP Registration",
+		"PCMU / G.711 μ-law", "via RTP (RFC2833)", "Authenticate Server Certificate chain",
+		"Status → Port Status", "saved password as blank afterward", "HT80x V2 administration guide",
+	} {
 		if !strings.Contains(setupBody, guidance) {
 			t.Errorf("setup card omitted authentication guidance %q", guidance)
 		}

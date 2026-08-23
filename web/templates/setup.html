@@ -54,6 +54,7 @@
     <span class="kicker">Works with any SIP phone</span>
     <h2>Manual settings</h2>
     <p>Use these for an ATA, desk phone, or any softphone that is not Linphone. {{if .SimpleSIPCredentials}}The new username and password use digits only. {{end}}Copy one value at a time, or make one private setup note.</p>
+    <a class="device-guide-jump" href="#grandstream-ht801-v2"><span class="device-guide-jump-icon" aria-hidden="true">☎</span><span><strong>Using a Grandstream HT801 V2?</strong><small>Jump to the exact menu and field guide</small></span><span aria-hidden="true">↓</span></a>
   </div>
   <dl class="setup-card">
     <div data-setup-field><dt>SIP server / registrar</dt><dd class="copy-value"><strong id="setup-server" data-setup-value>{{.SIPPublicHost}}</strong><button class="copy-button" type="button" data-copy-target="setup-server" data-copy-label="SIP server" aria-label="Copy SIP server" aria-controls="setup-server setup-copy-status" hidden>Copy</button></dd></div>
@@ -73,6 +74,43 @@
     <button class="button button-quiet" type="button" data-copy-setup aria-controls="setup-copy-status" hidden>Copy all six settings</button>
     <p><strong>This copies the password too.</strong> Paste it only into the phone or a private message to the person setting it up, then remove that message after the phone is saved.</p>
   </div>
+  <section class="device-specific-guide" id="grandstream-ht801-v2" aria-labelledby="grandstream-guide-title">
+    <header class="device-guide-heading">
+      <span class="device-guide-mark" aria-hidden="true">GS</span>
+      <div>
+        <span class="kicker">Exact adapter guide</span>
+        <h3 id="grandstream-guide-title">Grandstream HT801 V2</h3>
+        <p>Keep this private setup page open while you use the adapter’s web interface in another tab.</p>
+      </div>
+      <span class="device-guide-time">About 5 minutes</span>
+    </header>
+    <ol class="device-guide-steps">
+      <li><span aria-hidden="true">1</span><div><strong>Plug it in</strong><p>Connect the telephone to <strong>PHONE</strong>, Ethernet to <strong>NET</strong>, and then power. Never connect the PHONE port to a wall telephone jack.</p></div></li>
+      <li><span aria-hidden="true">2</span><div><strong>Find its address</strong><p>Pick up the attached phone, dial <strong>***</strong>, wait for “Enter the menu option,” then dial <strong>02</strong>. Type the announced address into a browser on the same home network.</p></div></li>
+      <li><span aria-hidden="true">3</span><div><strong>Open the phone line</strong><p>Sign in as the adapter administrator. Open <strong>Port Settings → FXS PORT → General Settings</strong>.</p></div></li>
+      <li><span aria-hidden="true">4</span><div><strong>Enter these fields</strong><p>Use the RingRing values above exactly. The visual spaces in new credentials are not part of either number.</p></div></li>
+    </ol>
+    <dl class="grandstream-settings" aria-label="Grandstream HT801 V2 field values">
+      <div><dt>Account Active</dt><dd>On</dd></div>
+      <div><dt>Primary SIP Server</dt><dd><strong>{{.SIPPublicHost}}:5061</strong></dd></div>
+      <div><dt>SIP User ID</dt><dd><strong>Username / auth ID</strong> above</dd></div>
+      <div><dt>SIP Authenticate ID</dt><dd>The same <strong>Username / auth ID</strong></dd></div>
+      <div><dt>SIP Authentication Password</dt><dd><strong>Password</strong> above</dd></div>
+      <div><dt>Name</dt><dd>RingRing {{.Claim.Member.Extension}}</dd></div>
+      <div><dt>Outbound Proxy</dt><dd>Leave blank</dd></div>
+      <div><dt>NAT Traversal</dt><dd>Keep-alive</dd></div>
+    </dl>
+    <div class="device-guide-next">
+      <span aria-hidden="true">→</span>
+      <div><strong>Then open SIP Settings</strong><p>Keep <strong>SIP Registration</strong> on, choose <strong>TLS</strong> for SIP Transport, and keep the <strong>sips</strong> URI scheme. Under Codec Settings, put <strong>PCMU / G.711 μ-law</strong> first and prefer DTMF <strong>via RTP (RFC2833)</strong>. Under Advanced Settings, turn <strong>Authenticate Server Certificate chain</strong> on.</p></div>
+    </div>
+    <details class="device-guide-fallback">
+      <summary>Use the UDP fallback only if TLS will not register</summary>
+      <p>Change Primary SIP Server to <strong>{{.SIPPublicHost}}:5060</strong> and SIP Transport to <strong>UDP</strong>. Keep every username, password, NAT, codec, and DTMF setting the same. One initial 401 is normal and is not a reason to switch transports.</p>
+    </details>
+    <div class="device-guide-finish"><strong>Save and prove it.</strong><p>Choose <strong>Save and Apply</strong>, then open <strong>Status → Port Status</strong>. Registration should say <strong>Registered</strong>. Grandstream intentionally shows the saved password as blank afterward. Pick up the phone and dial <strong>*10</strong> for the echo test.</p></div>
+    <p class="device-guide-source">Menu names checked against Grandstream’s <a href="https://documentation.grandstream.com/knowledge-base/ht801-v2-quick-installation-guide/" target="_blank" rel="noreferrer">HT801 V2 installation guide</a>, <a href="https://documentation.grandstream.com/knowledge-base/ht80x-v2-administration-guide/" target="_blank" rel="noreferrer">HT80x V2 administration guide</a>, and a physical HT801 V2.</p>
+  </section>
   <section class="field-translator" aria-labelledby="field-translator-title">
     <span aria-hidden="true">🧭</span>
     <div>

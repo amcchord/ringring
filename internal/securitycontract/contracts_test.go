@@ -205,6 +205,31 @@ func TestGeneratedSIPCredentialsStayKeypadFriendlyAndCollisionSafe(t *testing.T)
 	}
 }
 
+func TestGrandstreamGuidePreservesCredentialAndRoutingBoundaries(t *testing.T) {
+	setup := readRepositoryFile(t, "web/templates/setup.html")
+	start := strings.Index(setup, `<section class="device-specific-guide"`)
+	end := strings.Index(setup, `<section class="field-translator"`)
+	if start < 0 || end <= start {
+		t.Fatal("the credential-aware Grandstream guide is missing or misplaced")
+	}
+	guide := setup[start:end]
+	for _, required := range []string{
+		`{{.SIPPublicHost}}:5061`, `{{.SIPPublicHost}}:5060`, "SIP Authenticate ID", "SIP Authentication Password",
+		"The same <strong>Username / auth ID</strong>", "Outbound Proxy", "Leave blank", "NAT Traversal", "Keep-alive",
+		"SIP Registration", "TLS", "PCMU / G.711 μ-law", "via RTP (RFC2833)", "Authenticate Server Certificate chain",
+		"One initial 401 is normal", "Save and Apply", "Status → Port Status", "dial <strong>*10</strong>",
+	} {
+		if !strings.Contains(guide, required) {
+			t.Errorf("the Grandstream guide is missing safe setup marker %q", required)
+		}
+	}
+	for _, forbidden := range []string{`{{.Claim.Device.SIPUsername}}`, `{{.Claim.SIPSecret}}`, "port forward", "factory reset"} {
+		if strings.Contains(guide, forbidden) {
+			t.Errorf("the Grandstream guide duplicates a secret or unsafe operation %q", forbidden)
+		}
+	}
+}
+
 func TestAsteriskHasNoPSTNOrGlobalOutboundRoute(t *testing.T) {
 	pjsip := readRepositoryFile(t, "deploy/asterisk/config/pjsip.conf.in")
 	if !strings.Contains(pjsip, "endpoint_identifier_order=auth_username,username,ip,anonymous") {

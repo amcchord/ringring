@@ -2,6 +2,32 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Add a real Grandstream HT801 V2 setup path
+
+### Shipped
+
+- Confirmed the active source already issues a 6-digit SIP username and 12-digit numeric password for every new, added, or deliberately rotated phone. Existing longer credentials remain unchanged so an upgrade cannot silently disconnect a working adapter; the one-time setup card continues to show explicit length/no-space hints and copies only exact raw digits.
+- Added a prominent Grandstream HT801 V2 shortcut beside Manual settings and a credential-aware, five-minute guide on the same private page. It covers physical ports, the `***` / `02` address prompt, exact current menu paths and field labels, TLS/UDP ports, username/auth reuse, NAT keep-alive, PCMU, RFC2833 DTMF, certificate-chain validation, registration status, saved-password behavior, and `*10` verification.
+- Kept the model-specific guide from duplicating the raw username or password. It points back to the single credential card, leaves the outbound proxy blank, contains no factory-reset or router-port-forwarding instruction, and links to Grandstream's official installation and administration guides.
+
+### Decisions
+
+- Put the exact guide on the one-time credential page because that is where a person can safely see and copy the fields the adapter needs. A prominent jump link avoids making them hunt through the longer softphone and universal-device guidance.
+- Prefer TLS on `5061`, Grandstream's `sips` URI mode, certificate-chain authentication, NAT keep-alive, PCMU/G.711 μ-law, and RTP/RFC2833 DTMF. Keep UDP on `5060` as an explicitly secondary compatibility path; one ordinary SIP 401 challenge is not a reason to switch transports.
+- Use the HT801 V2's real labels—`SIP Authenticate ID` and `SIP Authentication Password`—rather than relying only on generic provider terminology.
+
+### Verification
+
+- Focused web and executable security-contract tests pass. They verify rendered 6/12-digit credentials, the complete HT801 V2 field mapping, safe routing/defaults, accessible guide relationships, and minimum touch-target contracts.
+- Disposable in-app browser review at 1280×900 and 390×844 verifies the direct guide jump, two-column desktop and stacked mobile layouts, no page or guide overflow, 44px external links, a 52px fallback disclosure, exact numeric credential shapes, and a clean console.
+- A physical Grandstream HT801 V2 confirmed the documented current menu paths and labels. Its status page reported Registered before any settings were changed, establishing that the previously observed 401 could complete the normal challenge-response flow.
+- `make check`, `make security`, and `make admin-test` pass locally, including formatting, operator fixtures, vet, the complete race-enabled suite, reachable-vulnerability scanning, exact security contracts, and administrator tests.
+
+### Remaining
+
+- Publish and deploy the combined short-credential, phone-book, and HT801 V2 guide release, then deliberately issue a fresh 6/12-digit phone setting and complete TLS registration, `*10`, incoming ring, and two-phone calling on the physical adapter.
+- Expand the same credential-aware pattern after physical validation of other common FXS adapters. Complete the external child-safety review and OpenAI Zero Data Retention eligibility before opening the AI conversation gate.
+
 ## 2026-08-22 — Turn the phone book into a friendly control board
 
 ### Shipped
