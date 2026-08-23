@@ -24,12 +24,12 @@ type Reloader interface {
 }
 
 type Reconciler struct {
-	Source                RoutingSource
-	Cipher                SecretDecryptor
-	ConfigDir             string
-	Reloader              Reloader
-	AIChildSafetyApproved bool
-	mu                    sync.Mutex
+	Source             RoutingSource
+	Cipher             SecretDecryptor
+	ConfigDir          string
+	Reloader           Reloader
+	AIAdultOnlyEnabled bool
+	mu                 sync.Mutex
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context) error {
@@ -50,7 +50,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if !r.AIChildSafetyApproved {
+	if !r.AIAdultOnlyEnabled {
 		for index := range services {
 			services[index].AIEnabled = false
 		}

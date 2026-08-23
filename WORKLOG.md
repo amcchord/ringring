@@ -2,6 +2,31 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-23 — Make the AI line an adult-extension choice
+
+### Shipped
+
+- Replaced the host-wide safety form and repeated keypad confirmation with one **Adult extension (18+)** checkbox on the invitation claim form. The value is stored as a minimal member boolean; existing extensions migrate to false, and there is no birthday collection or phone-book toggle.
+- Restricted `*14` at call time using Asterisk's authenticated PJSIP endpoint. Only an active device in the same party whose extension was marked adult can receive a bridge ticket; unknown, revoked, non-adult, and cross-party endpoints fail closed with the same friendly spoken response.
+- Kept the deployment gate default-closed as `AI_ADULT_ONLY_ENABLED`, required at least one adult extension before a host can enable the party line, and limited first-call advertising of `*14` to the adult extension that was just created.
+- Simplified the caller experience to one short adults-only AI/provider disclosure followed by the live bridge. RingRing still exposes no tools, disables input transcription and tracing, discards transcript events, bounds call duration/concurrency/output, and stores no call audio or transcript.
+
+### Decisions
+
+- Treat the checkbox as an administrative classification, not age verification. Child and shared phones stay unmarked, and minor-facing AI remains out of scope until the separate under-18 safety/privacy review and required provider-retention evidence are complete.
+- Keep provider retention visible in the setup copy and audible disclosure. The standalone `ringringctl openai-retention` audit remains available, but it is not a runtime precondition for this explicitly adults-only preview.
+- Authorize from the registered endpoint rather than caller ID so a handset cannot gain access by presenting another extension number.
+
+### Verification
+
+- Focused store, web, telephony, voice, configuration, and security-contract tests pass, followed by `go test ./...`, `make check`, `make security`, and `make admin-test`; `govulncheck` reports no reachable vulnerability.
+- The local SIP smoke suite passes for TLS and UDP registrations, same-extension and mixed-transport calls, friendly invalid/disabled routes, `*10`, RTP, and `*15`. The Colima run used the documented host-shared temporary-root override and left the source tree unchanged.
+- The invitation page was inspected at 1280×900 and 390×844. The single yellow adult-extension choice has a 44px-or-larger target, clear focus styling, and no mobile horizontal overflow.
+
+### Remaining
+
+- Publish and deploy the isolated server release, mark the existing test extension adult, open the operator and party gates, and verify production health plus the generated `*14` route. A real adult handset call remains the final end-to-end Realtime check.
+
 ## 2026-08-22 — Give failed calls a friendly voice
 
 ### Shipped

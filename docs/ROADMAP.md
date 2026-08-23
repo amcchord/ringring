@@ -39,9 +39,9 @@
 - [x] Per-party encrypted runtime key use.
 - [x] Immediate party-key revocation and replacement.
 - [x] Host-set project hard spend limit with an operator ceiling and fail-closed provider reconciliation.
-- [x] Realtime voice line with child-appropriate instructions, disclosure, bounded calls, and no tools.
+- [x] Adults-only Realtime voice line with conservative instructions, disclosure, bounded calls, and no tools.
 - [x] AI disclosure for generated weather speech and no default transcript retention.
-- [x] Default-closed operator gate across startup ZDR verification, storage, web, telephony, Realtime, and deployment-doctor boundaries until child-safety/ZDR approval.
+- [x] Default-closed operator gate plus authenticated adult-extension authorization across storage, web, telephony, FastAGI, and Realtime boundaries.
 - [ ] External child-safety review and confirmation of OpenAI Zero Data Retention before use by callers under 13.
 
 ## Milestone 4 — Dependable self-hosting

@@ -84,8 +84,8 @@ AI_AUDIO_ADDR=:4574
 AI_REALTIME_MODEL=gpt-realtime-2.1
 AI_CALL_MAX_DURATION=3m
 AI_MAX_CONCURRENT=2
-# Do not set true until the child-safety and ZDR checks below are complete.
-AI_CHILD_SAFETY_APPROVED=false
+# Set true only when intentionally offering the adults-only *14 preview.
+AI_ADULT_ONLY_ENABLED=false
 VOICE_AUDIO_DIR=/asterisk/audio
 VOICE_PLAYBACK_DIR=/var/lib/ringring/asterisk/audio
 TZ=America/New_York
@@ -115,20 +115,13 @@ Host-set spend limits add three forward-only `parties` columns for the last conf
 
 `METRICS_ADDR` and `AI_AUDIO_ADDR` are private container traffic and must not be published on the host. The metrics listener exports only bounded aggregate health/activity and Caddy does not proxy it; see [Privacy-preserving observability](OBSERVABILITY.md). The reference limits `*14` calls to three minutes and two concurrent sessions in addition to each party project's hard monthly spend limit.
 
-`AI_CHILD_SAFETY_APPROVED` is a server-operator gate for the open-ended `*14` conversation line, not a party preference. It defaults to `false`; fresh installs write that value explicitly, and older deployments that omit it are also closed. While closed, RingRing rejects host attempts to enable `*14`, clears any older saved `ai_enabled` preference at startup, removes the route from generated Asterisk configuration, refuses FastAGI authorization and party-key decryption, and refuses the Realtime WebSocket bridge. Time, weather text-to-speech, radio, echo, extension selection, and ordinary party calls are unaffected.
+`AI_ADULT_ONLY_ENABLED` is a server-operator gate for the open-ended `*14` conversation line, not a party preference. It defaults to `false`; fresh installs write that value explicitly, and older deployments that omit it are also closed. While closed, RingRing rejects host attempts to enable `*14`, clears any older saved `ai_enabled` preference at startup, removes the route from generated Asterisk configuration, refuses FastAGI authorization and party-key decryption, and refuses the Realtime WebSocket bridge. Time, weather text-to-speech, radio, echo, extension selection, and ordinary party calls are unaffected.
 
-Do not change the gate to `true` until both conditions are independently satisfied:
+Set the gate to `true` only when this deployment intentionally offers an adults-only preview. A member chooses **Adult extension (18+)** once while claiming a new extension. Existing extensions migrate to non-adult, the host cannot enable `*14` until at least one adult extension exists, and every call is authorized from the active authenticated SIP endpoint in the same party. Do not mark a child or shared handset adult. The call disclosure explains that audio goes to OpenAI and provider retention may apply even though RingRing stores no audio or transcript.
 
-1. An external child-safety review has approved the intended callers, disclosures, content controls, supervision, monitoring, reporting, and escalation process under OpenAI's [Under 18 API Guidance](https://developers.openai.com/api/docs/guides/safety-checks/under-18-api-guidance).
-2. OpenAI has confirmed Zero Data Retention for the exact organization and party projects used by RingRing. Ask the installed app to make the read-only official [organization](https://developers.openai.com/api/reference/python/resources/admin/subresources/organization/subresources/data_retention/methods/retrieve) and [project](https://developers.openai.com/api/reference/python/resources/admin/subresources/organization/subresources/projects/subresources/data_retention/methods/retrieve) data-retention requests:
+Edit the root-only `/etc/ringring/app.env`, set exactly `AI_ADULT_ONLY_ENABLED=true`, run `cd /opt/ringring && docker compose up -d --force-recreate app`, and then run `sudo /opt/ringring/ringringctl doctor`. To revoke the preview, set the value back to `false` and recreate the app container; startup closes saved conversation preferences before telephony reconciliation.
 
-   ```sh
-   sudo /opt/ringring/ringringctl openai-retention
-   ```
-
-   Success prints only `status`, the non-secret organization ZDR type, and the number of party projects checked. A forbidden or `not_eligible` response, modified-abuse-monitoring or project `none` mode, unknown/malformed result, missing administrator key, timeout, or transport error fails the command and is not confirmation.
-
-After both checks, edit the root-only `/etc/ringring/app.env`, set exactly `AI_CHILD_SAFETY_APPROVED=true`, and run `cd /opt/ringring && docker compose up -d --force-recreate app`. Before opening any listener, startup independently repeats the bounded read-only provider checks and refuses to start unless the organization and every stored party project remain ZDR-safe. Then run `sudo /opt/ringring/ringringctl doctor`; while the gate is configured open, doctor rechecks provider retention again. To revoke approval, set the value back to `false` and recreate the app container; startup closes saved conversation preferences before telephony reconciliation. Do not put review evidence, provider responses, or administrator credentials in the repository.
+The independent `sudo /opt/ringring/ringringctl openai-retention` command still makes bounded, read-only requests to OpenAI's official [organization](https://developers.openai.com/api/reference/python/resources/admin/subresources/organization/subresources/data_retention/methods/retrieve) and [project](https://developers.openai.com/api/reference/python/resources/admin/subresources/organization/subresources/projects/subresources/data_retention/methods/retrieve) data-retention endpoints. Success prints only `status`, the non-secret organization ZDR type, and the number of party projects checked. A forbidden or `not_eligible` response, modified-abuse-monitoring or project `none` mode, unknown/malformed result, missing administrator key, timeout, or transport error fails the command and is not confirmation. This audit is not a runtime precondition for the adult-only preview and must not be used to imply that RingRing is ready for minors. OpenAI's [Under 18 API Guidance](https://developers.openai.com/api/docs/guides/safety-checks/under-18-api-guidance) and an external under-18 safety/privacy review remain release gates before offering `*14` to minors. Do not put review evidence, provider responses, or administrator credentials in the repository.
 
 ## SIP authentication firewall
 
@@ -328,7 +321,7 @@ sheet and needs no data or configuration migration.
 
 The `*14` release adds `party_services.ai_enabled` with a forward-only startup migration. Take the app-state backup while the app is stopped, then restart the old version before beginning the normal update. The column defaults to disabled and older RingRing builds ignore it, so rolling the app image and checkout back leaves the migrated database usable; the four `AI_*` environment variables are also ignored by older builds. Keep the database backup until the upgraded app, private port `4574`, and generated Asterisk dialplan have all been verified. Do not publish port `4574` during either upgrade or rollback.
 
-The child-safety gate release adds no schema or provider mutation. Existing deployments omit `AI_CHILD_SAFETY_APPROVED` and therefore default closed. On first startup, the new app durably clears any older enabled `*14` preference before regenerating routes, so a rollback cannot revive the conversation line from stale state. A later hardening release adds only the read-only ZDR verification command and open-gate startup/doctor checks. Its isolated restore drill explicitly overrides the gate to false so a network-disabled recovery exercise neither needs the administrator key nor claims provider compliance. Older builds ignore the gate variable and do not perform the provider check; therefore do not roll back an approved deployment while `*14` is enabled. Leave the gate false unless the two documented external approvals are complete.
+The adults-only release adds the forward-only `members.adult_extension` boolean and replaces the former operator variable with `AI_ADULT_ONLY_ENABLED`. Existing members migrate to false, and older builds safely ignore the additive column. A deployment that still has only `AI_CHILD_SAFETY_APPROVED` remains closed because the new variable defaults false. Before rollback, set `AI_ADULT_ONLY_ENABLED=false`, recreate the app so durable `*14` preferences are cleared, and leave the older gate false as well. The isolated restore drill explicitly overrides the new gate to false. The standalone read-only ZDR audit remains available but is no longer coupled to startup or `doctor`; it changes no provider state.
 
 ### `*15` upgrade and rollback
 

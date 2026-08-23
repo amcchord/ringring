@@ -33,6 +33,10 @@ type ExtensionManager interface {
 	ChangeMemberExtensionByDevice(context.Context, string, string, string) error
 }
 
+type AIAdultAccessSource interface {
+	AIAdultAccessForDevice(context.Context, string, string) (bool, error)
+}
+
 type SecretDecryptor interface {
 	Decrypt(string, []byte) (string, error)
 }
@@ -46,26 +50,27 @@ type SpeechSource interface {
 }
 
 type Server struct {
-	Source                PartySource
-	Extensions            ExtensionManager
-	Reconcile             func(context.Context) error
-	Cipher                SecretDecryptor
-	Weather               WeatherSource
-	Speech                SpeechSource
-	AudioDir              string
-	PlaybackDir           string
-	Logger                *slog.Logger
-	Metrics               *observability.Registry
-	Now                   func() time.Time
-	CacheDuration         time.Duration
-	AIModel               string
-	AIRealtimeURL         string
-	AICallMaxDuration     time.Duration
-	AIMaxConcurrent       int
-	AIChildSafetyApproved bool
-	aiMu                  sync.Mutex
-	aiTickets             map[string]aiTicket
-	aiActive              int
+	Source             PartySource
+	AIAdultAccess      AIAdultAccessSource
+	Extensions         ExtensionManager
+	Reconcile          func(context.Context) error
+	Cipher             SecretDecryptor
+	Weather            WeatherSource
+	Speech             SpeechSource
+	AudioDir           string
+	PlaybackDir        string
+	Logger             *slog.Logger
+	Metrics            *observability.Registry
+	Now                func() time.Time
+	CacheDuration      time.Duration
+	AIModel            string
+	AIRealtimeURL      string
+	AICallMaxDuration  time.Duration
+	AIMaxConcurrent    int
+	AIAdultOnlyEnabled bool
+	aiMu               sync.Mutex
+	aiTickets          map[string]aiTicket
+	aiActive           int
 }
 
 func (s *Server) Serve(listener net.Listener) error {

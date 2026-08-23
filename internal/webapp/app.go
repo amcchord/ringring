@@ -77,8 +77,6 @@ type App struct {
 
 type openAIProjectManager interface {
 	Provision(context.Context, string, string) (openaiadmin.ProvisionedProject, error)
-	VerifyOrganizationZeroDataRetention(context.Context) (openaiadmin.OrganizationDataRetention, error)
-	VerifyProjectZeroDataRetention(context.Context, string) (openaiadmin.ProjectDataRetention, error)
 	ArchiveProject(context.Context, string) error
 	CreateServiceAccountAPIKey(context.Context, string, string) (openaiadmin.ServiceAccountAPIKey, error)
 	ServiceAccountAPIKeyIDs(context.Context, string, string) ([]string, error)
@@ -140,6 +138,7 @@ type PageData struct {
 	JoinDisplayName          string
 	JoinExtension            string
 	JoinDeviceLabel          string
+	JoinAdultExtension       bool
 	Claim                    model.ClaimedDevice
 	SIPPublicHost            string
 	SIPUsernameDisplay       string
@@ -176,7 +175,7 @@ type PageData struct {
 	OpenAISpendPending       string
 	OpenAISpendLimitMax      string
 	OpenAISpendLimitMaxInput string
-	AIChildSafetyApproved    bool
+	AIAdultOnlyEnabled       bool
 }
 
 type authSession struct {
@@ -185,9 +184,10 @@ type authSession struct {
 }
 
 type joinFormValues struct {
-	DisplayName string
-	Extension   string
-	DeviceLabel string
+	DisplayName    string
+	Extension      string
+	DeviceLabel    string
+	AdultExtension bool
 }
 
 type setupFlash struct {
@@ -264,7 +264,7 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 	if cfg.AsteriskConfigDir != "" {
 		app.telephony = &telephony.Reconciler{
 			Source: database, Cipher: cipher, ConfigDir: cfg.AsteriskConfigDir,
-			Reloader: ami, AIChildSafetyApproved: cfg.AIChildSafetyApproved,
+			Reloader: ami, AIAdultOnlyEnabled: cfg.AIAdultOnlyEnabled,
 		}
 	}
 
@@ -895,29 +895,11 @@ func (a *App) provisionOpenAI(ctx context.Context, party model.Party) error {
 	if err != nil {
 		return err
 	}
-	if a.cfg.AIChildSafetyApproved {
-		if _, err := a.openAI.VerifyOrganizationZeroDataRetention(ctx); err != nil {
-			a.archiveUnverifiedOpenAIProject(provisioned.ProjectID)
-			return fmt.Errorf("verify OpenAI organization Zero Data Retention for provisioned project: %w", err)
-		}
-		if _, err := a.openAI.VerifyProjectZeroDataRetention(ctx, provisioned.ProjectID); err != nil {
-			a.archiveUnverifiedOpenAIProject(provisioned.ProjectID)
-			return fmt.Errorf("verify provisioned OpenAI project Zero Data Retention: %w", err)
-		}
-	}
 	ciphertext, err := a.cipher.Encrypt(provisioned.APIKey, []byte(party.ID))
 	if err != nil {
 		return err
 	}
 	return a.store.UpdatePartyOpenAI(ctx, party.ID, provisioned.ProjectID, provisioned.ServiceAccountID, provisioned.APIKeyID, ciphertext, "ready", provisioned.SpendLimitCents)
-}
-
-func (a *App) archiveUnverifiedOpenAIProject(projectID string) {
-	cleanupContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := a.openAI.ArchiveProject(cleanupContext, projectID); err != nil {
-		a.logger.Error("archive OpenAI project after retention verification failed", "error_class", observability.ErrorClass(err))
-	}
 }
 
 func (a *App) party(w http.ResponseWriter, r *http.Request, session authSession) {
@@ -1329,8 +1311,8 @@ func (a *App) updateServices(w http.ResponseWriter, r *http.Request, session aut
 	query := strings.Join(strings.Fields(r.FormValue("weather_query")), " ")
 	weatherEnabled := r.FormValue("weather_enabled") != ""
 	aiEnabled := r.FormValue("ai_enabled") != ""
-	if aiEnabled && !a.cfg.AIChildSafetyApproved {
-		a.errorPage(w, http.StatusConflict, "The AI conversation line is locked", "The server operator has not completed the child-safety review and confirmed Zero Data Retention. Weather and the other family lines still work.", "/parties/"+url.PathEscape(partyID), "Back to the party")
+	if aiEnabled && !a.cfg.AIAdultOnlyEnabled {
+		a.errorPage(w, http.StatusConflict, "The AI conversation line is locked", "The server operator has not opened the adults-only preview. Weather and the other family lines still work.", "/parties/"+url.PathEscape(partyID), "Back to the party")
 		return
 	}
 	radioStationID := r.FormValue("radio_station")
@@ -1346,9 +1328,23 @@ func (a *App) updateServices(w http.ResponseWriter, r *http.Request, session aut
 		a.errorPage(w, http.StatusConflict, "The AI lines need their voice", "Wait until this party's AI status says ready, then turn an AI-powered line on.", "/parties/"+url.PathEscape(partyID), "Back to the party")
 		return
 	}
-	if aiEnabled && !existing.AIEnabled && r.FormValue("ai_safety_confirmed") == "" {
-		a.errorPage(w, http.StatusBadRequest, "An adult host must confirm the safety rules", "Review the child-safety note and check the confirmation before turning on the AI conversation line.", "/parties/"+url.PathEscape(partyID), "Back to the party")
-		return
+	if aiEnabled && !existing.AIEnabled {
+		members, memberErr := a.store.ListMembers(r.Context(), partyID)
+		if memberErr != nil {
+			a.internalError(w, r, memberErr)
+			return
+		}
+		adultAllowed := false
+		for _, member := range members {
+			if member.AdultExtension {
+				adultAllowed = true
+				break
+			}
+		}
+		if !adultAllowed {
+			a.errorPage(w, http.StatusConflict, "Create an adult extension first", "At least one extension must be marked Adult extension (18+) before you can turn on *14.", "/parties/"+url.PathEscape(partyID), "Back to the party")
+			return
+		}
 	}
 	if weatherEnabled && query == "" {
 		a.errorPage(w, http.StatusBadRequest, "Add a weather location", "Enter a city or postal code before turning on the weather line.", "/parties/"+url.PathEscape(partyID), "Back to the party")
@@ -1376,7 +1372,7 @@ func (a *App) updateServices(w http.ResponseWriter, r *http.Request, session aut
 		WeatherQuery: location.Query, WeatherLabel: location.Label,
 		WeatherLatitude: location.Latitude, WeatherLongitude: location.Longitude,
 		RadioEnabled: r.FormValue("radio_enabled") != "", RadioStation: radioStation.ID, AIEnabled: aiEnabled,
-		AIChildSafetyApproved: a.cfg.AIChildSafetyApproved, UpdatedAt: a.now(),
+		AIAdultOnlyEnabled: a.cfg.AIAdultOnlyEnabled, UpdatedAt: a.now(),
 	})
 	if err != nil {
 		a.internalError(w, r, err)
@@ -1869,7 +1865,8 @@ func (a *App) claimInvitation(w http.ResponseWriter, r *http.Request) {
 	displayName := strings.Join(strings.Fields(r.FormValue("display_name")), " ")
 	extensionValue := strings.TrimSpace(r.FormValue("extension"))
 	deviceLabel := strings.Join(strings.Fields(r.FormValue("device_label")), " ")
-	values := joinFormValues{DisplayName: displayName, Extension: extensionValue, DeviceLabel: deviceLabel}
+	adultExtension := r.FormValue("adult_extension") != ""
+	values := joinFormValues{DisplayName: displayName, Extension: extensionValue, DeviceLabel: deviceLabel, AdultExtension: adultExtension}
 	invitedParty, err := a.store.PartyByInvitation(r.Context(), secure.Hash(token), a.now())
 	if err != nil {
 		a.invitationError(w, err)
@@ -1927,7 +1924,7 @@ func (a *App) claimInvitation(w http.ResponseWriter, r *http.Request) {
 	_, sipSecret, err := a.saveWithNewSIPCredentials(deviceID, func(username, ciphertext string) error {
 		party, member, device, err = a.store.ClaimInvitation(r.Context(), store.NewClaim{
 			TokenHash: secure.Hash(token), MemberID: memberID, DisplayName: displayName, Extension: extensionValue,
-			DeviceID: deviceID, DeviceLabel: deviceLabel, SIPUsername: username,
+			AdultExtension: adultExtension, DeviceID: deviceID, DeviceLabel: deviceLabel, SIPUsername: username,
 			SIPSecretCiphertext: ciphertext, Provisioning: provisionRecord, Now: now,
 		})
 		return err
@@ -1954,7 +1951,7 @@ func (a *App) claimInvitation(w http.ResponseWriter, r *http.Request) {
 	data.Claim = model.ClaimedDevice{Party: party, Member: member, Device: device, SIPSecret: sipSecret}
 	data.SIPPublicHost = a.cfg.SIPPublicHost
 	data.CallDirectory = privateCallDirectory(directoryMembers)
-	data.FirstCallLines = availableFirstCallLines(party, services, a.cfg.AIChildSafetyApproved)
+	data.FirstCallLines = availableFirstCallLines(party, services, a.cfg.AIAdultOnlyEnabled, member.AdultExtension)
 	if err := a.addLinphoneSetup(&data, provisionToken); err != nil {
 		a.logger.Error("prepare claimed Linphone setup", "error_class", observability.ErrorClass(err))
 	}
@@ -1978,7 +1975,7 @@ func privateCallDirectory(members []model.Member) []callDirectoryEntry {
 	return directory
 }
 
-func availableFirstCallLines(party model.Party, services model.PartyServices, childSafetyApproved bool) []firstCallLine {
+func availableFirstCallLines(party model.Party, services model.PartyServices, adultOnlyEnabled, memberAdultAllowed bool) []firstCallLine {
 	lines := []firstCallLine{
 		{Number: "*10", Title: "Echo test", Description: "Hear your own voice come back."},
 		{Number: "*15", Title: "Pick another extension", Description: "Choose a new number by phone."},
@@ -1993,8 +1990,8 @@ func availableFirstCallLines(party model.Party, services model.PartyServices, ch
 	if services.RadioEnabled {
 		lines = append(lines, firstCallLine{Number: "*13", Title: "Internet radio", Description: "Play the host's chosen station."})
 	}
-	if services.AIEnabled && voiceReady && childSafetyApproved {
-		lines = append(lines, firstCallLine{Number: "*14", Title: "RingRing AI", Description: "Talk with a clearly disclosed AI voice."})
+	if services.AIEnabled && voiceReady && adultOnlyEnabled && memberAdultAllowed {
+		lines = append(lines, firstCallLine{Number: "*14", Title: "RingRing AI · adults only", Description: "Talk with a clearly disclosed AI voice."})
 	}
 	return lines
 }
@@ -2014,6 +2011,7 @@ func (a *App) renderJoinForm(w http.ResponseWriter, r *http.Request, party model
 	data.JoinDisplayName = values.DisplayName
 	data.JoinExtension = values.Extension
 	data.JoinDeviceLabel = values.DeviceLabel
+	data.JoinAdultExtension = values.AdultExtension
 	data.FormError = message
 	data.FormInvalid = make(map[string]bool, len(invalidFields))
 	for _, field := range invalidFields {
@@ -2215,7 +2213,7 @@ func (a *App) pageData(session *authSession) PageData {
 	data := PageData{
 		AuthConfigured: a.cfg.HostSignupEnabled(), DevAuth: a.cfg.DevAuth,
 		SignupEnabled: a.cfg.HostSignupEnabled(), SignupCode: a.cfg.HostSignupCode != "",
-		AIChildSafetyApproved: a.cfg.AIChildSafetyApproved,
+		AIAdultOnlyEnabled: a.cfg.AIAdultOnlyEnabled,
 	}
 	if session != nil {
 		data.User = &session.User

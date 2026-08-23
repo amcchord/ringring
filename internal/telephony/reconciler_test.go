@@ -23,14 +23,14 @@ func (childSafetyRoutingSource) RoutingServices(context.Context) ([]model.Routin
 	return []model.RoutingServices{{PartyID: "pty_safe", TimeEnabled: true, AIEnabled: true}}, nil
 }
 
-type childSafetyDecryptor struct{}
+type adultOnlyDecryptor struct{}
 
-func (childSafetyDecryptor) Decrypt(string, []byte) (string, error) { return "secret", nil }
+func (adultOnlyDecryptor) Decrypt(string, []byte) (string, error) { return "secret", nil }
 
-func TestReconcilerFiltersAIWhenChildSafetyGateIsClosed(t *testing.T) {
+func TestReconcilerFiltersAIWhenAdultOnlyGateIsClosed(t *testing.T) {
 	directory := t.TempDir()
 	reconciler := &Reconciler{
-		Source: childSafetyRoutingSource{}, Cipher: childSafetyDecryptor{}, ConfigDir: directory,
+		Source: childSafetyRoutingSource{}, Cipher: adultOnlyDecryptor{}, ConfigDir: directory,
 	}
 	if err := reconciler.Reconcile(t.Context()); err != nil {
 		t.Fatal(err)
@@ -43,7 +43,7 @@ func TestReconcilerFiltersAIWhenChildSafetyGateIsClosed(t *testing.T) {
 		t.Fatalf("closed gate generated an AI route or removed an ordinary route:\n%s", closed)
 	}
 
-	reconciler.AIChildSafetyApproved = true
+	reconciler.AIAdultOnlyEnabled = true
 	if err := reconciler.Reconcile(t.Context()); err != nil {
 		t.Fatal(err)
 	}

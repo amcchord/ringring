@@ -45,8 +45,8 @@ type openAIRetentionReport struct {
 	ProjectsVerified int    `json:"projects_verified"`
 }
 
-func requireOpenAIZeroDataRetention(ctx context.Context, childSafetyApproved bool, verifier openAIRetentionVerifier, projects openAIProjectSource) (openAIRetentionReport, error) {
-	if !childSafetyApproved {
+func requireOpenAIZeroDataRetention(ctx context.Context, required bool, verifier openAIRetentionVerifier, projects openAIProjectSource) (openAIRetentionReport, error) {
+	if !required {
 		return openAIRetentionReport{}, nil
 	}
 	organization, err := verifier.VerifyOrganizationZeroDataRetention(ctx)
@@ -150,18 +150,8 @@ func main() {
 		os.Exit(1)
 	}
 	defer database.Close()
-	retentionContext, cancelRetention := context.WithTimeout(context.Background(), openAIRetentionAuditTimeout)
-	retention, err := requireOpenAIZeroDataRetention(retentionContext, cfg.AIChildSafetyApproved, openAIAdminClient(cfg), database)
-	cancelRetention()
-	if err != nil {
-		logger.Error("AI conversation gate requires current OpenAI Zero Data Retention", "error", err)
-		os.Exit(1)
-	}
-	if cfg.AIChildSafetyApproved {
-		logger.Info("OpenAI Zero Data Retention verified for AI conversation gate", "organization_type", retention.OrganizationType, "projects_verified", retention.ProjectsVerified)
-	}
-	if err := database.EnforceAIChildSafetyGate(context.Background(), cfg.AIChildSafetyApproved, time.Now()); err != nil {
-		logger.Error("enforce AI conversation child-safety gate", "error", err)
+	if err := database.EnforceAIAdultOnlyGate(context.Background(), cfg.AIAdultOnlyEnabled, time.Now()); err != nil {
+		logger.Error("enforce AI conversation adult-only gate", "error", err)
 		os.Exit(1)
 	}
 	cipher, err := secure.NewCipher(cfg.MasterKey)
@@ -205,12 +195,12 @@ func main() {
 	}
 	defer aiListener.Close()
 	voiceServer := &voice.Server{
-		Source: database, Extensions: database, Reconcile: app.ReconcileTelephony,
+		Source: database, AIAdultAccess: database, Extensions: database, Reconcile: app.ReconcileTelephony,
 		Cipher: cipher, Weather: weather.New(nil), Speech: openairuntime.New(nil),
 		AudioDir: cfg.VoiceAudioDir, PlaybackDir: cfg.VoicePlaybackDir, Logger: logger,
 		AIModel: cfg.AIRealtimeModel, AICallMaxDuration: cfg.AICallMaxDuration, AIMaxConcurrent: cfg.AIMaxConcurrent,
-		AIChildSafetyApproved: cfg.AIChildSafetyApproved,
-		Metrics:               app.Metrics(),
+		AIAdultOnlyEnabled: cfg.AIAdultOnlyEnabled,
+		Metrics:            app.Metrics(),
 	}
 	go func() {
 		if err := voiceServer.Serve(voiceListener); err != nil {

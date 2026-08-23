@@ -73,12 +73,13 @@ type Invitation struct {
 }
 
 type Member struct {
-	ID          string
-	PartyID     string
-	DisplayName string
-	Extension   string
-	CreatedAt   time.Time
-	Devices     []Device
+	ID             string
+	PartyID        string
+	DisplayName    string
+	Extension      string
+	AdultExtension bool
+	CreatedAt      time.Time
+	Devices        []Device
 }
 
 type Device struct {

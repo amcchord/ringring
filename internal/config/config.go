@@ -34,7 +34,7 @@ type Config struct {
 	AIRealtimeModel            string
 	AICallMaxDuration          time.Duration
 	AIMaxConcurrent            int
-	AIChildSafetyApproved      bool
+	AIAdultOnlyEnabled         bool
 	VoiceAudioDir              string
 	VoicePlaybackDir           string
 	InviteTTL                  time.Duration
@@ -42,7 +42,7 @@ type Config struct {
 }
 
 func Load() (Config, error) {
-	aiChildSafetyApproved, err := envStrictBool("AI_CHILD_SAFETY_APPROVED", false)
+	aiAdultOnlyEnabled, err := envStrictBool("AI_ADULT_ONLY_ENABLED", false)
 	if err != nil {
 		return Config{}, err
 	}
@@ -67,7 +67,7 @@ func Load() (Config, error) {
 		AIRealtimeModel:            env("AI_REALTIME_MODEL", "gpt-realtime-2.1"),
 		AICallMaxDuration:          envDuration("AI_CALL_MAX_DURATION", 3*time.Minute),
 		AIMaxConcurrent:            envInt("AI_MAX_CONCURRENT", 2),
-		AIChildSafetyApproved:      aiChildSafetyApproved,
+		AIAdultOnlyEnabled:         aiAdultOnlyEnabled,
 		VoiceAudioDir:              env("VOICE_AUDIO_DIR", "/asterisk/audio"),
 		VoicePlaybackDir:           env("VOICE_PLAYBACK_DIR", "/var/lib/ringring/asterisk/audio"),
 		InviteTTL:                  48 * time.Hour,

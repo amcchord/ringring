@@ -30,6 +30,12 @@ type fakePartySource struct {
 
 type failingPartySource struct{ err error }
 
+type fakeAIAdultAccess bool
+
+func (f fakeAIAdultAccess) AIAdultAccessForDevice(context.Context, string, string) (bool, error) {
+	return bool(f), nil
+}
+
 func (f failingPartySource) PartyVoiceSettings(context.Context, string) (model.Party, model.PartyServices, error) {
 	return model.Party{}, model.PartyServices{}, f.err
 }

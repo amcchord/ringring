@@ -32,7 +32,7 @@ var (
 	ErrOpenAIRotation   = errors.New("OpenAI key rotation state changed")
 	ErrOpenAISpendLimit = errors.New("OpenAI spend limit state changed")
 	ErrInvalidRadio     = errors.New("radio station is not in the catalog")
-	ErrAIChildSafety    = errors.New("AI conversation child-safety gate is closed")
+	ErrAIAdultOnly      = errors.New("AI conversation adult-only gate is closed")
 )
 
 const MaxDevicesPerMember = 8
@@ -81,6 +81,7 @@ type NewClaim struct {
 	MemberID            string
 	DisplayName         string
 	Extension           string
+	AdultExtension      bool
 	DeviceID            string
 	DeviceLabel         string
 	SIPUsername         string
@@ -127,17 +128,17 @@ type CreatedDevice struct {
 }
 
 type ServiceSettingsInput struct {
-	TimeEnabled           bool
-	WeatherEnabled        bool
-	WeatherQuery          string
-	WeatherLabel          string
-	WeatherLatitude       float64
-	WeatherLongitude      float64
-	RadioEnabled          bool
-	RadioStation          string
-	AIEnabled             bool
-	AIChildSafetyApproved bool
-	UpdatedAt             time.Time
+	TimeEnabled        bool
+	WeatherEnabled     bool
+	WeatherQuery       string
+	WeatherLabel       string
+	WeatherLatitude    float64
+	WeatherLongitude   float64
+	RadioEnabled       bool
+	RadioStation       string
+	AIEnabled          bool
+	AIAdultOnlyEnabled bool
+	UpdatedAt          time.Time
 }
 
 type DeviceReadinessInput struct {
@@ -183,11 +184,27 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate OpenAI spend limit state: %w", err)
 	}
+	if err := ensureMemberAdultExtensionColumn(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate adult extension setting: %w", err)
+	}
 	if err := migrateReservedMemberExtensions(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate reserved member extensions: %w", err)
 	}
 	return &Store{db: db}, nil
+}
+
+func ensureMemberAdultExtensionColumn(db *sql.DB) error {
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('members') WHERE name = 'adult_extension'`).Scan(&count); err != nil {
+		return err
+	}
+	if count != 0 {
+		return nil
+	}
+	_, err := db.Exec(`ALTER TABLE members ADD COLUMN adult_extension INTEGER NOT NULL DEFAULT 0 CHECK(adult_extension IN (0, 1))`)
+	return err
 }
 
 // migrateReservedMemberExtensions repairs values accepted by preview builds
@@ -680,8 +697,8 @@ func (s *Store) PartyServices(ctx context.Context, partyID string) (model.PartyS
 }
 
 func (s *Store) UpdatePartyServices(ctx context.Context, partyID, hostUserID string, input ServiceSettingsInput) (model.PartyServices, error) {
-	if input.AIEnabled && !input.AIChildSafetyApproved {
-		return model.PartyServices{}, ErrAIChildSafety
+	if input.AIEnabled && !input.AIAdultOnlyEnabled {
+		return model.PartyServices{}, ErrAIAdultOnly
 	}
 	station, ok := radio.Resolve(input.RadioStation)
 	if !ok {
@@ -721,23 +738,40 @@ func (s *Store) UpdatePartyServices(ctx context.Context, partyID, hostUserID str
 	}, nil
 }
 
-// EnforceAIChildSafetyGate clears every durable conversation-line preference
+// EnforceAIAdultOnlyGate clears every durable conversation-line preference
 // while the operator gate is closed. This keeps upgrades and rollbacks fail
 // closed even when an older database contains an enabled *14 setting.
-func (s *Store) EnforceAIChildSafetyGate(ctx context.Context, approved bool, now time.Time) error {
-	if approved {
+func (s *Store) EnforceAIAdultOnlyGate(ctx context.Context, enabled bool, now time.Time) error {
+	if enabled {
 		return nil
 	}
 	if _, err := s.db.ExecContext(ctx, `
 		UPDATE party_services SET ai_enabled = 0, updated_at = ? WHERE ai_enabled = 1`, unix(now)); err != nil {
-		return fmt.Errorf("close AI conversation child-safety gate: %w", err)
+		return fmt.Errorf("close AI conversation adult-only gate: %w", err)
 	}
 	return nil
 }
 
+// AIAdultAccessForDevice authorizes from Asterisk's authenticated endpoint,
+// not caller ID. Unknown, revoked, cross-party, and unapproved devices all
+// return the same closed result.
+func (s *Store) AIAdultAccessForDevice(ctx context.Context, partyID, sipUsername string) (bool, error) {
+	var allowed int
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM devices d
+			JOIN members m ON m.id = d.member_id
+			WHERE m.party_id = ? AND d.sip_username = ? AND d.revoked_at IS NULL
+				AND m.adult_extension = 1
+		)`, partyID, sipUsername).Scan(&allowed); err != nil {
+		return false, fmt.Errorf("check member adult AI access: %w", err)
+	}
+	return allowed == 1, nil
+}
+
 // ListOpenAIProjectIDs returns the provider projects that could supply a party
-// model call. Startup uses this narrow list only while validating an explicitly
-// requested-open conversation gate; identifiers are never logged or rendered.
+// model call. The explicit retention audit uses this narrow list; identifiers
+// are never logged or rendered.
 func (s *Store) ListOpenAIProjectIDs(ctx context.Context) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT DISTINCT openai_project_id FROM parties
@@ -941,8 +975,8 @@ func (s *Store) ClaimInvitation(ctx context.Context, input NewClaim) (model.Part
 	}
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO members (id, party_id, display_name, extension, created_at)
-		VALUES (?, ?, ?, ?, ?)`, input.MemberID, partyID, input.DisplayName, input.Extension, unix(input.Now))
+		INSERT INTO members (id, party_id, display_name, extension, adult_extension, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)`, input.MemberID, partyID, input.DisplayName, input.Extension, boolInt(input.AdultExtension), unix(input.Now))
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return model.Party{}, model.Member{}, model.Device{}, ErrExtensionTaken
@@ -980,7 +1014,7 @@ func (s *Store) ClaimInvitation(ctx context.Context, input NewClaim) (model.Part
 		return model.Party{}, model.Member{}, model.Device{}, fmt.Errorf("commit invitation claim: %w", err)
 	}
 
-	member := model.Member{ID: input.MemberID, PartyID: partyID, DisplayName: input.DisplayName, Extension: input.Extension, CreatedAt: input.Now.UTC()}
+	member := model.Member{ID: input.MemberID, PartyID: partyID, DisplayName: input.DisplayName, Extension: input.Extension, AdultExtension: input.AdultExtension, CreatedAt: input.Now.UTC()}
 	device := model.Device{ID: input.DeviceID, MemberID: input.MemberID, Label: input.DeviceLabel, SIPUsername: input.SIPUsername, SIPSecretCiphertext: input.SIPSecretCiphertext, CreatedAt: input.Now.UTC()}
 	return party, member, device, nil
 }
@@ -1010,7 +1044,7 @@ func (s *Store) SuggestedExtension(ctx context.Context, partyID string) (string,
 
 func (s *Store) ListMembers(ctx context.Context, partyID string) ([]model.Member, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.id, m.party_id, m.display_name, m.extension, m.created_at,
+		SELECT m.id, m.party_id, m.display_name, m.extension, m.adult_extension, m.created_at,
 			d.id, d.label, d.sip_username, d.created_at, d.revoked_at,
 			r.echo_tested_at, r.outgoing_call_tested_at, r.incoming_call_tested_at
 		FROM members m
@@ -1027,16 +1061,18 @@ func (s *Store) ListMembers(ctx context.Context, partyID string) ([]model.Member
 	byID := make(map[string]int)
 	for rows.Next() {
 		var member model.Member
+		var adultExtension int
 		var memberCreated int64
 		var deviceID, deviceLabel, sipUsername sql.NullString
 		var deviceCreated, revoked, echoTested, outgoingTested, incomingTested sql.NullInt64
-		if err := rows.Scan(&member.ID, &member.PartyID, &member.DisplayName, &member.Extension, &memberCreated,
+		if err := rows.Scan(&member.ID, &member.PartyID, &member.DisplayName, &member.Extension, &adultExtension, &memberCreated,
 			&deviceID, &deviceLabel, &sipUsername, &deviceCreated, &revoked,
 			&echoTested, &outgoingTested, &incomingTested); err != nil {
 			return nil, fmt.Errorf("scan member: %w", err)
 		}
 		index, ok := byID[member.ID]
 		if !ok {
+			member.AdultExtension = adultExtension == 1
 			member.CreatedAt = fromUnix(memberCreated)
 			members = append(members, member)
 			index = len(members) - 1
@@ -1715,6 +1751,7 @@ CREATE TABLE IF NOT EXISTS members (
     party_id TEXT NOT NULL REFERENCES parties(id) ON DELETE CASCADE,
     display_name TEXT NOT NULL,
     extension TEXT NOT NULL,
+    adult_extension INTEGER NOT NULL DEFAULT 0 CHECK(adult_extension IN (0, 1)),
     created_at INTEGER NOT NULL,
     UNIQUE(party_id, extension)
 );

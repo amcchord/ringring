@@ -195,7 +195,7 @@ assert_successful_install() {
   grep -qx 'HOST_SIGNUP_CODE=rainbow-42' "$config/app.env" || fail 'signup code was not rendered'
   grep -qx 'OPENAI_ADMIN_KEY=sk-admin-abcdefghijklmnop' "$config/app.env" || fail 'OpenAI key was not rendered'
   grep -qx 'OPENAI_PARTY_SPEND_LIMIT_CENTS=2500' "$config/app.env" || fail 'spend ceiling was not rendered'
-  grep -qx 'AI_CHILD_SAFETY_APPROVED=false' "$config/app.env" || fail 'child-safety gate did not default closed'
+  grep -qx 'AI_ADULT_ONLY_ENABLED=false' "$config/app.env" || fail 'adult-only AI gate did not default closed'
   grep -qx 'RINGRING_DOMAIN=phone.example.test' "$checkout/.env" || fail 'Compose domain was not rendered'
   app_ami=$(sed -n 's/^ASTERISK_AMI_SECRET=//p' "$config/app.env")
   asterisk_ami=$(sed -n 's/^ASTERISK_AMI_SECRET=//p' "$config/asterisk.env")
@@ -226,19 +226,15 @@ assert_successful_install() {
   retention_output=$(run_ctl openai-retention 2>&1) || fail "retention check rejected the installed fixture: $retention_output"
   printf '%s\n' "$retention_output" | grep -q '"organization_type":"zero_data_retention"' || fail 'retention check omitted the verified organization type'
   printf '%s\n' "$retention_output" | grep -q '"projects_verified":1' || fail 'retention check omitted the verified project count'
-  sed 's/^AI_CHILD_SAFETY_APPROVED=false$/AI_CHILD_SAFETY_APPROVED=true/' "$config/app.env" >"$fixture/app.approved.env"
+  sed 's/^AI_ADULT_ONLY_ENABLED=false$/AI_ADULT_ONLY_ENABLED=true/' "$config/app.env" >"$fixture/app.approved.env"
   chmod 0600 "$fixture/app.approved.env"
   mv "$fixture/app.approved.env" "$config/app.env"
   : >"$log"
   doctor_output=$(run_ctl doctor 2>&1) || fail "doctor rejected the verified approval fixture: $doctor_output"
-  grep -q '^docker compose exec -T app ringring verify-openai-retention$' "$log" || fail 'doctor did not recheck retention for the open gate'
-  if RINGRING_TEST_FAIL_RETENTION=1 run_ctl doctor >/dev/null 2>&1; then
-    fail 'doctor accepted an open gate after retention verification failed'
-  fi
   if RINGRING_TEST_FAIL_RETENTION=1 run_ctl openai-retention >/dev/null 2>&1; then
     fail 'standalone retention check ignored provider verification failure'
   fi
-  sed 's/^AI_CHILD_SAFETY_APPROVED=true$/AI_CHILD_SAFETY_APPROVED=false/' "$config/app.env" >"$fixture/app.closed.env"
+  sed 's/^AI_ADULT_ONLY_ENABLED=true$/AI_ADULT_ONLY_ENABLED=false/' "$config/app.env" >"$fixture/app.closed.env"
   chmod 0600 "$fixture/app.closed.env"
   mv "$fixture/app.closed.env" "$config/app.env"
   sed 's/^METRICS_ADDR=.*/METRICS_ADDR=0.0.0.0:9090/' "$config/app.env" >"$fixture/app.invalid-metrics.env"

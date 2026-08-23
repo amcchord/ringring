@@ -60,7 +60,7 @@
       {{$keyReady := eq .Party.OpenAIStatus "ready"}}
       {{$spendPaused := or (eq .Party.OpenAISpendLimitStatus "updating") (eq .Party.OpenAISpendLimitStatus "update-error")}}
       {{$voiceReady := and $keyReady (not $spendPaused)}}
-      {{$conversationReady := and $voiceReady .AIChildSafetyApproved}}
+	  {{$conversationReady := and $voiceReady .AIAdultOnlyEnabled}}
       <form class="service-form" method="post" action="/parties/{{.Party.ID}}/services">
         <input type="hidden" name="csrf" value="{{.CSRF}}">
         <label class="service-toggle">
@@ -89,16 +89,9 @@
         </div>
         <div class="service-choice ai-service-choice">
           <label class="service-toggle">
-            <input type="checkbox" name="ai_enabled" value="1" {{if and .Services.AIEnabled .AIChildSafetyApproved}}checked{{end}} {{if not $conversationReady}}disabled{{end}}>
-            <span><strong><span class="service-number">*14</span> RingRing AI</strong><small>{{if $conversationReady}}Talk with a clearly disclosed, family-friendly AI voice for up to three minutes.{{else if not .AIChildSafetyApproved}}Locked until the server operator completes the child-safety review and confirms Zero Data Retention.{{else}}Available when this party's AI status is ready.{{end}}</small></span>
-          </label>
-          <p class="ai-safety-note">RingRing does not save call audio or transcripts. An adult must supervise younger callers. OpenAI requires Zero Data Retention before personal data from a child under 13 is processed. <a href="https://developers.openai.com/api/docs/guides/safety-checks/under-18-api-guidance" rel="external">Read the official under-18 guidance</a>.</p>
-          {{if and $conversationReady (not .Services.AIEnabled)}}
-          <label class="safety-confirmation">
-            <input type="checkbox" name="ai_safety_confirmed" value="1">
-            <span>I am the adult host. I will explain that this is AI, supervise younger callers, and follow the under-13 data rule above.</span>
-          </label>
-          {{end}}
+			<input type="checkbox" name="ai_enabled" value="1" {{if and .Services.AIEnabled .AIAdultOnlyEnabled}}checked{{end}} {{if not $conversationReady}}disabled{{end}}>
+			<span><strong><span class="service-number">*14</span> RingRing AI · adults only</strong><small>{{if $conversationReady}}Only adult extensions can call. Audio goes to OpenAI; provider retention may apply. RingRing stores no call audio or transcript.{{else if not .AIAdultOnlyEnabled}}The server operator has not opened the adults-only preview.{{else}}Available when this party's AI status is ready.{{end}}</small></span>
+		  </label>
         </div>
         <button class="button button-primary" type="submit">Save fun numbers</button>
       </form>
@@ -273,8 +266,8 @@
           {{end}}
           </div>
         </div>
-        <footer class="member-card-footer">
-          <details class="device-actions member-add-device">
+		<footer class="member-card-footer">
+		  <details class="device-actions member-add-device">
             <summary aria-label="Add another phone for {{$member.DisplayName}} on extension {{$member.Extension}}"><span aria-hidden="true">＋</span> Add another phone</summary>
             <div class="device-action-card add-device-card">
               <p>It will share extension <strong>{{$member.Extension}}</strong>. Every active phone gets its own password, and calls to this extension ring them together.</p>

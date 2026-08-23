@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -41,26 +42,26 @@ func TestPrepareAICallDisclosesAIAndIssuesOneUseTicket(t *testing.T) {
 				PartyID: "pty_ai", AIEnabled: true, UpdatedAt: now,
 			},
 		},
-		Cipher: cipher, Speech: speech, AudioDir: t.TempDir(), PlaybackDir: "/voice",
+		Cipher: cipher, Speech: speech, AIAdultAccess: fakeAIAdultAccess(true), AudioDir: t.TempDir(), PlaybackDir: "/voice",
 		Now: func() time.Time { return now }, AIMaxConcurrent: 1, Metrics: metrics,
-		AIChildSafetyApproved: true,
+		AIAdultOnlyEnabled: true,
 	}
 	callID := uuid.NewString()
-	path, canonicalID, err := server.prepareAICall(t.Context(), "pty_ai", callID, "101")
+	path, canonicalID, err := server.prepareAICall(t.Context(), "pty_ai", callID, "123456")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if path != "/voice/ai-disclosure-pty_ai" || canonicalID != callID {
+	if path != "/voice/ai-adult-disclosure-pty_ai" || canonicalID != callID {
 		t.Fatalf("unexpected AI authorization: path=%q call=%q", path, canonicalID)
 	}
 	if speech.key != "party-runtime-key" || speech.input != aiDisclosurePhrase || !strings.Contains(speech.input, "AI-generated voice") {
 		t.Fatalf("AI disclosure used unexpected key or phrase: key=%q phrase=%q", speech.key, speech.input)
 	}
-	if _, _, err := server.prepareAICall(t.Context(), "pty_ai", uuid.NewString(), "102"); err == nil {
+	if _, _, err := server.prepareAICall(t.Context(), "pty_ai", uuid.NewString(), "234567"); err == nil {
 		t.Fatal("concurrency reservation allowed a second AI call")
 	}
 	ticket, ok := server.claimAITicket(callID)
-	if !ok || ticket.PartyID != "pty_ai" || !strings.HasPrefix(ticket.SafetyID, "rr_") || strings.Contains(ticket.SafetyID, "101") {
+	if !ok || ticket.PartyID != "pty_ai" || !strings.HasPrefix(ticket.SafetyID, "rr_") || strings.Contains(ticket.SafetyID, "123456") {
 		t.Fatalf("unexpected privacy-preserving ticket: %#v ok=%v", ticket, ok)
 	}
 	if _, ok := server.claimAITicket(callID); ok {
@@ -79,18 +80,49 @@ func TestPrepareAICallDisclosesAIAndIssuesOneUseTicket(t *testing.T) {
 	}
 }
 
-func TestAIChildSafetyGateStopsAuthorizationAndRealtime(t *testing.T) {
+func TestPrepareAICallGivesFriendlyDenialToNonAdultExtension(t *testing.T) {
+	cipher, err := secure.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ciphertext, err := cipher.Encrypt("party-runtime-key", []byte("pty_ai"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	speech := &fakeSpeech{}
+	server := &Server{
+		Source: fakePartySource{
+			party:    model.Party{ID: "pty_ai", OpenAIStatus: "ready", OpenAIKeyCiphertext: ciphertext},
+			services: model.PartyServices{PartyID: "pty_ai", AIEnabled: true},
+		},
+		AIAdultAccess: fakeAIAdultAccess(false), Cipher: cipher, Speech: speech,
+		AudioDir: t.TempDir(), PlaybackDir: "/voice", AIAdultOnlyEnabled: true,
+	}
+	callID := uuid.NewString()
+	path, canonicalID, err := server.prepareAICall(t.Context(), "pty_ai", callID, "rrd_legacy-device")
+	if !errors.Is(err, errAIAdultAccess) {
+		t.Fatalf("non-adult extension error = %v", err)
+	}
+	if path != "/voice/ai-adult-only-pty_ai" || canonicalID != "" || speech.input != aiAdultOnlyPhrase {
+		t.Fatalf("unexpected friendly denial: path=%q call=%q phrase=%q", path, canonicalID, speech.input)
+	}
+	if _, ok := server.claimAITicket(callID); ok {
+		t.Fatal("non-adult extension received an AI bridge ticket")
+	}
+}
+
+func TestAIAdultOnlyGateStopsAuthorizationAndRealtime(t *testing.T) {
 	server := &Server{}
-	if _, _, err := server.prepareAICall(t.Context(), "pty_ai", uuid.NewString(), "101"); err == nil || !strings.Contains(err.Error(), "child-safety gate") {
+	if _, _, err := server.prepareAICall(t.Context(), "pty_ai", uuid.NewString(), "123456"); err == nil || !strings.Contains(err.Error(), "adult-only gate") {
 		t.Fatalf("closed gate allowed AI authorization: %v", err)
 	}
-	if _, _, _, err := server.partyAIKey(t.Context(), "pty_ai"); err == nil || !strings.Contains(err.Error(), "child-safety gate") {
+	if _, _, _, err := server.partyAIKey(t.Context(), "pty_ai"); err == nil || !strings.Contains(err.Error(), "adult-only gate") {
 		t.Fatalf("closed gate allowed party key access: %v", err)
 	}
 	appSide, phoneSide := net.Pipe()
 	defer appSide.Close()
 	defer phoneSide.Close()
-	if err := server.bridgeRealtime(t.Context(), appSide, "party-key", "rr_safe_test"); err == nil || !strings.Contains(err.Error(), "child-safety gate") {
+	if err := server.bridgeRealtime(t.Context(), appSide, "party-key", "rr_safe_test"); err == nil || !strings.Contains(err.Error(), "adult-only gate") {
 		t.Fatalf("closed gate allowed a Realtime bridge: %v", err)
 	}
 }
@@ -108,10 +140,10 @@ func TestSpendLimitReconciliationDoesNotUseCachedAIDisclosure(t *testing.T) {
 			},
 			services: model.PartyServices{PartyID: "pty_ai", AIEnabled: true},
 		},
-		Cipher: &fakeDecryptor{}, Speech: &fakeSpeech{}, AudioDir: temporary, PlaybackDir: "/voice",
-		AIChildSafetyApproved: true,
+		Cipher: &fakeDecryptor{}, Speech: &fakeSpeech{}, AIAdultAccess: fakeAIAdultAccess(true), AudioDir: temporary, PlaybackDir: "/voice",
+		AIAdultOnlyEnabled: true,
 	}
-	if _, _, err := server.prepareAICall(t.Context(), "pty_ai", uuid.NewString(), "101"); err == nil {
+	if _, _, err := server.prepareAICall(t.Context(), "pty_ai", uuid.NewString(), "123456"); err == nil {
 		t.Fatal("spend-limit reconciliation served a cached AI disclosure")
 	}
 }
@@ -189,7 +221,7 @@ func TestRealtimeBridgeTranscodesAudioAndUsesPrivacyControls(t *testing.T) {
 	defer websocketServer.Close()
 
 	appSide, asteriskSide := net.Pipe()
-	bridge := &Server{AIRealtimeURL: websocketServer.URL, AIModel: "gpt-realtime-2.1", AIChildSafetyApproved: true}
+	bridge := &Server{AIRealtimeURL: websocketServer.URL, AIModel: "gpt-realtime-2.1", AIAdultOnlyEnabled: true}
 	bridgeResult := make(chan error, 1)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
@@ -228,7 +260,7 @@ func TestRealtimeBridgeTranscodesAudioAndUsesPrivacyControls(t *testing.T) {
 	}
 	sessionJSON, _ := json.Marshal(observation.Session)
 	sessionText := string(sessionJSON)
-	for _, required := range []string{`"audio/pcmu"`, `"tracing":null`, `"tools":[]`, "Callers may be children", `"max_output_tokens":256`} {
+	for _, required := range []string{`"audio/pcmu"`, `"tracing":null`, `"tools":[]`, "adult extension for a caller age 18 or older", `"max_output_tokens":256`} {
 		if !strings.Contains(sessionText, required) {
 			t.Fatalf("Realtime privacy/safety setting %q missing from %s", required, sessionText)
 		}
