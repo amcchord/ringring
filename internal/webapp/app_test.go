@@ -3,6 +3,7 @@ package webapp
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -18,6 +19,7 @@ import (
 	"github.com/amcchord/ringring/internal/config"
 	"github.com/amcchord/ringring/internal/model"
 	"github.com/amcchord/ringring/internal/openaiadmin"
+	"github.com/amcchord/ringring/internal/provisioning"
 	"github.com/amcchord/ringring/internal/secure"
 	"github.com/amcchord/ringring/internal/sipcredentials"
 	"github.com/amcchord/ringring/internal/store"
@@ -330,6 +332,52 @@ func TestFirstCallLinesMatchCurrentlyDialableServices(t *testing.T) {
 	party.OpenAISpendLimitStatus = "update-error"
 	if got := numbers(availableFirstCallLines(party, services, true, true)); got != "*10,*15,*11,*13" {
 		t.Fatalf("spend-paused first-call lines = %q", got)
+	}
+}
+
+func TestPhoneCallDestinationsHideOwnNumberAndIncludeOnlyRoutableChoices(t *testing.T) {
+	revokedAt := time.Date(2026, 8, 22, 1, 0, 0, 0, time.UTC)
+	destinations := phoneCallDestinations("101", []model.Member{
+		{DisplayName: "Blue phone", Extension: "101", Devices: []model.Device{{ID: "dev_blue"}}},
+		{DisplayName: "Green phone", Extension: "102", Devices: []model.Device{{ID: "dev_green"}}},
+		{DisplayName: "Quiet phone", Extension: "103", Devices: []model.Device{{ID: "dev_quiet", RevokedAt: &revokedAt}}},
+	}, []firstCallLine{{Number: "*10", Title: "Echo test", Description: "Hear your own voice come back."}})
+
+	if len(destinations) != 2 {
+		t.Fatalf("iOS call destinations = %#v", destinations)
+	}
+	if got := destinations[0]; got.Kind != "person" || got.Label != "Green phone" || got.Dial != "102" || got.Detail != "" {
+		t.Fatalf("person destination = %#v", got)
+	}
+	if got := destinations[1]; got.Kind != "service" || got.Label != "Echo test" || got.Dial != "*10" || got.Detail == "" {
+		t.Fatalf("service destination = %#v", got)
+	}
+}
+
+func TestPhoneOpenAPIIsPublicEmbeddedDocumentation(t *testing.T) {
+	database, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	cipher, err := secure.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := New(config.Config{Environment: "development", BaseURL: "http://ringring.test"}, database, cipher, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(app)
+	defer server.Close()
+
+	response := get(t, server.Client(), server.URL+"/openapi.yaml")
+	body := readBody(t, response)
+	if response.StatusCode != http.StatusOK || !strings.HasPrefix(response.Header.Get("Content-Type"), "application/yaml") || response.Header.Get("Access-Control-Allow-Origin") != "*" || response.Header.Get("Cross-Origin-Resource-Policy") != "cross-origin" || !strings.Contains(response.Header.Get("Cache-Control"), "public") {
+		t.Fatalf("OpenAPI response was not safely public: status=%d headers=%v", response.StatusCode, response.Header)
+	}
+	if !strings.Contains(body, "openapi: 3.1.2") || !strings.Contains(body, "/api/v1/phone-provisioning/{token}:") || strings.Contains(body, "ringring_session") {
+		t.Fatal("served OpenAPI contract was missing, stale, or contained an application session field")
 	}
 }
 
@@ -743,7 +791,7 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 		"csrf": {joinCSRF}, "display_name": {"Blue phone"}, "extension": {"101"}, "device_label": {"ATA"}, "adult_extension": {"1"},
 	})
 	setupBody := readBody(t, setup)
-	if setup.StatusCode != http.StatusOK || !strings.Contains(setupBody, "You are extension 101") || !strings.Contains(setupBody, "sip.example.test") || !strings.Contains(setupBody, "Scan it with <em>Linphone.</em>") || !strings.Contains(setupBody, "data:image/png;base64,") || !strings.Contains(setupBody, "href=\"sip-linphone:?linphone-fetch-config=http%3A%2F%2F") || strings.Contains(setupBody, "#ZgotmplZ") || !strings.Contains(setupBody, "Use Linphone’s scanner—not the regular Camera app") || !strings.Contains(setupBody, "TLS · port 5061") || !strings.Contains(setupBody, "UDP · port 5060") || !strings.Contains(setupBody, "TLS protects phone sign-in and call setup") || !strings.Contains(setupBody, "voice audio is still server-relayed RTP, not encrypted media") || !strings.Contains(setupBody, "Test both directions") || !strings.Contains(setupBody, "dial <strong>*10</strong>") || !strings.Contains(setupBody, "Pick a different extension by phone") || !strings.Contains(setupBody, "Dial <strong>*15</strong>") || !strings.Contains(setupBody, "press <strong>1</strong> to save") || !strings.Contains(setupBody, `data-copy-setup`) || !strings.Contains(setupBody, `data-copy-target="setup-password"`) || !strings.Contains(setupBody, "This copies the password too") || !strings.Contains(setupBody, "SIP user, user ID, authentication ID") || !strings.Contains(setupBody, "Do not forward router ports") || !strings.Contains(setupBody, "Digits only") || !strings.Contains(setupBody, "Copy uses the exact unspaced value") {
+	if setup.StatusCode != http.StatusOK || !strings.Contains(setupBody, "You are extension 101") || !strings.Contains(setupBody, "sip.example.test") || !strings.Contains(setupBody, "Scan it with the <em>RingRing app.</em>") || !strings.Contains(setupBody, "Scan it with <em>Linphone.</em>") || !strings.Contains(setupBody, "data:image/png;base64,") || !strings.Contains(setupBody, `href="ringring://join?provision=`) || !strings.Contains(setupBody, `id="ios-provision-url"`) || !strings.Contains(setupBody, `id="phone-provision-url"`) || !strings.Contains(setupBody, `/api/v1/phone-provisioning/`) || !strings.Contains(setupBody, `href="/openapi.yaml"`) || !strings.Contains(setupBody, "Use only one setup URL") || !strings.Contains(setupBody, "href=\"sip-linphone:?linphone-fetch-config=http%3A%2F%2F") || strings.Contains(setupBody, "#ZgotmplZ") || !strings.Contains(setupBody, "Use the scanner inside RingRing") || !strings.Contains(setupBody, "Use Linphone’s scanner—not the regular Camera app") || !strings.Contains(setupBody, "TLS · port 5061") || !strings.Contains(setupBody, "UDP · port 5060") || !strings.Contains(setupBody, "TLS protects phone sign-in and call setup") || !strings.Contains(setupBody, "voice audio is still server-relayed RTP, not encrypted media") || !strings.Contains(setupBody, "Test both directions") || !strings.Contains(setupBody, "dial <strong>*10</strong>") || !strings.Contains(setupBody, "Pick a different extension by phone") || !strings.Contains(setupBody, "Dial <strong>*15</strong>") || !strings.Contains(setupBody, "press <strong>1</strong> to save") || !strings.Contains(setupBody, `data-copy-setup`) || !strings.Contains(setupBody, `data-copy-target="setup-password"`) || !strings.Contains(setupBody, "This copies the password too") || !strings.Contains(setupBody, "SIP user, user ID, authentication ID") || !strings.Contains(setupBody, "Do not forward router ports") || !strings.Contains(setupBody, "Digits only") || !strings.Contains(setupBody, "Copy uses the exact unspaced value") {
 		t.Fatalf("setup response was not successful: status=%d", setup.StatusCode)
 	}
 	if !strings.Contains(setupBody, ">*14<") {
@@ -957,6 +1005,12 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 		t.Fatal("second phone reused the first phone's SIP username")
 	}
 	secondProvisionURL := firstMatch(t, addedPhoneBody, `value="(http://[^"]+/provision/linphone/[A-Za-z0-9_-]{43})"`)
+	secondIOSProvisionURL := firstMatch(t, addedPhoneBody, `value="(http://[^"]+/provision/ios/[A-Za-z0-9_-]{43})"`)
+	compatibilityProvision := get(t, client, secondIOSProvisionURL)
+	compatibilityBody := readBody(t, compatibilityProvision)
+	if compatibilityProvision.StatusCode != http.StatusOK || !strings.HasPrefix(compatibilityProvision.Header.Get("Content-Type"), "application/json") || !strings.Contains(compatibilityBody, `"version":1`) || !strings.Contains(compatibilityBody, `"extension":"101"`) {
+		t.Fatalf("released iOS compatibility route failed: status=%d", compatibilityProvision.StatusCode)
+	}
 	membersAfterAdd, err := database.ListMembers(t.Context(), partyID)
 	if err != nil || len(membersAfterAdd) != 1 || len(membersAfterAdd[0].Devices) != 2 {
 		t.Fatalf("second phone was not attached to one member: %#v error=%v", membersAfterAdd, err)
@@ -1066,8 +1120,55 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 		t.Fatal("rotation did not replace the SIP username")
 	}
 	rotatedProvisionURL := firstMatch(t, rotatedBody, `value="(http://[^"]+/provision/linphone/[A-Za-z0-9_-]{43})"`)
+	rotatedIOSProvisionURL := firstMatch(t, rotatedBody, `value="(http://[^"]+/provision/ios/[A-Za-z0-9_-]{43})"`)
+	rotatedPhoneProvisionURL := firstMatch(t, rotatedBody, `value="(http://[^"]+/api/v1/phone-provisioning/[A-Za-z0-9_-]{43})"`)
 	if rotatedProvisionURL == provisionURL {
 		t.Fatal("rotation reused the prior provisioning link")
+	}
+	headPhoneRequest, err := http.NewRequest(http.MethodHead, rotatedPhoneProvisionURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	headPhoneProvision, err := client.Do(headPhoneRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = headPhoneProvision.Body.Close()
+	if headPhoneProvision.StatusCode != http.StatusMethodNotAllowed || headPhoneProvision.Header.Get("Allow") != http.MethodGet {
+		t.Fatalf("HEAD phone provisioning check consumed or accepted the link: status=%d", headPhoneProvision.StatusCode)
+	}
+	phoneProvisioned := get(t, client, rotatedPhoneProvisionURL)
+	phoneProvisionedBody := readBody(t, phoneProvisioned)
+	if phoneProvisioned.StatusCode != http.StatusOK || !strings.HasPrefix(phoneProvisioned.Header.Get("Content-Type"), "application/json") || phoneProvisioned.Header.Get("Cache-Control") != "no-store, max-age=0" || phoneProvisioned.Header.Get("Referrer-Policy") != "no-referrer" || phoneProvisioned.Header.Get("Cross-Origin-Resource-Policy") != "same-origin" || phoneProvisioned.Header.Get("Access-Control-Allow-Origin") != "" || !strings.Contains(phoneProvisioned.Header.Get("X-Robots-Tag"), "noindex") {
+		t.Fatalf("phone API provisioning headers/status were unsafe: status=%d headers=%v", phoneProvisioned.StatusCode, phoneProvisioned.Header)
+	}
+	var phoneConfig provisioning.PhoneProvisioningDocument
+	if err := json.Unmarshal([]byte(phoneProvisionedBody), &phoneConfig); err != nil {
+		t.Fatal(err)
+	}
+	if phoneConfig.Version != provisioning.PhoneProvisioningVersion || phoneConfig.SIP.Server != "sip.example.test" || phoneConfig.SIP.Port != 5061 || phoneConfig.SIP.Transport != "tls" || phoneConfig.SIP.Username != freshUsername || phoneConfig.SIP.Extension != "101" || phoneConfig.SIP.Password == "" {
+		t.Fatalf("unexpected phone provisioning document: %#v", phoneConfig)
+	}
+	if len(phoneConfig.Destinations) != 6 || phoneConfig.Destinations[0].Kind != "service" || phoneConfig.Destinations[0].Label != "Echo test" || phoneConfig.Destinations[0].Dial != "*10" {
+		t.Fatalf("unexpected phone call menu: %#v", phoneConfig.Destinations)
+	}
+	for _, privateValue := range []string{"Blue phone", "Cousins Club", "ATA", "host@example.test", "proj_test"} {
+		if strings.Contains(phoneProvisionedBody, privateValue) {
+			t.Fatalf("phone provisioning exposed unrelated private data: %q", privateValue)
+		}
+	}
+	if reusedIOSProvision := get(t, client, rotatedIOSProvisionURL); reusedIOSProvision.StatusCode != http.StatusGone {
+		t.Fatalf("iOS compatibility route did not share one-time consumption: status=%d", reusedIOSProvision.StatusCode)
+	} else {
+		_ = readBody(t, reusedIOSProvision)
+	}
+	if reusedPhoneProvision := get(t, client, rotatedPhoneProvisionURL); reusedPhoneProvision.StatusCode != http.StatusGone || !strings.HasPrefix(reusedPhoneProvision.Header.Get("Content-Type"), "application/problem+json") {
+		t.Fatalf("phone API provisioning link was reusable: status=%d content-type=%q", reusedPhoneProvision.StatusCode, reusedPhoneProvision.Header.Get("Content-Type"))
+	} else {
+		var problem apiProblem
+		if err := json.Unmarshal([]byte(readBody(t, reusedPhoneProvision)), &problem); err != nil || problem.Status != http.StatusGone || problem.Type != "about:blank" || problem.Detail == "" {
+			t.Fatalf("phone API did not return a bounded problem document: %#v error=%v", problem, err)
+		}
 	}
 	if again := get(t, client, rotated.Request.URL.String()); again.StatusCode != http.StatusGone {
 		t.Fatalf("setup reveal could be read twice: status=%d", again.StatusCode)
@@ -1228,6 +1329,21 @@ func TestSecretPathsAreMaskedAndProvisioningIsRateLimited(t *testing.T) {
 	if got := safeRoute(provisioning); got != "/provision/linphone/{token}" || requestSurface(provisioning) != "provisioning" {
 		t.Fatalf("safe provisioning route = %q surface=%q", got, requestSurface(provisioning))
 	}
+	iosProvisioning := httptest.NewRequest(http.MethodGet, "/provision/ios/provision-secret", nil)
+	iosProvisioning.Pattern = "GET /provision/ios/{token}"
+	if got := safeRoute(iosProvisioning); got != "/provision/ios/{token}" || requestSurface(iosProvisioning) != "provisioning" {
+		t.Fatalf("safe iOS provisioning route = %q surface=%q", got, requestSurface(iosProvisioning))
+	}
+	phoneProvisioning := httptest.NewRequest(http.MethodGet, "/api/v1/phone-provisioning/provision-secret", nil)
+	phoneProvisioning.Pattern = "GET /api/v1/phone-provisioning/{token}"
+	if got := safeRoute(phoneProvisioning); got != "/api/v1/phone-provisioning/{token}" || requestSurface(phoneProvisioning) != "provisioning" {
+		t.Fatalf("safe phone API route = %q surface=%q", got, requestSurface(phoneProvisioning))
+	}
+	openAPI := httptest.NewRequest(http.MethodGet, "/openapi.yaml", nil)
+	openAPI.Pattern = "GET /openapi.yaml"
+	if got := safeRoute(openAPI); got != "/openapi.yaml" || requestSurface(openAPI) != "documentation" {
+		t.Fatalf("safe OpenAPI route = %q surface=%q", got, requestSurface(openAPI))
+	}
 	unmatched := httptest.NewRequest(http.MethodGet, "/private-value", nil)
 	if got := safeRoute(unmatched); got != "unmatched" || requestSurface(unmatched) != "other" {
 		t.Fatalf("unmatched route = %q surface=%q", got, requestSurface(unmatched))
@@ -1236,6 +1352,11 @@ func TestSecretPathsAreMaskedAndProvisioningIsRateLimited(t *testing.T) {
 	category, limit, window := rateCategory(req)
 	if category != "provision" || limit != 20 || window != 5*time.Minute {
 		t.Fatalf("provisioning rate category = %q %d %s", category, limit, window)
+	}
+	phoneRequest := httptest.NewRequest(http.MethodGet, "/api/v1/phone-provisioning/provision-secret", nil)
+	category, limit, window = rateCategory(phoneRequest)
+	if category != "provision" || limit != 20 || window != 5*time.Minute {
+		t.Fatalf("phone API rate category = %q %d %s", category, limit, window)
 	}
 }
 

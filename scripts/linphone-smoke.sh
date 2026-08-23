@@ -16,9 +16,10 @@ for container in $containers; do
   fi
 done
 
-work_directory=$(mktemp -d /tmp/ringring-linphone-smoke.XXXXXX)
+temporary_root=${RINGRING_SMOKE_TMP_ROOT:-/tmp}
+work_directory=$(mktemp -d "$temporary_root/ringring-linphone-smoke.XXXXXX")
 case "$work_directory" in
-  /tmp/ringring-linphone-smoke.*) ;;
+  "$temporary_root"/ringring-linphone-smoke.*) ;;
   *) echo "Unexpected temporary directory: $work_directory" >&2; exit 1 ;;
 esac
 

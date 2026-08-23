@@ -41,7 +41,8 @@ func TestSharedAccessibilityContract(t *testing.T) {
 		`.device-guide-jump { min-height: 70px;`,
 		`.device-guide-fallback summary { min-height: 52px;`,
 		`.device-guide-source a { min-height: 44px;`,
-		`.linphone-card, .first-call-grid { grid-template-columns: 1fr; }`,
+		`.api-doc-link { min-height: 44px;`,
+		`.linphone-card, .ringring-app-card, .first-call-grid { grid-template-columns: 1fr; }`,
 		`.kicker.light { color: var(--white); }`,
 	} {
 		if !strings.Contains(css, want) {
@@ -129,6 +130,9 @@ func TestFormInstructionsAreVisibleAndAssociated(t *testing.T) {
 				`<dl class="setup-card">`,
 				`<dt>Password{{if .SimpleSIPCredentials}}<span class="credential-format">12 digits · no spaces</span>{{end}}</dt>`,
 				`aria-describedby="linphone-provision-help"`,
+				`aria-describedby="phone-provision-help"`,
+				`aria-label="Copy phone provisioning API URL"`,
+				`class="api-doc-link" href="/openapi.yaml"`,
 				`id="setup-copy-status" class="visually-hidden" role="status" aria-live="polite"`,
 				`aria-label="Copy password"`,
 				`aria-controls="setup-password setup-copy-status"`,

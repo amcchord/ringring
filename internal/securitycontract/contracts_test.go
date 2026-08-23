@@ -395,6 +395,60 @@ func TestInvitationQRCodeStaysInsideTheOneTimeHostReveal(t *testing.T) {
 	}
 }
 
+func TestPhoneProvisioningAPIKeepsTheOneTimePartyBoundary(t *testing.T) {
+	required := map[string][]string{
+		"internal/webapp/app.go": {
+			`GET /openapi.yaml`, `GET /api/v1/phone-provisioning/{token}`, `GET /provision/ios/{token}`,
+			"phoneProvisioningDocument", "ConsumeProvisioningToken", "device.PartyID", "device.MemberID",
+			`w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")`, `Type: "about:blank"`,
+		},
+		"internal/webapp/ratelimit.go": {
+			`strings.HasPrefix(r.URL.Path, "/api/v1/phone-provisioning/")`, `return "provision", 20, 5 * time.Minute`,
+		},
+		"internal/provisioning/phone.go": {
+			"PhoneProvisioningVersion = 1", "len(destinations) > 128", "seenDialTargets",
+			"validatePhoneDestination", "serviceExtensionPattern", "PhoneOpenAPI",
+		},
+		"internal/provisioning/phone-provisioning.openapi.yaml": {
+			"openapi: 3.1.2", "/api/v1/phone-provisioning/{token}:", "application/problem+json:",
+			"no-store, max-age=0", "maxItems: 128", "It never provides a PSTN route",
+		},
+		"web/templates/setup.html": {
+			`id="phone-provision-url"`, "Use only one setup URL", `href="/openapi.yaml"`,
+			"Never test or preview a real URL in a browser",
+		},
+		"docs/PHONE_API.md": {
+			"disable redirects", "cap the body at 256 KiB", "device-protected secret storage",
+			"do not add PSTN, emergency, trunk", "setup-time snapshot, not live presence",
+		},
+	}
+	for filename, markers := range required {
+		contents := readRepositoryFile(t, filename)
+		for _, marker := range markers {
+			if !strings.Contains(contents, marker) {
+				t.Errorf("%s is missing phone API boundary %q", filename, marker)
+			}
+		}
+	}
+
+	app := readRepositoryFile(t, "internal/webapp/app.go")
+	credentialStart := strings.Index(app, "func (a *App) phoneProvisionAPI")
+	credentialEnd := strings.Index(app, "func (a *App) iosProvisionCompatibility")
+	if credentialStart < 0 || credentialEnd <= credentialStart {
+		t.Fatal("could not isolate the canonical phone provisioning handler")
+	}
+	if strings.Contains(app[credentialStart:credentialEnd], "Access-Control-Allow-Origin") {
+		t.Fatal("credential responses must not opt into browser CORS")
+	}
+
+	spec := readRepositoryFile(t, "internal/provisioning/phone-provisioning.openapi.yaml")
+	for _, forbidden := range []string{"email:", "party_id", "member_id", "device_id", "openai", "presence:"} {
+		if strings.Contains(strings.ToLower(spec), forbidden) {
+			t.Errorf("OpenAPI contract exposes forbidden private field marker %q", forbidden)
+		}
+	}
+}
+
 func TestHostCanCancelOnlyActiveInvitationsInsideOwnedParty(t *testing.T) {
 	required := map[string][]string{
 		"internal/store/store.go": {

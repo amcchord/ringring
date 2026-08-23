@@ -110,6 +110,8 @@ type NewProvisioningToken struct {
 
 type ProvisioningDevice struct {
 	DeviceID            string
+	PartyID             string
+	MemberID            string
 	SIPUsername         string
 	SIPSecretCiphertext string
 	Extension           string
@@ -1441,13 +1443,13 @@ func (s *Store) ConsumeProvisioningToken(ctx context.Context, tokenHash []byte, 
 	var expires int64
 	var used, revoked sql.NullInt64
 	err = tx.QueryRowContext(ctx, `
-		SELECT d.id, d.sip_username, d.sip_secret_ciphertext, m.extension,
+		SELECT d.id, m.party_id, m.id, d.sip_username, d.sip_secret_ciphertext, m.extension,
 			t.expires_at, t.used_at, d.revoked_at
 		FROM device_provisioning_tokens t
 		JOIN devices d ON d.id = t.device_id
 		JOIN members m ON m.id = d.member_id
 		WHERE t.token_hash = ?`, tokenHash).Scan(
-		&provision.DeviceID, &provision.SIPUsername, &provision.SIPSecretCiphertext,
+		&provision.DeviceID, &provision.PartyID, &provision.MemberID, &provision.SIPUsername, &provision.SIPSecretCiphertext,
 		&provision.Extension, &expires, &used, &revoked,
 	)
 	if errors.Is(err, sql.ErrNoRows) {

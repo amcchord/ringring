@@ -18,10 +18,52 @@
   <p>Keep this screen private and finish your phone setup now. The password is only shown once.</p>
   {{end}}
   <p id="setup-copy-status" class="visually-hidden" role="status" aria-live="polite"></p>
+  {{if .IOSQR}}
+  <section class="ringring-app-card" id="ringring-app-setup" aria-labelledby="ringring-app-title">
+    <div class="linphone-copy">
+      <span class="kicker">Made for RingRing</span>
+      <h2 id="ringring-app-title">Scan it with the <em>RingRing app.</em></h2>
+      <ol class="linphone-steps">
+        <li>Install or open <strong>RingRing</strong> on the iPhone.</li>
+        <li>Tap <strong>Scan my setup code</strong> and allow camera access.</li>
+        <li>Scan this code. The app securely saves the phone settings and connects.</li>
+      </ol>
+      <p class="scanner-warning"><strong>Use the scanner inside RingRing.</strong> The code carries a private one-time setup link. It expires after 30 minutes and stops working after the app fetches it.</p>
+      <div class="linphone-actions">
+        <a class="button button-primary" href="{{.IOSOpenURL}}">Open in RingRing <span aria-hidden="true">→</span></a>
+        <span>Use this button when this page is already open on the iPhone.</span>
+      </div>
+      <details class="provision-details">
+        <summary>Paste the setup link in the app instead</summary>
+        <label for="ios-provision-url">RingRing app setup URL</label>
+        <div class="provision-copy-field">
+          <input id="ios-provision-url" value="{{.IOSProvisionURL}}" readonly autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="ios-provision-help">
+          <button class="copy-button" type="button" data-copy-target="ios-provision-url" data-copy-label="RingRing app setup URL" aria-label="Copy RingRing app setup URL" aria-controls="ios-provision-url setup-copy-status" hidden>Copy</button>
+        </div>
+        <p id="ios-provision-help">In RingRing, tap <strong>Paste a setup link</strong>. Do not open the URL in a browser, because fetching it consumes the one-time setup.</p>
+      </details>
+      <details class="provision-details phone-api-details">
+        <summary>Building or using another phone app?</summary>
+        <p>RingRing publishes a vendor-neutral, versioned phone setup API for trusted native apps. It returns this phone’s SIP-over-TLS account and private call-button snapshot—never a public phone route or an ongoing directory credential.</p>
+        <label for="phone-provision-url">Phone provisioning API URL</label>
+        <div class="provision-copy-field">
+          <input id="phone-provision-url" value="{{.PhoneProvisionURL}}" readonly autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="phone-provision-help">
+          <button class="copy-button" type="button" data-copy-target="phone-provision-url" data-copy-label="Phone provisioning API URL" aria-label="Copy phone provisioning API URL" aria-controls="phone-provision-url setup-copy-status" hidden>Copy</button>
+        </div>
+        <p id="phone-provision-help"><strong>Use only one setup URL.</strong> This API URL and the RingRing app URL contain the same one-time token; the first successful fetch disables both. Never test or preview a real URL in a browser.</p>
+        <a class="api-doc-link" href="/openapi.yaml">Read the OpenAPI contract <span aria-hidden="true">→</span></a>
+      </details>
+    </div>
+    <div class="qr-frame ringring-qr-frame">
+      <img src="{{.IOSQR}}" alt="One-time RingRing app setup QR code for extension {{.Claim.Member.Extension}}">
+      <strong>Extension {{.Claim.Member.Extension}}</strong>
+    </div>
+  </section>
+  {{end}}
   {{if .LinphoneQR}}
   <section class="linphone-card" id="linphone-setup" aria-labelledby="linphone-title">
     <div class="linphone-copy">
-      <span class="kicker">Fastest softphone setup</span>
+      <span class="kicker">Another softphone option</span>
       <h2 id="linphone-title">Scan it with <em>Linphone.</em></h2>
       <ol class="linphone-steps">
         <li>Install or open <a href="https://www.linphone.org/en/download/">Linphone</a>.</li>

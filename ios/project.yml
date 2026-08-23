@@ -1,0 +1,82 @@
+name: RingRing
+
+options:
+  bundleIdPrefix: com.mcchord
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "26.0"
+  groupSortPosition: top
+  generateEmptyDirectories: true
+
+packages:
+  LinphoneSDK:
+    url: https://github.com/BelledonneCommunications/linphone-sdk-swift-ios.git
+    exactVersion: 5.5.15
+
+settings:
+  base:
+    DEVELOPMENT_TEAM: 7PTN7E8EDS
+    CODE_SIGN_STYLE: Automatic
+    CURRENT_PROJECT_VERSION: 3
+    MARKETING_VERSION: 0.1.0
+    SWIFT_VERSION: 5.0
+    ENABLE_USER_SCRIPT_SANDBOXING: true
+    ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: true
+  configs:
+    Debug:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+    Release:
+      SWIFT_COMPILATION_MODE: wholemodule
+
+targets:
+  RingRing:
+    type: application
+    platform: iOS
+    sources:
+      - path: RingRing
+        excludes:
+          - Info.plist
+    dependencies:
+      - package: LinphoneSDK
+        product: linphonesw
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mcchord.ringring
+        PRODUCT_NAME: RingRing
+        TARGETED_DEVICE_FAMILY: "1"
+        SUPPORTS_MACCATALYST: false
+        INFOPLIST_FILE: RingRing/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @loader_path/Frameworks"
+        OTHER_LDFLAGS: "$(inherited) -ObjC"
+
+  RingRingTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - RingRingTests
+    dependencies:
+      - target: RingRing
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mcchord.ringring.tests
+        GENERATE_INFOPLIST_FILE: true
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/RingRing.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/RingRing"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
+schemes:
+  RingRing:
+    build:
+      targets:
+        RingRing: all
+        RingRingTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: true
+      targets:
+        - RingRingTests
+    archive:
+      config: Release

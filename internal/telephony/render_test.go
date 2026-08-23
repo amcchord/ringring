@@ -240,11 +240,15 @@ func TestRenderAnswersInvalidAndUnavailableCallsWithFriendlyPrompts(t *testing.T
 		"exten => _*X!,1,Answer()\n same => n,Wait(0.5)\n same => n,Set(RINGRING_OPERATOR_READY=0)\n same => n,AGI(agi://app:4573/operator,pty_two,misdial)",
 		"same => n,GotoIf($[\"${AGISTATUS}\"=\"SUCCESS\"]?rr-agi-done:rr-agi-unavailable)",
 		"same => n,AGI(agi://app:4573/operator,pty_one,service-unavailable)",
+		"same => n(rr-operator-fallback),NoOp(OpenAI operator unavailable - using bundled prompts)",
 		"same => n,Playback(cannot-complete-as-dialed)",
 	} {
 		if !strings.Contains(dialplan, required) {
 			t.Fatalf("friendly failure route missing %q:\n%s", required, dialplan)
 		}
+	}
+	if strings.Contains(dialplan, "NoOp(OpenAI operator unavailable;") {
+		t.Fatal("an Asterisk comment delimiter truncated the operator fallback application")
 	}
 	if strings.Count(dialplan, "exten => _X!,1,Answer()") != 2 || strings.Count(dialplan, "exten => _*X!,1,Answer()") != 2 {
 		t.Fatalf("each party must own its numeric and star-code fallbacks:\n%s", dialplan)

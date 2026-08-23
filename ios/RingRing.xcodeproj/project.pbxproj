@@ -1,0 +1,486 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		014B6FFB67A65FCBAEECFCF1 /* CredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5571D5896C258F8379DA8483 /* CredentialStore.swift */; };
+		0C8B2310DC327D9A6BE50281 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4FA845F8618DA40AD2D8FFF /* Theme.swift */; };
+		2053721B6D0AA126D676DC77 /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B19867B1C613ACBC1E6C8DD /* QRScannerView.swift */; };
+		22C0D3A1B72DE156A9528455 /* linphonesw in Frameworks */ = {isa = PBXBuildFile; productRef = ED97F22315A8D59D4DB15781 /* linphonesw */; };
+		38275C8F90AB49342E64135D /* RingRingApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27225ABF4FE03C8504B19AC /* RingRingApp.swift */; };
+		38A4D89DE5A5B4954DEA7D33 /* PhoneService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26287E4B948CCBB7069F817F /* PhoneService.swift */; };
+		5B55AD5074DE874313120F2F /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A728D7A87F53ADBD3AEFA5D6 /* AppModel.swift */; };
+		640EA0451BDDD9F6C9364FA0 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 306D5DC14719FC4F79F0FBF5 /* Assets.xcassets */; };
+		64A3B0B66859CCB0E9B5F0EB /* ProvisioningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65A3EB8565A88D29751F66BE /* ProvisioningTests.swift */; };
+		73E83AC4D18104D80BBD2395 /* Views.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46D995B0C4B55F78449B842B /* Views.swift */; };
+		C271175D6241D219217E887F /* Provisioning.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5B408CFA8F7BFC35FF49C4E /* Provisioning.swift */; };
+		DD40D3175EA3C5FD2A18F569 /* CallKitCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F9526B441901472A601BC25 /* CallKitCoordinator.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		F078D1F4E85607E6722883C3 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7DBA242FE3260E806D319E97 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 94E748A4CD038A6F6AECCE0F;
+			remoteInfo = RingRing;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		0A98C6E4A669DDE41D93BC82 /* RingRingTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = RingRingTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		1B19867B1C613ACBC1E6C8DD /* QRScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerView.swift; sourceTree = "<group>"; };
+		26287E4B948CCBB7069F817F /* PhoneService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneService.swift; sourceTree = "<group>"; };
+		306D5DC14719FC4F79F0FBF5 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		46D995B0C4B55F78449B842B /* Views.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views.swift; sourceTree = "<group>"; };
+		5571D5896C258F8379DA8483 /* CredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialStore.swift; sourceTree = "<group>"; };
+		65A3EB8565A88D29751F66BE /* ProvisioningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProvisioningTests.swift; sourceTree = "<group>"; };
+		6F9526B441901472A601BC25 /* CallKitCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallKitCoordinator.swift; sourceTree = "<group>"; };
+		A4FA845F8618DA40AD2D8FFF /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		A728D7A87F53ADBD3AEFA5D6 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		B5B408CFA8F7BFC35FF49C4E /* Provisioning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Provisioning.swift; sourceTree = "<group>"; };
+		CF8B03AED4EDB7F865DDE982 /* RingRing.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RingRing.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E27225ABF4FE03C8504B19AC /* RingRingApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RingRingApp.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		AD8BE5248B02871D879AACFE /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				22C0D3A1B72DE156A9528455 /* linphonesw in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		52A285CD11A705115ACDAF86 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				CF8B03AED4EDB7F865DDE982 /* RingRing.app */,
+				0A98C6E4A669DDE41D93BC82 /* RingRingTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		890E4B1F5BF1B9E31B5F0453 = {
+			isa = PBXGroup;
+			children = (
+				DDEA692A4FD46103D00F4F47 /* RingRing */,
+				F5E79A71AB3E4EF31111073A /* RingRingTests */,
+				52A285CD11A705115ACDAF86 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		DDEA692A4FD46103D00F4F47 /* RingRing */ = {
+			isa = PBXGroup;
+			children = (
+				A728D7A87F53ADBD3AEFA5D6 /* AppModel.swift */,
+				306D5DC14719FC4F79F0FBF5 /* Assets.xcassets */,
+				6F9526B441901472A601BC25 /* CallKitCoordinator.swift */,
+				5571D5896C258F8379DA8483 /* CredentialStore.swift */,
+				26287E4B948CCBB7069F817F /* PhoneService.swift */,
+				B5B408CFA8F7BFC35FF49C4E /* Provisioning.swift */,
+				1B19867B1C613ACBC1E6C8DD /* QRScannerView.swift */,
+				E27225ABF4FE03C8504B19AC /* RingRingApp.swift */,
+				A4FA845F8618DA40AD2D8FFF /* Theme.swift */,
+				46D995B0C4B55F78449B842B /* Views.swift */,
+			);
+			path = RingRing;
+			sourceTree = "<group>";
+		};
+		F5E79A71AB3E4EF31111073A /* RingRingTests */ = {
+			isa = PBXGroup;
+			children = (
+				65A3EB8565A88D29751F66BE /* ProvisioningTests.swift */,
+			);
+			path = RingRingTests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		4CEAB224FAC03C8F58B5FB6F /* RingRingTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3F09EBF3811EF88CF8AA001D /* Build configuration list for PBXNativeTarget "RingRingTests" */;
+			buildPhases = (
+				50F4200F2660331DF3923092 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				442395414EF43EEF3A740716 /* PBXTargetDependency */,
+			);
+			name = RingRingTests;
+			packageProductDependencies = (
+			);
+			productName = RingRingTests;
+			productReference = 0A98C6E4A669DDE41D93BC82 /* RingRingTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		94E748A4CD038A6F6AECCE0F /* RingRing */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 86C2190D134D1FA0A4BBA6C9 /* Build configuration list for PBXNativeTarget "RingRing" */;
+			buildPhases = (
+				F2DF74865D74D5805E3758C4 /* Sources */,
+				3DCDA9A99F868118B1BCF621 /* Resources */,
+				AD8BE5248B02871D879AACFE /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = RingRing;
+			packageProductDependencies = (
+				ED97F22315A8D59D4DB15781 /* linphonesw */,
+			);
+			productName = RingRing;
+			productReference = CF8B03AED4EDB7F865DDE982 /* RingRing.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		7DBA242FE3260E806D319E97 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+					4CEAB224FAC03C8F58B5FB6F = {
+						DevelopmentTeam = 7PTN7E8EDS;
+						ProvisioningStyle = Automatic;
+					};
+					94E748A4CD038A6F6AECCE0F = {
+						DevelopmentTeam = 7PTN7E8EDS;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 740E428E533C527F51D164B3 /* Build configuration list for PBXProject "RingRing" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 890E4B1F5BF1B9E31B5F0453;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				2353300E1913B0114681A3EA /* XCRemoteSwiftPackageReference "linphone-sdk-swift-ios" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 52A285CD11A705115ACDAF86 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				94E748A4CD038A6F6AECCE0F /* RingRing */,
+				4CEAB224FAC03C8F58B5FB6F /* RingRingTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		3DCDA9A99F868118B1BCF621 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				640EA0451BDDD9F6C9364FA0 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		50F4200F2660331DF3923092 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				64A3B0B66859CCB0E9B5F0EB /* ProvisioningTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F2DF74865D74D5805E3758C4 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5B55AD5074DE874313120F2F /* AppModel.swift in Sources */,
+				DD40D3175EA3C5FD2A18F569 /* CallKitCoordinator.swift in Sources */,
+				014B6FFB67A65FCBAEECFCF1 /* CredentialStore.swift in Sources */,
+				38A4D89DE5A5B4954DEA7D33 /* PhoneService.swift in Sources */,
+				C271175D6241D219217E887F /* Provisioning.swift in Sources */,
+				2053721B6D0AA126D676DC77 /* QRScannerView.swift in Sources */,
+				38275C8F90AB49342E64135D /* RingRingApp.swift in Sources */,
+				0C8B2310DC327D9A6BE50281 /* Theme.swift in Sources */,
+				73E83AC4D18104D80BBD2395 /* Views.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		442395414EF43EEF3A740716 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 94E748A4CD038A6F6AECCE0F /* RingRing */;
+			targetProxy = F078D1F4E85607E6722883C3 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		0572509EA4B73ACEB480F542 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = RingRing/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+				OTHER_LDFLAGS = "$(inherited) -ObjC";
+				PRODUCT_BUNDLE_IDENTIFIER = com.mcchord.ringring;
+				PRODUCT_NAME = RingRing;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		2FB30362BC4655FB5CBF8716 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = RingRing/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+				OTHER_LDFLAGS = "$(inherited) -ObjC";
+				PRODUCT_BUNDLE_IDENTIFIER = com.mcchord.ringring;
+				PRODUCT_NAME = RingRing;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		74C8BD4C719F062FC61B35A5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 3;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 7PTN7E8EDS;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		AA3193FF1FE44C518D50939C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.mcchord.ringring.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/RingRing.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/RingRing";
+			};
+			name = Debug;
+		};
+		F2F97B9953179B208F3EC801 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.mcchord.ringring.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/RingRing.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/RingRing";
+			};
+			name = Release;
+		};
+		FD43F95D94250E3A9E171057 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 3;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 7PTN7E8EDS;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		3F09EBF3811EF88CF8AA001D /* Build configuration list for PBXNativeTarget "RingRingTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA3193FF1FE44C518D50939C /* Debug */,
+				F2F97B9953179B208F3EC801 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		740E428E533C527F51D164B3 /* Build configuration list for PBXProject "RingRing" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FD43F95D94250E3A9E171057 /* Debug */,
+				74C8BD4C719F062FC61B35A5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		86C2190D134D1FA0A4BBA6C9 /* Build configuration list for PBXNativeTarget "RingRing" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2FB30362BC4655FB5CBF8716 /* Debug */,
+				0572509EA4B73ACEB480F542 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		2353300E1913B0114681A3EA /* XCRemoteSwiftPackageReference "linphone-sdk-swift-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/BelledonneCommunications/linphone-sdk-swift-ios.git";
+			requirement = {
+				kind = exactVersion;
+				version = 5.5.15;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		ED97F22315A8D59D4DB15781 /* linphonesw */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 2353300E1913B0114681A3EA /* XCRemoteSwiftPackageReference "linphone-sdk-swift-ios" */;
+			productName = linphonesw;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 7DBA242FE3260E806D319E97 /* Project object */;
+}

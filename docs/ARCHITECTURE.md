@@ -31,7 +31,7 @@ The app also owns a distinct loopback-only metrics listener on `127.0.0.1:9090`.
 - **Invitation**: a single-use, expiring, hashed bearer token that permits one member/device enrollment.
 - **Member**: a person represented by a display label and one extension within a party. An account is not required.
 - **Device**: a SIP registration identity and encrypted secret associated with a member.
-- **Provisioning link**: a single-use, 30-minute, hashed bearer token that lets Linphone fetch only one device's account configuration.
+- **Provisioning link**: a single-use, 30-minute, hashed bearer token that lets one trusted phone app fetch only one device's account configuration.
 - **Service line**: a party-enabled special extension such as time, weather, radio, or OpenAI voice.
 
 ## Call isolation
@@ -78,13 +78,17 @@ The database is authoritative. When a device or party setting changes, the app:
 
 On startup, the app regenerates all telephony configuration from the database.
 
-## One-time Linphone setup
+## One-time phone setup
 
 The one-time setup screen keeps the universal registrar, username, password, extension, and transport fields for ATAs, desk phones, and arbitrary SIP apps. Current numeric credentials are visually grouped in threes and fours, with explicit instructions to omit the display spaces; the local copy helper and Linphone XML use the exact raw digits. The grouping never enters SQLite, Asterisk, a clipboard value, or provisioning XML. The screen also renders a Linphone-specific QR according to [Linphone's remote-provisioning format](https://wiki.linphone.org/xwiki/wiki/public/view/Linphone/Remote%20Provisioning/). No external QR or provisioning service receives the credentials.
 
 The QR contains an HTTPS URL, not the SIP password. Its 32-byte random token is stored only as a SHA-256 digest, expires after 30 minutes, and is consumed transactionally by the first `GET`. `HEAD` does not consume it. The response decrypts only that device's SIP secret and returns a transient Linphone XML document with the generated username, extension, RingRing registrar, TLS port, and password; it contains no member name, party name, host data, or integration key. A second fetch receives a generic gone response. Rotation atomically replaces any prior link, while revocation and cascading device deletion remove it.
 
-Setup pages and provisioning responses are `no-store`, `no-referrer`, and `noindex`; token-bearing request paths are masked in application logs and separately rate limited. The UI warns people to use Linphone's scanner instead of a normal camera/browser because an ordinary fetch would consume the link without configuring the app. A desktop `sip-linphone` handler and a copyable remote-provisioning URL are secondary paths. This configures the account only and does not assert mobile push or background-ringing support.
+The vendor-neutral `/api/v1/phone-provisioning/{token}` route uses the same one-time boundary and returns a versioned JSON document. In addition to the single device's SIP fields, that document carries a bounded call-menu snapshot made only from active members in the device's party and currently routable service lines. The device's own member is omitted. Display labels and hidden dial targets are validated before serialization and again by the native app, which stores the snapshot with its SIP account in the device-only Keychain and places calls through named buttons without rendering the target. Manual dialing remains a secondary compatibility path. The snapshot does not silently gain cross-party or later-created entries; fresh settings are required to update it until an authenticated refresh protocol exists.
+
+Every binary embeds and serves the exact OpenAPI contract at `/openapi.yaml`; the canonical source and a client implementation checklist live in [Phone provisioning API](PHONE_API.md). The document is public and cross-origin readable, while the credential endpoint deliberately remains non-CORS and same-origin-resource restricted. Released iOS build 3 setup cards keep using `/provision/ios/{token}` as a deprecated direct compatibility alias. Both routes call the same validation and party-reduction code and atomically consume the same token, so a client must choose one rather than probing both. The canonical route uses bounded `application/problem+json` errors; neither form reveals why a token is unavailable.
+
+Setup pages and provisioning responses are `no-store`, `no-referrer`, and `noindex`; token-bearing request paths for the XML, canonical JSON API, and compatibility JSON route are masked in application logs and share the provisioning rate limit. `HEAD` is refused before token consumption. The UI warns people to use an app-owned scanner instead of a normal camera/browser because an ordinary fetch would consume the link without configuring the app. A desktop `sip-linphone` handler and copyable, format-specific provisioning URLs are secondary paths. This configures the account only and does not assert mobile push or background-ringing support.
 
 The manual setup sheet translates common ATA and SIP-phone labels into the six
 RingRing values and can copy one value or a complete private setup note. The

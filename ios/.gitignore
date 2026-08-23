@@ -1,0 +1,15 @@
+.build/
+DerivedData/
+build/
+*.xcarchive
+*.ipa
+*.dSYM.zip
+*.mobileprovision
+ExportOptions.plist
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/
+fastlane/test_output/
+xcuserdata/
+*.xcuserstate
+.DS_Store

@@ -1,0 +1,244 @@
+openapi: 3.1.2
+info:
+  title: RingRing Phone Provisioning API
+  version: 1.0.0
+  summary: One-time SIP setup and private party call-menu provisioning.
+  description: |
+    This API lets a trusted native phone application turn a RingRing one-time
+    setup link into one SIP-over-TLS account and a bounded snapshot of buttons
+    the phone may call. It never provides a PSTN route, a public directory, or
+    a persistent directory credential.
+
+    The token is a secret bearer value. A successful GET consumes it atomically,
+    so clients must not preflight, preview, log, crawl, or retry the URL after a
+    successful response. Store the returned SIP password only in device-protected
+    secret storage. Credential responses intentionally do not enable browser CORS.
+  license:
+    name: MIT
+    url: https://github.com/amcchord/ringring/blob/main/LICENSE
+servers:
+  - url: /
+    description: The RingRing deployment that issued the setup link.
+tags:
+  - name: Phone provisioning
+paths:
+  /openapi.yaml:
+    get:
+      operationId: getOpenAPIDocument
+      summary: Download this OpenAPI description.
+      responses:
+        "200":
+          description: The public, non-secret API description.
+          content:
+            application/yaml:
+              schema:
+                type: string
+  /api/v1/phone-provisioning/{token}:
+    get:
+      operationId: consumePhoneProvisioning
+      tags: [Phone provisioning]
+      summary: Consume one phone setup token.
+      description: |
+        Returns the complete setup document exactly once. A `410` response is
+        deliberately generic: the token may be malformed, unknown, expired,
+        already used, replaced, or attached to a revoked phone.
+      parameters:
+        - $ref: "#/components/parameters/ProvisioningToken"
+      responses:
+        "200":
+          $ref: "#/components/responses/PhoneProvisioning"
+        "410":
+          $ref: "#/components/responses/ProvisioningUnavailable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /provision/ios/{token}:
+    get:
+      operationId: consumeLegacyIOSProvisioning
+      tags: [Phone provisioning]
+      summary: Consume one phone setup token through the RingRing iOS compatibility route.
+      description: |
+        Backward-compatible alias used by released RingRing iOS builds. New
+        clients should use `/api/v1/phone-provisioning/{token}`. Both paths
+        consume the same token, so only the first successful request can work.
+      deprecated: true
+      parameters:
+        - $ref: "#/components/parameters/ProvisioningToken"
+      responses:
+        "200":
+          $ref: "#/components/responses/PhoneProvisioning"
+        "410":
+          description: The setup link is unavailable. The compatibility route returns a generic HTML error page.
+          content:
+            text/html:
+              schema:
+                type: string
+        "429":
+          description: Too many provisioning requests from this source.
+          headers:
+            Retry-After:
+              schema:
+                type: string
+                const: "60"
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: The server could not safely build the setup document. The compatibility route returns a generic HTML error page.
+          content:
+            text/html:
+              schema:
+                type: string
+components:
+  parameters:
+    ProvisioningToken:
+      name: token
+      in: path
+      required: true
+      description: A 43-character, high-entropy, single-use bearer token supplied privately by the RingRing host.
+      schema:
+        type: string
+        minLength: 43
+        maxLength: 43
+        pattern: "^[A-Za-z0-9_-]{43}$"
+  responses:
+    PhoneProvisioning:
+      description: The one-time SIP account and same-party call-menu snapshot.
+      headers:
+        Cache-Control:
+          description: Credential responses must never be cached.
+          schema:
+            type: string
+            const: no-store, max-age=0
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/PhoneProvisioningDocument"
+          examples:
+            phoneSetup:
+              summary: Example with fictitious credentials and labels.
+              value:
+                version: 1
+                sip:
+                  server: ringring.example
+                  port: 5061
+                  transport: tls
+                  username: "483726"
+                  password: "927461830572"
+                  extension: "101"
+                destinations:
+                  - kind: person
+                    label: Studio phone
+                    dial: "102"
+                  - kind: service
+                    label: Echo test
+                    detail: Hear your own voice come back.
+                    dial: "*10"
+    ProvisioningUnavailable:
+      description: The setup token cannot be used. No reason is disclosed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    TooManyRequests:
+      description: Too many provisioning requests from this source.
+      headers:
+        Retry-After:
+          schema:
+            type: string
+            const: "60"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    InternalError:
+      description: The server could not safely build the setup document.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+  schemas:
+    PhoneProvisioningDocument:
+      type: object
+      required: [version, sip, destinations]
+      properties:
+        version:
+          type: integer
+          const: 1
+          description: Reject unsupported versions rather than guessing at semantics.
+        sip:
+          $ref: "#/components/schemas/SIPAccount"
+        destinations:
+          type: array
+          maxItems: 128
+          description: A setup-time snapshot. It is not presence and does not refresh automatically.
+          items:
+            $ref: "#/components/schemas/Destination"
+    SIPAccount:
+      type: object
+      required: [server, port, transport, username, password, extension]
+      properties:
+        server:
+          type: string
+          minLength: 1
+          maxLength: 253
+          description: DNS name or IP literal of the RingRing SIP server.
+        port:
+          type: integer
+          const: 5061
+        transport:
+          type: string
+          const: tls
+        username:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: "^[A-Za-z0-9_-]+$"
+          description: SIP authentication identity. It is not the party extension.
+        password:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: Sensitive SIP password. Reject control characters and keep it only in protected secret storage.
+        extension:
+          type: string
+          pattern: "^[0-9]{2,5}$"
+          description: The display and short-dial extension assigned inside this party.
+    Destination:
+      type: object
+      required: [kind, label, dial]
+      properties:
+        kind:
+          type: string
+          enum: [person, service]
+        label:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: Friendly button label with no leading/trailing whitespace or control characters.
+        detail:
+          type: string
+          maxLength: 160
+          description: Optional explanatory text with no leading/trailing whitespace or control characters.
+        dial:
+          type: string
+          pattern: "^(?:[0-9]{2,5}|\\*[0-9]{2})$"
+          description: Hidden same-party extension or explicit RingRing service code. It is never a public telephone number.
+    Problem:
+      type: object
+      required: [type, title, status, detail]
+      properties:
+        type:
+          type: string
+          format: uri-reference
+          const: about:blank
+        title:
+          type: string
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string

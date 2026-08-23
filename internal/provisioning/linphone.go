@@ -52,8 +52,8 @@ func LinphoneXML(input LinphoneConfig) ([]byte, error) {
 	if !sipIdentityPattern.MatchString(input.Username) {
 		return nil, errors.New("invalid SIP username")
 	}
-	if input.Password == "" || len(input.Password) > 256 || strings.IndexFunc(input.Password, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
-		return nil, errors.New("invalid SIP password")
+	if err := validatePassword(input.Password); err != nil {
+		return nil, err
 	}
 	if !extensionPattern.MatchString(input.Extension) {
 		return nil, errors.New("invalid extension")
@@ -88,6 +88,13 @@ func LinphoneXML(input LinphoneConfig) ([]byte, error) {
 		return nil, fmt.Errorf("encode Linphone provisioning: %w", err)
 	}
 	return append([]byte(xml.Header), encoded...), nil
+}
+
+func validatePassword(password string) error {
+	if password == "" || len(password) > 256 || strings.IndexFunc(password, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+		return errors.New("invalid SIP password")
+	}
+	return nil
 }
 
 func overwriteEntry(name, value string) linphoneEntry {

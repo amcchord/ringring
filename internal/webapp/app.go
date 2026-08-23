@@ -52,6 +52,7 @@ const (
 var (
 	usernamePattern       = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._-]{1,30}[a-z0-9])$`)
 	provisionTokenPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
+	errPhoneSetupGone     = errors.New("phone provisioning unavailable")
 )
 
 type App struct {
@@ -147,6 +148,10 @@ type PageData struct {
 	LinphoneProvisionURL     string
 	LinphoneOpenURL          template.URL
 	LinphoneQR               template.URL
+	IOSProvisionURL          string
+	IOSOpenURL               template.URL
+	IOSQR                    template.URL
+	PhoneProvisionURL        string
 	CallDirectory            []callDirectoryEntry
 	FirstCallLines           []firstCallLine
 	SetupForHost             bool
@@ -207,6 +212,13 @@ type recoveryFlash struct {
 	Kind     string   `json:"kind"`
 	Username string   `json:"username"`
 	Codes    []string `json:"codes"`
+}
+
+type apiProblem struct {
+	Type   string `json:"type"`
+	Title  string `json:"title"`
+	Status int    `json:"status"`
+	Detail string `json:"detail"`
 }
 
 type statusWriter struct {
@@ -271,6 +283,7 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", app.health)
 	mux.HandleFunc("GET /readyz", app.ready)
+	mux.HandleFunc("GET /openapi.yaml", app.phoneOpenAPI)
 	mux.Handle("GET /static/", app.static)
 	mux.HandleFunc("GET /signup", app.signupForm)
 	mux.HandleFunc("POST /signup", app.signup)
@@ -306,6 +319,8 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 	mux.HandleFunc("GET /join/{token}", app.join)
 	mux.HandleFunc("POST /join/{token}", app.claimInvitation)
 	mux.HandleFunc("GET /provision/linphone/{token}", app.linphoneProvision)
+	mux.HandleFunc("GET /provision/ios/{token}", app.iosProvisionCompatibility)
+	mux.HandleFunc("GET /api/v1/phone-provisioning/{token}", app.phoneProvisionAPI)
 	mux.HandleFunc("GET /", app.home)
 
 	app.handler = app.securityHeaders(app.requestLog(app.recoverPanic(app.rateLimit(mux))))
@@ -2074,6 +2089,134 @@ func (a *App) linphoneProvision(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (a *App) phoneOpenAPI(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.Header().Set("Content-Disposition", `inline; filename="ringring-openapi.yaml"`)
+	w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
+	w.Header().Set("Cross-Origin-Resource-Policy", "cross-origin")
+	w.Header().Set("X-Robots-Tag", "noindex")
+	_, _ = w.Write(provisioning.PhoneOpenAPI())
+}
+
+func (a *App) phoneProvisionAPI(w http.ResponseWriter, r *http.Request) {
+	phoneProvisioningHeaders(w)
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	document, err := a.phoneProvisioningDocument(r.Context(), r.PathValue("token"))
+	if errors.Is(err, errPhoneSetupGone) {
+		writeAPIProblem(w, http.StatusGone, "Phone setup link unavailable", "This one-time setup link was used, expired, replaced, or disconnected. Ask the party host for fresh settings.")
+		return
+	}
+	if err != nil {
+		a.logger.Error("build one-time phone API provisioning", "error_class", observability.ErrorClass(err))
+		writeAPIProblem(w, http.StatusInternalServerError, "Phone setup unavailable", "RingRing could not safely prepare these phone settings. Ask the party host for fresh settings.")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if _, err := w.Write(document); err != nil {
+		a.logger.Error("write one-time phone API provisioning", "error_class", observability.ErrorClass(err))
+	}
+}
+
+func (a *App) iosProvisionCompatibility(w http.ResponseWriter, r *http.Request) {
+	phoneProvisioningHeaders(w)
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	document, err := a.phoneProvisioningDocument(r.Context(), r.PathValue("token"))
+	if errors.Is(err, errPhoneSetupGone) {
+		a.provisioningGone(w)
+		return
+	}
+	if err != nil {
+		a.logger.Error("build one-time iOS compatibility provisioning", "error_class", observability.ErrorClass(err))
+		a.errorPage(w, http.StatusInternalServerError, "The setup line went quiet", "Ask the party host to rotate this phone and make fresh settings.", "/", "Back home")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if _, err := w.Write(document); err != nil {
+		a.logger.Error("write one-time iOS compatibility provisioning", "error_class", observability.ErrorClass(err))
+	}
+}
+
+func phoneProvisioningHeaders(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store, max-age=0")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Robots-Tag", "noindex, nofollow, noarchive")
+	w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+}
+
+func (a *App) phoneProvisioningDocument(ctx context.Context, token string) ([]byte, error) {
+	if !provisionTokenPattern.MatchString(token) {
+		return nil, errPhoneSetupGone
+	}
+	device, err := a.store.ConsumeProvisioningToken(ctx, secure.Hash(token), a.now())
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrProvisionUsed) || errors.Is(err, store.ErrProvisionExpired) {
+		return nil, errPhoneSetupGone
+	}
+	if err != nil {
+		return nil, fmt.Errorf("consume phone provisioning token: %w", err)
+	}
+	password, err := a.cipher.Decrypt(device.SIPSecretCiphertext, []byte(device.DeviceID))
+	if err != nil {
+		return nil, fmt.Errorf("decrypt one-time phone provisioning credential: %w", err)
+	}
+	party, services, err := a.store.PartyVoiceSettings(ctx, device.PartyID)
+	if err != nil {
+		return nil, fmt.Errorf("load phone provisioning services: %w", err)
+	}
+	members, err := a.store.ListMembers(ctx, device.PartyID)
+	if err != nil {
+		return nil, fmt.Errorf("load phone provisioning directory: %w", err)
+	}
+	memberAdultAllowed := false
+	for _, member := range members {
+		if member.ID == device.MemberID {
+			memberAdultAllowed = member.AdultExtension
+			break
+		}
+	}
+	document, err := provisioning.PhoneJSON(provisioning.LinphoneConfig{
+		Server: a.cfg.SIPPublicHost, Username: device.SIPUsername, Password: password, Extension: device.Extension,
+	}, phoneCallDestinations(device.Extension, members, availableFirstCallLines(party, services, a.cfg.AIAdultOnlyEnabled, memberAdultAllowed)))
+	if err != nil {
+		return nil, fmt.Errorf("encode phone provisioning document: %w", err)
+	}
+	return document, nil
+}
+
+func phoneCallDestinations(ownExtension string, members []model.Member, services []firstCallLine) []provisioning.PhoneDestination {
+	directory := privateCallDirectory(members)
+	destinations := make([]provisioning.PhoneDestination, 0, len(directory)+len(services))
+	for _, entry := range directory {
+		if entry.Extension == ownExtension {
+			continue
+		}
+		destinations = append(destinations, provisioning.PhoneDestination{
+			Kind: "person", Label: entry.DisplayName, Dial: entry.Extension,
+		})
+	}
+	for _, service := range services {
+		destinations = append(destinations, provisioning.PhoneDestination{
+			Kind: "service", Label: service.Title, Detail: service.Description, Dial: service.Number,
+		})
+	}
+	return destinations
+}
+
+func writeAPIProblem(w http.ResponseWriter, status int, title, detail string) {
+	w.Header().Set("Content-Type", "application/problem+json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(apiProblem{Type: "about:blank", Title: title, Status: status, Detail: detail})
+}
+
 func (a *App) provisioningGone(w http.ResponseWriter) {
 	a.errorPage(w, http.StatusGone, "That phone setup link is finished", "This private one-time link was used, expired, replaced, or disconnected. Ask the party host for fresh settings.", "/", "Back home")
 }
@@ -2138,6 +2281,19 @@ func (a *App) addLinphoneSetup(data *PageData, token string) error {
 	data.LinphoneProvisionURL = provisionURL
 	data.LinphoneOpenURL = template.URL("sip-linphone:?linphone-fetch-config=" + url.QueryEscape(provisionURL))
 	data.LinphoneQR = template.URL(qr)
+	data.PhoneProvisionURL = a.cfg.BaseURL + "/api/v1/phone-provisioning/" + url.PathEscape(token)
+	iosProvisionURL := a.cfg.BaseURL + "/provision/ios/" + url.PathEscape(token)
+	openURL := url.URL{Scheme: "ringring", Host: "join"}
+	query := openURL.Query()
+	query.Set("provision", iosProvisionURL)
+	openURL.RawQuery = query.Encode()
+	iosQR, err := provisioning.QRCodeDataURI(openURL.String())
+	if err != nil {
+		return err
+	}
+	data.IOSProvisionURL = iosProvisionURL
+	data.IOSOpenURL = template.URL(openURL.String())
+	data.IOSQR = template.URL(iosQR)
 	return nil
 }
 
@@ -2458,6 +2614,8 @@ func requestSurface(request *http.Request) string {
 	switch {
 	case route == "/healthz" || route == "/readyz":
 		return "health"
+	case route == "/openapi.yaml":
+		return "documentation"
 	case strings.HasPrefix(route, "/static/"):
 		return "static"
 	case route == "/signup" || route == "/login" || route == "/recover" ||
@@ -2467,7 +2625,7 @@ func requestSurface(request *http.Request) string {
 		return "host"
 	case strings.HasPrefix(route, "/join/"):
 		return "invitation"
-	case strings.HasPrefix(route, "/provision/"):
+	case strings.HasPrefix(route, "/provision/") || route == "/api/v1/phone-provisioning/{token}":
 		return "provisioning"
 	case route == "/":
 		return "public"

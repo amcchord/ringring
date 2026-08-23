@@ -2,6 +2,34 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-23 — Publish an open phone provisioning API
+
+### Shipped
+
+- Added the vendor-neutral `GET /api/v1/phone-provisioning/{token}` endpoint. One successful, no-store JSON response contains a strictly validated SIP-over-TLS account and a bounded snapshot of friendly same-party call buttons; it contains no host controls, presence, call history, provider key, PSTN route, or persistent directory credential.
+- Embedded and publicly served an OpenAPI 3.1.2 contract at `GET /openapi.yaml`, with fictitious examples, bounded problem responses, and explicit schemas for the account and menu. Added `docs/PHONE_API.md` as the implementation guide covering token lifecycle, client validation, secret storage, version evolution, privacy limits, and the separate background-push requirement.
+- Kept released TestFlight build 3 working through the deprecated `/provision/ios/{token}` compatibility path. The canonical and compatibility URLs share the same stored token and first-fetch-wins behavior, while the one-time setup card exposes the canonical URL and API contract to other native-app builders.
+- Updated the RingRing iOS source to accept either documented path and to count destination text by the same Unicode-scalar limits as the server. Existing installs still migrate safely and retain their two always-available utility buttons when an older payload has no menu.
+- Made the official Linphone smoke harness honor the documented `RINGRING_SMOKE_TMP_ROOT`, matching the SIP harness so VM-backed Docker runtimes can bind-mount disposable generated state from a host-shared directory.
+- Removed an Asterisk comment delimiter from the RingRing operator's fallback `NoOp`, preventing Asterisk from treating its closing parenthesis as a comment when it loads generated dialplans.
+
+### Decisions
+
+- Treat the API as an open contract for trusted native clients, not a browser-readable credential endpoint. The public specification permits cross-origin reads; provisioning responses intentionally omit CORS, reject `HEAD` without consuming the token, mask the token-bearing route in logs, share the existing provisioning rate limit, and return generic errors that disclose no token state.
+- Preserve the setup token as a single-use provisioning bearer. Do not turn it into a persistent directory credential or use it for refresh; the party-scoped Asterisk dialplan remains authoritative after the device stores its setup-time menu snapshot.
+- Permit unknown optional fields within version 1 for forward-compatible additions while requiring clients to validate all required fields and reject unsupported versions. Any change to an existing field's meaning or safety boundary requires a new integer version.
+
+### Verification
+
+- Focused provisioning, web, accessibility, and executable security-contract tests pass, followed by `go test ./...`. The embedded OpenAPI document parses successfully and reports version 3.1.2 with the three documented paths.
+- The iPhone 17 Pro simulator passes all 11 Swift tests, including canonical and compatibility URL validation, legacy payload migration, menu validation, and Unicode-scalar limits.
+- The live local setup page was inspected at 1280×720 and at the 500px phone breakpoint. The expanded API disclosure reflows to one column, has no horizontal overflow, and keeps its copy button and documentation link as 44px-or-larger targets.
+
+### Remaining
+
+- Run the exact clean release gates, publish and deploy the candidate, then verify the public specification and the deployment's internal/public health without fetching a real token-bearing URL.
+- Issue fresh settings and finish the physical TestFlight call matrix. PushKit/APNs and the Linphone licensing decision remain gates before a public App Store release.
+
 ## 2026-08-23 — Give every party a RingRing operator
 
 ### Shipped
@@ -64,6 +92,61 @@ This is the durable, chronological project record. Add new entries at the top. C
 
 - Dial `*14` from the adult Grandstream handset to complete the physical Realtime audio check. Child and shared extensions remain unable to authorize, and the separate under-18 review remains open.
 - `*12` still needs a host-chosen weather location before it can be enabled; that unrelated configuration was left unchanged.
+
+## 2026-08-23 — Put the party behind one-tap iPhone call buttons
+
+### Shipped
+
+- Replaced the iPhone app's keypad-first home screen with a bright Memphis call menu. **People** contains large buttons for other active phones in the party and **More to call** contains friendly buttons for currently routable services; extensions and star codes remain hidden behind each action. The call screen and CallKit resolve known destinations back to their labels, while **Dial manually** preserves the keypad as a secondary compatibility path.
+- Extended the version-1 iOS provisioning document with a bounded call-menu snapshot derived from the claimed device's party. It excludes the phone's own extension, members without an active phone, paused/disabled services, and every unrelated host, party, device, email, provider, readiness, and timestamp field. Go and Swift independently validate kind, label/detail size and control characters, target shape, uniqueness, and maximum menu size.
+- Migrated secure local storage from a bare SIP account to the account plus menu snapshot in the device-only Keychain. Build-1 installs decode through an explicit legacy path and keep the always-available **Echo test** and **Pick another extension** buttons instead of losing their working SIP setup.
+- Archived, App Store-signed, validated, and uploaded version `0.1.0` build `3` with the AustinLand App Store Connect key, superseding build 2 after aligning the native CallKit surface with the extension-free friendly labels. App Store Connect reports processing state **VALID** and internal state **IN_BETA_TESTING**; the automatic **RingRing Internal** group now shows one invited tester and three builds. Build-specific “What to Test” notes describe the fresh-setup, upgrade, call, privacy, and keypad checks.
+
+### Decisions
+
+- Treat the call menu as minimum necessary party data: names and hidden dial targets are available only after the same one-time provisioning bearer is successfully consumed, travel over the existing no-store HTTPS response, and remain in the device-only Keychain. They do not enter the QR, setup page, `UserDefaults`, logs, metrics, or CallKit labels for unknown numbers.
+- Keep provisioning version `1` because adding an ignored JSON field is backward-compatible with build 1. Build 3 also accepts the older response without that field and supplies only the two always-routable local utilities.
+- Make this first menu a setup-time snapshot. Automatically refreshing family names later requires a new authenticated, revocable device-directory channel; the one-use setup token must not be repurposed as a persistent bearer.
+- Keep the matching server release separate from TestFlight delivery. A fresh setup receives the complete menu only after this server-side provisioning change is deliberately deployed.
+
+### Verification
+
+- Focused provisioning, storage, and web tests pass, including active-member filtering, own-extension omission, service readiness, unsafe/duplicate destination rejection, and one-time-token behavior. `make check`, `make security`, and `make admin-test` pass; `govulncheck` finds no reachable vulnerability.
+- The iPhone 17 Pro simulator passes all 10 Swift tests, including legacy payload migration and menu validation. A debug-only generic fixture rendered the complete call menu at 1206×2622; every primary call row exceeds the 44-point touch target, labels wrap cleanly, the numeric targets stay absent, and the manual dialer remains visible below the menu. The fixture and screenshot were removed after inspection.
+- Apple's package verification returned **VERIFY SUCCEEDED with no errors**. Upload delivery `6eef2695-69ef-4b0f-a921-6754d0892fbf` transferred the 43,662,618-byte IPA; its SHA-256 is `b39a24705df3db6b340ce05b0f5d95b0bd914b1e4ee179f261e6f3f11406dd57`. The signed-in App Store Connect group page confirms **1 Tester · 3 Builds** and the tester remains **Invited**. Temporary private-key copies were permanently removed; the nonsecret archive, IPA, and export logs were moved to Trash after verification.
+
+### Remaining
+
+- Deliberately deploy the matching server change, rotate or issue fresh phone settings, then verify that real family names and enabled services arrive on a physical iPhone and that each button reaches only its intended same-party destination.
+- Accept the internal tester invitation and complete the physical Wi-Fi/cellular, two-way audio, CallKit, mute/speaker/DTMF, and background matrix. PushKit/APNs and the Linphone licensing decision remain release gates.
+
+## 2026-08-22 — Ship the first RingRing iPhone endpoint to TestFlight
+
+### Shipped
+
+- Added a dedicated native SwiftUI app under `ios/` for iOS 17 and later. Its bright Memphis-style onboarding scans a RingRing QR, keeps the SIP secret in the device-only Keychain, registers over SIP TLS through Linphone SDK 5.5.15, and presents outgoing and incoming calls through CallKit. The dialer supports party extensions and service codes, plus mute, speaker routing, in-call DTMF, duration, hangup, and an explicit no-PSTN/privacy settings screen.
+- Added a versioned, one-time `/provision/ios/{token}` JSON boundary alongside the existing Linphone route. The successful setup page now leads with a yellow RingRing-app card, custom `ringring://join` deep link, scannable QR, and copyable fallback URL. Both client and server strictly validate token shape, TLS/5061 account fields, identity, password, and extension; the shared provisioning token retains its 30-minute, first-fetch-wins behavior.
+- Registered `com.mcchord.ringring`, created the App Store Connect record **RingRing Family Phone**, archived and App Store-signed version `0.1.0` build `1`, and uploaded it with an AustinLand-provisioned App Store Connect API key. Created the automatic **RingRing Internal** group, added the account holder as its single internal tester, attached the valid build, and published focused “What to Test” notes.
+- Added the generated 1024px Memphis handset icon, reproducible XcodeGen project, pinned Swift package resolution, simulator tests, TestFlight notes, and explicit Linphone AGPL/commercial-license notice. No API key, provisioning profile, archive, IPA, credential, or token entered the repository.
+
+### Decisions
+
+- Keep Linphone's config path empty and rehydrate the account from Keychain so its persistent preferences never become a second SIP-secret store. Reduce SDK logging to fatal-only and never show the SIP username or password after setup.
+- Require HTTPS provisioning in Release builds; Debug accepts HTTP only on loopback for local tests. Refuse redirects, credential-bearing URLs, query/fragment additions, oversized bodies, non-JSON responses, unexpected versions, UDP provisioning, and malformed accounts.
+- Treat this as an honest first TestFlight endpoint, not a finished push architecture. Incoming calls work while the core is active and during ordinary short background periods; reliable ringing after iOS suspends or terminates the app requires a later RingRing-controlled PushKit/APNs and Asterisk holding path.
+- Use Linphone under AGPLv3 for this internal build while preserving the licensing decision as a public-release gate. Public App Store distribution requires a reviewed AGPL source-distribution path or a commercial Belledonne license.
+
+### Verification
+
+- Focused Go provisioning, web-flow, accessibility, and executable security-contract tests pass. `make check` passes, including formatting, operator fixtures, vet, and the complete race-enabled suite.
+- `xcodebuild` resolves the exact `5.5.15` package, builds the iPhone simulator target, and passes the Swift Testing suite for deep-link parsing, provisioning validation, insecure/malformed rejection, and callable dial strings. The welcome UI was rendered on an iPhone 17 Pro simulator; the web setup card was inspected at 1280×720 and 390×844 with zero mobile horizontal overflow.
+- Xcode archived an arm64 iPhone build, App Store export validation returned **VERIFY SUCCEEDED with no errors**, and upload returned delivery `fe7988d0-7bd4-4da7-ad58-b5387f6b0a92`. App Store Connect reports processing state **VALID**, build audience **APP_STORE_ELIGIBLE**, minimum iOS `17.0`, no non-exempt encryption, and a 90-day TestFlight expiry. The final 42 MB IPA SHA-256 is `a703257e835c172a3caceb3c562fbb6be8b4ffd7823070657b10e912e6ae925d`.
+
+### Remaining
+
+- Accept the internal TestFlight invitation on a physical iPhone, make a fresh setup card from a reachable RingRing deployment containing this server change, then prove TLS registration, `*10` two-way audio, extension calls in both directions, mute/speaker/DTMF, CallKit, Wi-Fi/cellular switching, and ordinary background ringing.
+- Deploying the server-side iOS QR route is intentionally separate from this repository/TestFlight delivery; do not change production merely to complete an app upload. Add and validate PushKit/APNs before promising suspended or force-quit incoming calls.
+- Resolve the Linphone AGPL-versus-commercial-license decision before any public App Store release.
 
 ## 2026-08-22 — Give failed calls a friendly voice
 

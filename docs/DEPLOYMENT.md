@@ -105,7 +105,7 @@ Native username/password login is always available. In production, new-account s
 
 Google OAuth is optional. If desired, create a web application and register `https://ringring.live/auth/google/callback` as an authorized redirect URI, then set the two Google fields. Leaving them empty does not affect native login.
 
-Linphone QR setup requires no additional environment variable. The QR points back to the deployment's `APP_BASE_URL`, so production must keep that origin on trusted HTTPS; its generated account uses verified SIP TLS on public port `5061`. The first startup of this release adds an additive `device_provisioning_tokens` table; a rollback to the prior app binary safely ignores it, and rotating a device after returning to this release creates a fresh link. Do not place a provisioning URL into monitoring probes because a real `GET` intentionally consumes it.
+Phone-app and Linphone QR setup require no additional environment variable. Their one-time URLs point back to the deployment's `APP_BASE_URL`, so production must keep that origin on trusted HTTPS; generated accounts use verified SIP TLS on public port `5061`. The canonical JSON contract is published at `/openapi.yaml` and documented in [Phone provisioning API](PHONE_API.md). It is safe to health-check the OpenAPI document, but never place a real `/api/v1/phone-provisioning/{token}`, `/provision/ios/{token}`, or `/provision/linphone/{token}` URL into a monitor because a successful `GET` intentionally consumes it. The additive `device_provisioning_tokens` table remains rollback-compatible: an older binary ignores it, and rotating a device after returning to this release creates a fresh link.
 
 Real-phone acceptance adds an additive `device_readiness` table containing only a device foreign key, three nullable host-confirmation timestamps, and an update timestamp. Startup creates the empty table without changing an existing member, device, credential, route, or provider resource. Older app builds ignore it, so an application rollback remains database-compatible; confirmations made before rollback reappear if this release returns. Credential rotation on this release intentionally clears that phone's confirmations. Verify the empty schema and host page after upgrade, but do not submit a real family's checklist merely as a deployment probe.
 
@@ -163,6 +163,7 @@ docker compose build
 docker compose up -d
 docker compose ps
 curl --fail https://ringring.live/readyz
+curl --fail --silent https://ringring.live/openapi.yaml | grep -q '^openapi: 3.1.2$'
 test "$(curl --silent --output /dev/null --write-out '%{http_code}' https://ringring.live/metrics)" = 404
 docker compose exec -T app curl --fail --silent http://127.0.0.1:9090/metrics
 docker compose exec asterisk asterisk -rx 'pjsip show transports'

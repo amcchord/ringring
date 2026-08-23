@@ -1,0 +1,5 @@
+Please test the first RingRing iPhone endpoint: make a fresh phone setup card in RingRing, scan its yellow RingRing-app QR, and confirm the status becomes Ready for calls. Dial *10 for two-way echo, call another party extension in both directions, and try mute, speaker, the in-call DTMF keypad, and hangup through CallKit.
+
+Also try receiving a call with the app open and shortly after backgrounding it.
+
+Known limitation: reliable incoming ringing after iOS fully suspends or force-quits RingRing needs the planned PushKit/APNs server bridge. This build never calls the public telephone network.
