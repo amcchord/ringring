@@ -34,6 +34,7 @@ This is the durable, chronological project record. Add new entries at the top. C
 ### Remaining
 
 - Reboot the physical handset after the complete theme is applied, verify all four custom ringtone slots, and complete the TLS registration, `*10`, incoming, outgoing, and cross-party hardware matrix.
+
 ## 2026-08-23 — Simplify the phone book and personalize weather
 
 ### Shipped
@@ -57,9 +58,16 @@ This is the durable, chronological project record. Add new entries at the top. C
 - `make sip-smoke` passes from the repository's Docker-shareable temporary root: TLS and UDP phones register, same-extension fanout and the live three-phone join stay intact, unavailable `*12` gets an answered operator response, and the existing mixed-transport RTP, `*10`, and authenticated `*15` checks remain green. The default macOS `/tmp` attempt could not open its bind-mounted disposable SQLite file; rerunning from the documented override removed that Docker Desktop path artifact.
 - In-app browser review with an empty and populated party covered the compact directory, collapsed and expanded member gear, separate settings page, disabled/offline states, keyboard-visible semantic controls, horizontal bounds, and a clean console. The visual pass caught and fixed a cramped phone-action row. The browser's documented viewport override remained at its 1280×720 surface, so the embedded CSS/accessibility contract—not a second rendered screenshot—currently covers the one-column 850px and full-width 520px breakpoints.
 
+### Production
+
+- Published and deployed exact runtime commit `c70ca7004277ba26e9a841f41a8342b2dcba5106` through the guarded fast-forward upgrader. It created and restore-drilled pre/post archives `ringring-20260823T215352Z-f020e0b.tar.gz` and `ringring-20260823T215639Z-c70ca70.tar.gz`.
+- The checkout is clean with no pending marker; `ringringctl doctor`, public health/readiness, database and credential integrity, private AMI access, SIP TLS synchronization, the three new public settings-style markers, and one existing SIP contact pass. The authenticated party URL still redirects a signed-out request to login, and recent app logs contain no warning or error.
+- The first verification pass caught only transient live phone/call polling warnings while Asterisk was being recreated. With zero active channels, recreating only the app after Asterisk was healthy gave it a clean startup; resuming the exact recorded target completed every verification and the post-upgrade recovery point without rotating or exposing a production credential.
+
 ### Remaining
 
 - Repeat the host-page visual check in a true 390px production browser after deployment, then place `*12` calls from two different physical extensions and confirm that each hears only its own saved ZIP.
+
 ## 2026-08-23 — Package a Memphis WP826 handset experience
 
 ### Shipped
