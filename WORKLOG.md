@@ -24,10 +24,16 @@ This is the durable, chronological project record. Add new entries at the top. C
 - Focused provisioning, web, accessibility, and executable security-contract tests pass, followed by `go test ./...`. The embedded OpenAPI document parses successfully and reports version 3.1.2 with the three documented paths.
 - The iPhone 17 Pro simulator passes all 11 Swift tests, including canonical and compatibility URL validation, legacy payload migration, menu validation, and Unicode-scalar limits.
 - The live local setup page was inspected at 1280×720 and at the 500px phone breakpoint. The expanded API disclosure reflows to one column, has no horizontal overflow, and keeps its copy button and documentation link as 44px-or-larger targets.
+- Exact integrated candidate `3fb8aae91c719ebb4c14c63c92121e9de4d41846` passes `make check`, `make security`, and `make admin-test` from a clean worktree; `govulncheck` finds no reachable vulnerability. Its runtime tree is identical outside this worklog to candidate `2d0c2cced447ac3bc57fb6ebbc49bc47264d439f`, which passed the complete local SIP/TLS/UDP/media/operator smoke and the official x86-64 Linphone provisioning, registration, extension-call, and echoed two-way-audio smoke on the reference host.
+
+### Production
+
+- Published and deployed exact commit `3fb8aae91c719ebb4c14c63c92121e9de4d41846` with the guarded fast-forward upgrader. It created, checksummed, and restore-drilled pre/post archives `ringring-20260823T141641Z-2226206.tar.gz` and `ringring-20260823T141828Z-3fb8aae.tar.gz` before reporting success at the same commit.
+- Public health, readiness, and `/openapi.yaml` return 200 while `/metrics` remains 404. The live OpenAPI SHA-256 exactly matches the embedded source at `b05ece6e117fb93dd873becf6724495c67899a5ecfa605a412b0172587220e81`; its public CORS/cache headers are present, and non-consuming `HEAD` requests to both token routes return 405 with `Allow: GET`, same-origin resource policy, and no-store/no-referrer/noindex protections.
+- The production checkout is clean; the app and Asterisk are healthy; Caddy is running; `ringringctl doctor` passes with the existing live SIP contact; and Asterisk's loaded dialplan contains all eight operator fallback sites without the truncated-comment form. One initial app reconcile warning occurred before the Asterisk container name resolved during startup; the generated files were already present, Asterisk loaded them on startup, and subsequent app logs contain no warning or error.
 
 ### Remaining
 
-- Run the exact clean release gates, publish and deploy the candidate, then verify the public specification and the deployment's internal/public health without fetching a real token-bearing URL.
 - Issue fresh settings and finish the physical TestFlight call matrix. PushKit/APNs and the Linphone licensing decision remain gates before a public App Store release.
 
 ## 2026-08-23 — Give every party a RingRing operator
