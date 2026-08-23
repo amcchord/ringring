@@ -50,6 +50,7 @@ make setup
 make dev
 make test
 make check
+make security
 make admin-test
 make sip-smoke
 make sip-tls-smoke
@@ -58,6 +59,8 @@ make linphone-smoke
 make radio-smoke
 make compose-up
 ```
+
+RingRing runs its release checks locally instead of on GitHub-hosted CI runners. Before publishing a candidate, run `make check`, `make security`, and `make admin-test` on a trusted development machine and record the result in `WORKLOG.md`. Pull requests remain useful for review, but GitHub does not execute repository code automatically.
 
 `make sip-smoke` builds RingRing plus the pinned Asterisk and source-checksummed SIPp images, seeds a disposable two-phone database, and places the complete app, PBX, and clients on an internal Docker network. A disposable CA proves TLS 1.2 certificate and hostname verification. One phone uses TLS, the compatibility phone uses UDP, and the pair must register, call, exchange PCMU audio, complete `*10`, and finish an authenticated `*15` DTMF interaction that changes `101` to `103` without changing the SIP credential. It reads no application environment or production database, publishes no host ports, and removes its containers, network, database, keys, and generated state when finished.
 

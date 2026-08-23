@@ -88,11 +88,13 @@ Before handing off a change:
 
 1. Run the narrowest relevant tests while developing.
 2. Run `make check` before committing.
-3. Render or open changed pages at mobile and desktop widths when UI changed.
-4. Validate generated Asterisk configuration when telephony changed.
-5. Run `make nat-smoke` when NAT-sensitive endpoint behavior changes.
-6. Run `make sip-tls-smoke` when SIP transport, certificates, or Linphone provisioning changes.
-7. Update `WORKLOG.md` with what changed, decisions, verification, and remaining work.
+3. Run `make security` and `make admin-test` locally before publishing a release candidate.
+4. Do not use GitHub-hosted Actions for routine CI; the repository's release gate runs on the contributor's trusted local machine.
+5. Render or open changed pages at mobile and desktop widths when UI changed.
+6. Validate generated Asterisk configuration when telephony changed.
+7. Run `make nat-smoke` when NAT-sensitive endpoint behavior changes.
+8. Run `make sip-tls-smoke` when SIP transport, certificates, or Linphone provisioning changes.
+9. Update `WORKLOG.md` with what changed, decisions, verification, and remaining work.
 
 ## Git and change hygiene
 

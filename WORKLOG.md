@@ -2,6 +2,27 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Keep the release gate local
+
+### Shipped
+
+- Removed the GitHub-hosted CI and Security workflows. Public pushes and pull requests no longer execute repository code on GitHub runners.
+- Made the trusted local release gate explicit in `AGENTS.md`, the README, and the threat model: run `make check`, `make security`, and `make admin-test` before publishing, then record the exact result here.
+
+### Decisions
+
+- Prefer the project's already-complete local gate over duplicate hosted runs. Pull requests remain a review surface, while build, test, race, vulnerability, operator-fixture, and security-contract execution stays on a contributor-controlled development machine.
+- Accept contributor discipline as an operational dependency and preserve human boundary review; moving runners does not make automated scanners complete.
+
+### Verification
+
+- The complete local release gate passes after deleting the hosted workflows and updating the policy documentation.
+- The public repository contains no remaining GitHub workflow file or reference claiming that hosted CI is required.
+
+### Remaining
+
+- Keep local verification evidence current in each release worklog entry and add a self-hosted option only if local release cadence later needs automation.
+
 ## 2026-08-22 — Add a real Grandstream HT801 V2 setup path
 
 ### Shipped
@@ -22,10 +43,11 @@ This is the durable, chronological project record. Add new entries at the top. C
 - Disposable in-app browser review at 1280×900 and 390×844 verifies the direct guide jump, two-column desktop and stacked mobile layouts, no page or guide overflow, 44px external links, a 52px fallback disclosure, exact numeric credential shapes, and a clean console.
 - A physical Grandstream HT801 V2 confirmed the documented current menu paths and labels. Its status page reported Registered before any settings were changed, establishing that the previously observed 401 could complete the normal challenge-response flow.
 - `make check`, `make security`, and `make admin-test` pass locally, including formatting, operator fixtures, vet, the complete race-enabled suite, reachable-vulnerability scanning, exact security contracts, and administrator tests.
+- GitHub CI and Security passed exact guide candidate `5522b93f6ba0893a887b9c96fc108fd477ae9f2d` before hosted workflows were retired. The guarded production upgrade then created and restore-drilled checksummed pre/post archives `ringring-20260823T021447Z-23d669b.tar.gz` and `ringring-20260823T021638Z-5522b93.tar.gz`; production finished clean at that exact candidate, and the physical HT801 V2 still reported Registered afterward with its existing credential unchanged.
 
 ### Remaining
 
-- Publish and deploy the combined short-credential, phone-book, and HT801 V2 guide release, then deliberately issue a fresh 6/12-digit phone setting and complete TLS registration, `*10`, incoming ring, and two-phone calling on the physical adapter.
+- Deliberately issue fresh 6/12-digit settings through the authenticated host console, then complete TLS registration, `*10`, incoming ring, and two-phone calling on the physical adapter.
 - Expand the same credential-aware pattern after physical validation of other common FXS adapters. Complete the external child-safety review and OpenAI Zero Data Retention eligibility before opening the AI conversation gate.
 
 ## 2026-08-22 — Turn the phone book into a friendly control board
