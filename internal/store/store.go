@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	extensionrules "github.com/amcchord/ringring/internal/extension"
 	"github.com/amcchord/ringring/internal/model"
@@ -32,6 +34,7 @@ var (
 	ErrOpenAIRotation   = errors.New("OpenAI key rotation state changed")
 	ErrOpenAISpendLimit = errors.New("OpenAI spend limit state changed")
 	ErrInvalidRadio     = errors.New("radio station is not in the catalog")
+	ErrInvalidWeather   = errors.New("weather location is invalid")
 	ErrAIAdultOnly      = errors.New("AI conversation adult-only gate is closed")
 )
 
@@ -130,17 +133,26 @@ type CreatedDevice struct {
 }
 
 type ServiceSettingsInput struct {
-	TimeEnabled        bool
-	WeatherEnabled     bool
-	WeatherQuery       string
-	WeatherLabel       string
-	WeatherLatitude    float64
-	WeatherLongitude   float64
-	RadioEnabled       bool
-	RadioStation       string
-	AIEnabled          bool
-	AIAdultOnlyEnabled bool
-	UpdatedAt          time.Time
+	TimeEnabled         bool
+	WeatherEnabled      bool
+	WeatherSetupAllowed bool
+	WeatherQuery        string
+	WeatherLabel        string
+	WeatherLatitude     float64
+	WeatherLongitude    float64
+	RadioEnabled        bool
+	RadioStation        string
+	AIEnabled           bool
+	AIAdultOnlyEnabled  bool
+	UpdatedAt           time.Time
+}
+
+type WeatherLocationInput struct {
+	Query     string
+	Label     string
+	Latitude  float64
+	Longitude float64
+	UpdatedAt time.Time
 }
 
 type DeviceReadinessInput struct {
@@ -177,6 +189,10 @@ func Open(path string) (*Store, error) {
 	if err := ensurePartyServicesRadioStationColumn(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate radio station setting: %w", err)
+	}
+	if err := ensurePartyServicesWeatherSetupColumn(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate weather setup setting: %w", err)
 	}
 	if err := ensurePartyOpenAIAPIKeyColumn(db); err != nil {
 		_ = db.Close()
@@ -307,6 +323,18 @@ func ensurePartyServicesRadioStationColumn(db *sql.DB) error {
 		return nil
 	}
 	_, err = db.Exec(`ALTER TABLE party_services ADD COLUMN radio_station TEXT NOT NULL DEFAULT 'groove-salad'`)
+	return err
+}
+
+func ensurePartyServicesWeatherSetupColumn(db *sql.DB) error {
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('party_services') WHERE name = 'weather_setup_allowed'`).Scan(&count); err != nil {
+		return err
+	}
+	if count != 0 {
+		return nil
+	}
+	_, err := db.Exec(`ALTER TABLE party_services ADD COLUMN weather_setup_allowed INTEGER NOT NULL DEFAULT 1 CHECK(weather_setup_allowed IN (0, 1))`)
 	return err
 }
 
@@ -672,26 +700,27 @@ func (s *Store) SetPartyOpenAIKeyRotationStatus(ctx context.Context, partyID, ho
 
 func (s *Store) PartyServices(ctx context.Context, partyID string) (model.PartyServices, error) {
 	var services model.PartyServices
-	var timeEnabled, weatherEnabled, radioEnabled, aiEnabled int
+	var timeEnabled, weatherEnabled, weatherSetupAllowed, radioEnabled, aiEnabled int
 	var updated int64
 	err := s.db.QueryRowContext(ctx, `
-		SELECT party_id, time_enabled, weather_enabled, weather_query, weather_label,
+		SELECT party_id, time_enabled, weather_enabled, weather_setup_allowed, weather_query, weather_label,
 			weather_latitude, weather_longitude, radio_enabled, radio_station, ai_enabled, updated_at
 		FROM party_services WHERE party_id = ?`, partyID).Scan(
-		&services.PartyID, &timeEnabled, &weatherEnabled, &services.WeatherQuery, &services.WeatherLabel,
+		&services.PartyID, &timeEnabled, &weatherEnabled, &weatherSetupAllowed, &services.WeatherQuery, &services.WeatherLabel,
 		&services.WeatherLatitude, &services.WeatherLongitude, &radioEnabled, &services.RadioStation, &aiEnabled, &updated,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		if _, err := s.partyByID(ctx, partyID); err != nil {
 			return model.PartyServices{}, err
 		}
-		return model.PartyServices{PartyID: partyID, TimeEnabled: true, RadioStation: radio.DefaultStationID}, nil
+		return model.PartyServices{PartyID: partyID, TimeEnabled: true, WeatherSetupAllowed: true, RadioStation: radio.DefaultStationID}, nil
 	}
 	if err != nil {
 		return model.PartyServices{}, fmt.Errorf("load party services: %w", err)
 	}
 	services.TimeEnabled = timeEnabled != 0
 	services.WeatherEnabled = weatherEnabled != 0
+	services.WeatherSetupAllowed = weatherSetupAllowed != 0
 	services.RadioEnabled = radioEnabled != 0
 	services.AIEnabled = aiEnabled != 0
 	services.UpdatedAt = fromUnix(updated)
@@ -708,13 +737,14 @@ func (s *Store) UpdatePartyServices(ctx context.Context, partyID, hostUserID str
 	}
 	result, err := s.db.ExecContext(ctx, `
 		INSERT INTO party_services (
-			party_id, time_enabled, weather_enabled, weather_query, weather_label,
+			party_id, time_enabled, weather_enabled, weather_setup_allowed, weather_query, weather_label,
 			weather_latitude, weather_longitude, radio_enabled, radio_station, ai_enabled, updated_at
 		)
-		SELECT id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM parties WHERE id = ? AND host_user_id = ?
+		SELECT id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM parties WHERE id = ? AND host_user_id = ?
 		ON CONFLICT(party_id) DO UPDATE SET
 			time_enabled = excluded.time_enabled,
 			weather_enabled = excluded.weather_enabled,
+			weather_setup_allowed = excluded.weather_setup_allowed,
 			weather_query = excluded.weather_query,
 			weather_label = excluded.weather_label,
 			weather_latitude = excluded.weather_latitude,
@@ -723,7 +753,7 @@ func (s *Store) UpdatePartyServices(ctx context.Context, partyID, hostUserID str
 			radio_station = excluded.radio_station,
 			ai_enabled = excluded.ai_enabled,
 			updated_at = excluded.updated_at`,
-		boolInt(input.TimeEnabled), boolInt(input.WeatherEnabled), input.WeatherQuery, input.WeatherLabel,
+		boolInt(input.TimeEnabled), boolInt(input.WeatherEnabled), boolInt(input.WeatherSetupAllowed), input.WeatherQuery, input.WeatherLabel,
 		input.WeatherLatitude, input.WeatherLongitude, boolInt(input.RadioEnabled), station.ID, boolInt(input.AIEnabled), unix(input.UpdatedAt), partyID, hostUserID,
 	)
 	if err != nil {
@@ -733,11 +763,80 @@ func (s *Store) UpdatePartyServices(ctx context.Context, partyID, hostUserID str
 		return model.PartyServices{}, ErrNotFound
 	}
 	return model.PartyServices{
-		PartyID: partyID, TimeEnabled: input.TimeEnabled, WeatherEnabled: input.WeatherEnabled,
+		PartyID: partyID, TimeEnabled: input.TimeEnabled, WeatherEnabled: input.WeatherEnabled, WeatherSetupAllowed: input.WeatherSetupAllowed,
 		WeatherQuery: input.WeatherQuery, WeatherLabel: input.WeatherLabel,
 		WeatherLatitude: input.WeatherLatitude, WeatherLongitude: input.WeatherLongitude,
 		RadioEnabled: input.RadioEnabled, RadioStation: station.ID, AIEnabled: input.AIEnabled, UpdatedAt: input.UpdatedAt.UTC(),
 	}, nil
+}
+
+// SetWeatherLocationByDevice lets the first active phone in a party fill an
+// otherwise unknown weather location. It never replaces a location the host
+// or another phone has already resolved, and it preserves every unrelated
+// service preference.
+func (s *Store) SetWeatherLocationByDevice(ctx context.Context, partyID, sipUsername string, input WeatherLocationInput) (model.PartyServices, bool, error) {
+	if !validWeatherLocation(input) {
+		return model.PartyServices{}, false, ErrInvalidWeather
+	}
+	result, err := s.db.ExecContext(ctx, `
+		INSERT INTO party_services (
+			party_id, time_enabled, weather_enabled, weather_setup_allowed, weather_query, weather_label,
+			weather_latitude, weather_longitude, radio_enabled, radio_station, ai_enabled, updated_at
+		)
+		SELECT p.id, 1, 1, 1, ?, ?, ?, ?, 0, ?, 0, ?
+		FROM parties p
+		WHERE p.id = ? AND EXISTS (
+			SELECT 1 FROM devices d
+			JOIN members m ON m.id = d.member_id
+			WHERE m.party_id = p.id AND d.sip_username = ? AND d.revoked_at IS NULL
+		)
+		ON CONFLICT(party_id) DO UPDATE SET
+			weather_enabled = 1,
+			weather_setup_allowed = 1,
+			weather_query = excluded.weather_query,
+			weather_label = excluded.weather_label,
+			weather_latitude = excluded.weather_latitude,
+			weather_longitude = excluded.weather_longitude,
+			updated_at = excluded.updated_at
+		WHERE party_services.weather_setup_allowed = 1 AND TRIM(party_services.weather_label) = ''`,
+		input.Query, input.Label, input.Latitude, input.Longitude, radio.DefaultStationID,
+		unix(input.UpdatedAt), partyID, sipUsername,
+	)
+	if err != nil {
+		return model.PartyServices{}, false, fmt.Errorf("set weather location from phone: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return model.PartyServices{}, false, fmt.Errorf("count weather location update: %w", err)
+	}
+	if rows == 0 {
+		var active int
+		if err := s.db.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM devices d
+				JOIN members m ON m.id = d.member_id
+				WHERE m.party_id = ? AND d.sip_username = ? AND d.revoked_at IS NULL
+			)`, partyID, sipUsername).Scan(&active); err != nil {
+			return model.PartyServices{}, false, fmt.Errorf("verify weather setup device: %w", err)
+		}
+		if active == 0 {
+			return model.PartyServices{}, false, ErrNotFound
+		}
+	}
+	services, err := s.PartyServices(ctx, partyID)
+	if err != nil {
+		return model.PartyServices{}, false, err
+	}
+	return services, rows == 1, nil
+}
+
+func validWeatherLocation(input WeatherLocationInput) bool {
+	query := strings.TrimSpace(input.Query)
+	label := strings.TrimSpace(input.Label)
+	return query == input.Query && label == input.Label && len(query) >= 2 && len(query) <= 80 && len(label) >= 2 && len(label) <= 120 &&
+		strings.IndexFunc(query, unicode.IsControl) == -1 && strings.IndexFunc(label, unicode.IsControl) == -1 &&
+		!math.IsNaN(input.Latitude) && !math.IsInf(input.Latitude, 0) && !math.IsNaN(input.Longitude) && !math.IsInf(input.Longitude, 0) &&
+		input.Latitude >= -90 && input.Latitude <= 90 && input.Longitude >= -180 && input.Longitude <= 180 && !input.UpdatedAt.IsZero()
 }
 
 // EnforceAIAdultOnlyGate clears every durable conversation-line preference
@@ -1577,6 +1676,8 @@ func (s *Store) RoutingServices(ctx context.Context) ([]model.RoutingServices, e
 			COALESCE(s.time_enabled, 1),
 			CASE WHEN COALESCE(s.weather_enabled, 0) = 1 AND p.openai_status = 'ready'
 				AND p.openai_spend_limit_status NOT IN ('updating', 'update-error') THEN 1 ELSE 0 END,
+			CASE WHEN COALESCE(s.weather_setup_allowed, 1) = 1 AND COALESCE(s.weather_label, '') = '' AND p.openai_status = 'ready'
+				AND p.openai_spend_limit_status NOT IN ('updating', 'update-error') THEN 1 ELSE 0 END,
 			COALESCE(s.radio_enabled, 0),
 			COALESCE(s.radio_station, 'groove-salad'),
 			CASE WHEN COALESCE(s.ai_enabled, 0) = 1 AND p.openai_status = 'ready'
@@ -1590,12 +1691,13 @@ func (s *Store) RoutingServices(ctx context.Context) ([]model.RoutingServices, e
 	var services []model.RoutingServices
 	for rows.Next() {
 		var item model.RoutingServices
-		var timeEnabled, weatherEnabled, radioEnabled, aiEnabled int
-		if err := rows.Scan(&item.PartyID, &timeEnabled, &weatherEnabled, &radioEnabled, &item.RadioStation, &aiEnabled); err != nil {
+		var timeEnabled, weatherEnabled, weatherSetupEnabled, radioEnabled, aiEnabled int
+		if err := rows.Scan(&item.PartyID, &timeEnabled, &weatherEnabled, &weatherSetupEnabled, &radioEnabled, &item.RadioStation, &aiEnabled); err != nil {
 			return nil, fmt.Errorf("scan routing services: %w", err)
 		}
 		item.TimeEnabled = timeEnabled != 0
 		item.WeatherEnabled = weatherEnabled != 0
+		item.WeatherSetupEnabled = weatherSetupEnabled != 0
 		item.RadioEnabled = radioEnabled != 0
 		if _, ok := radio.Lookup(item.RadioStation); !ok {
 			return nil, errors.New("routing state contains an unsupported radio station")
@@ -1784,6 +1886,7 @@ CREATE TABLE IF NOT EXISTS party_services (
     party_id TEXT PRIMARY KEY REFERENCES parties(id) ON DELETE CASCADE,
     time_enabled INTEGER NOT NULL DEFAULT 1 CHECK(time_enabled IN (0, 1)),
     weather_enabled INTEGER NOT NULL DEFAULT 0 CHECK(weather_enabled IN (0, 1)),
+    weather_setup_allowed INTEGER NOT NULL DEFAULT 1 CHECK(weather_setup_allowed IN (0, 1)),
     weather_query TEXT NOT NULL DEFAULT '',
     weather_label TEXT NOT NULL DEFAULT '',
     weather_latitude REAL NOT NULL DEFAULT 0,

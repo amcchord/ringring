@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/amcchord/ringring/internal/radio"
 	"github.com/amcchord/ringring/internal/secure"
 )
 
@@ -911,11 +912,11 @@ func TestPartyServiceSettingsAreHostScopedAndDefaultToTime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !defaults.TimeEnabled || defaults.WeatherEnabled || defaults.RadioEnabled || defaults.RadioStation != "groove-salad" || defaults.AIEnabled {
+	if !defaults.TimeEnabled || defaults.WeatherEnabled || !defaults.WeatherSetupAllowed || defaults.RadioEnabled || defaults.RadioStation != "groove-salad" || defaults.AIEnabled {
 		t.Fatalf("unexpected service defaults: %#v", defaults)
 	}
 	input := ServiceSettingsInput{
-		TimeEnabled: false, WeatherEnabled: true, WeatherQuery: "Portland, Maine",
+		TimeEnabled: false, WeatherEnabled: true, WeatherSetupAllowed: true, WeatherQuery: "Portland, Maine",
 		WeatherLabel: "Portland, Maine", WeatherLatitude: 43.66, WeatherLongitude: -70.25,
 		RadioEnabled: true, RadioStation: "drone-zone", AIEnabled: true, AIAdultOnlyEnabled: true, UpdatedAt: now.Add(time.Minute),
 	}
@@ -966,6 +967,91 @@ func TestPartyServiceSettingsAreHostScopedAndDefaultToTime(t *testing.T) {
 	}
 	if _, err := s.RoutingServices(ctx); err == nil || strings.Contains(err.Error(), party.ID) {
 		t.Fatalf("corrupt radio routing state was not rejected generically: %v", err)
+	}
+}
+
+func TestFirstActivePartyPhoneCanSetOnlyAnUnknownWeatherLocation(t *testing.T) {
+	ctx := t.Context()
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Date(2026, 8, 23, 20, 0, 0, 0, time.UTC)
+	host, err := s.UpsertGoogleUser(ctx, GoogleProfile{Subject: "weather-host", Email: "host@example.test", Name: "Host"}, now, "usr_weather_host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	party, err := s.CreateParty(ctx, NewParty{ID: "pty_weather_setup", Name: "Weather", Slug: "weather-setup", HostUserID: host.ID, CreatedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdatePartyOpenAI(ctx, party.ID, "project", "service-account", "key", "ciphertext", "ready", 1000); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateInvitation(ctx, NewInvitation{
+		ID: "inv_weather_setup", PartyID: party.ID, CreatedByUserID: host.ID,
+		TokenHash: secure.Hash("weather-setup-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := s.ClaimInvitation(ctx, NewClaim{
+		TokenHash: secure.Hash("weather-setup-token"), MemberID: "mem_weather_setup", DisplayName: "Phone", Extension: "101",
+		DeviceID: "dev_weather_setup", DeviceLabel: "ATA", SIPUsername: "345678", SIPSecretCiphertext: "ciphertext",
+		Provisioning: testProvisioning("weather-provision", now), Now: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	routing, err := s.RoutingServices(ctx)
+	if err != nil || len(routing) != 1 || routing[0].WeatherEnabled || !routing[0].WeatherSetupEnabled {
+		t.Fatalf("unknown weather location did not expose only setup routing: %#v error=%v", routing, err)
+	}
+	valid := WeatherLocationInput{
+		Query: "02138", Label: "Cambridge, Massachusetts", Latitude: 42.37, Longitude: -71.11, UpdatedAt: now.Add(time.Minute),
+	}
+	if _, _, err := s.SetWeatherLocationByDevice(ctx, party.ID, "bad endpoint", valid); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown endpoint weather update error = %v", err)
+	}
+	invalid := valid
+	invalid.Label = "unsafe\nlabel"
+	if _, _, err := s.SetWeatherLocationByDevice(ctx, party.ID, "345678", invalid); !errors.Is(err, ErrInvalidWeather) {
+		t.Fatalf("unsafe weather location error = %v", err)
+	}
+	services, changed, err := s.SetWeatherLocationByDevice(ctx, party.ID, "345678", valid)
+	if err != nil || !changed || !services.WeatherEnabled || services.WeatherQuery != "02138" || services.WeatherLabel != "Cambridge, Massachusetts" {
+		t.Fatalf("first phone weather update = %#v changed=%t error=%v", services, changed, err)
+	}
+	routing, err = s.RoutingServices(ctx)
+	if err != nil || !routing[0].WeatherEnabled || routing[0].WeatherSetupEnabled {
+		t.Fatalf("resolved weather did not switch from setup to forecast routing: %#v error=%v", routing, err)
+	}
+	replacement := WeatherLocationInput{
+		Query: "97205", Label: "Portland, Oregon", Latitude: 45.52, Longitude: -122.68, UpdatedAt: now.Add(2 * time.Minute),
+	}
+	services, changed, err = s.SetWeatherLocationByDevice(ctx, party.ID, "345678", replacement)
+	if err != nil || changed || services.WeatherQuery != "02138" || services.WeatherLabel != "Cambridge, Massachusetts" {
+		t.Fatalf("phone replaced an already-known weather location: %#v changed=%t error=%v", services, changed, err)
+	}
+	if _, err := s.UpdatePartyServices(ctx, party.ID, host.ID, ServiceSettingsInput{
+		TimeEnabled: true, WeatherEnabled: false, WeatherQuery: services.WeatherQuery, WeatherLabel: services.WeatherLabel,
+		WeatherLatitude: services.WeatherLatitude, WeatherLongitude: services.WeatherLongitude,
+		RadioStation: radio.DefaultStationID, UpdatedAt: now.Add(3 * time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	routing, err = s.RoutingServices(ctx)
+	if err != nil || routing[0].WeatherEnabled || routing[0].WeatherSetupEnabled {
+		t.Fatalf("host-disabled known weather remained callable: %#v error=%v", routing, err)
+	}
+	if _, err := s.UpdatePartyServices(ctx, party.ID, host.ID, ServiceSettingsInput{
+		TimeEnabled: true, WeatherEnabled: false, WeatherSetupAllowed: false,
+		RadioStation: radio.DefaultStationID, UpdatedAt: now.Add(4 * time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	services, changed, err = s.SetWeatherLocationByDevice(ctx, party.ID, "345678", replacement)
+	if err != nil || changed || services.WeatherEnabled || services.WeatherLabel != "" {
+		t.Fatalf("phone bypassed the host-disabled unknown weather setting: %#v changed=%t error=%v", services, changed, err)
 	}
 }
 
@@ -1208,6 +1294,19 @@ func TestOpenAddsCurrentColumnsToLegacyDatabase(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("radio_station column count = %d", count)
+	}
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('party_services') WHERE name = 'weather_setup_allowed'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("weather_setup_allowed column count = %d", count)
+	}
+	var weatherSetupAllowed int
+	if err := store.db.QueryRow(`SELECT weather_setup_allowed FROM party_services WHERE party_id = 'pty_legacy'`).Scan(&weatherSetupAllowed); err != nil {
+		t.Fatal(err)
+	}
+	if weatherSetupAllowed != 1 {
+		t.Fatalf("legacy weather setup allowed = %d", weatherSetupAllowed)
 	}
 	var stationID string
 	if err := store.db.QueryRow(`SELECT radio_station FROM party_services WHERE party_id = 'pty_legacy'`).Scan(&stationID); err != nil {

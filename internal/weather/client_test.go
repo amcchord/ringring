@@ -1,6 +1,7 @@
 package weather
 
 import (
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -42,5 +43,14 @@ func TestGeocodeAndCurrent(t *testing.T) {
 	}
 	if conditions.Temperature != 72.4 || conditions.High != 76.2 || Description(conditions.WeatherCode) != "partly cloudy skies" {
 		t.Fatalf("unexpected conditions: %#v", conditions)
+	}
+}
+
+func TestCurrentRejectsNonFiniteCoordinates(t *testing.T) {
+	client := New(nil)
+	for _, coordinates := range [][2]float64{{math.NaN(), 0}, {0, math.Inf(1)}} {
+		if _, err := client.Current(t.Context(), coordinates[0], coordinates[1]); err == nil {
+			t.Fatalf("non-finite coordinates were accepted: %#v", coordinates)
+		}
 	}
 }

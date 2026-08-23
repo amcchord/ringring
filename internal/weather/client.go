@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -82,7 +83,8 @@ func (c *Client) Geocode(ctx context.Context, query string) (Location, error) {
 		return Location{}, errors.New("weather location was not found")
 	}
 	result := payload.Results[0]
-	if result.Latitude < -90 || result.Latitude > 90 || result.Longitude < -180 || result.Longitude > 180 {
+	if math.IsNaN(result.Latitude) || math.IsInf(result.Latitude, 0) || math.IsNaN(result.Longitude) || math.IsInf(result.Longitude, 0) ||
+		result.Latitude < -90 || result.Latitude > 90 || result.Longitude < -180 || result.Longitude > 180 {
 		return Location{}, errors.New("weather location returned invalid coordinates")
 	}
 	parts := []string{result.Name}
@@ -95,7 +97,8 @@ func (c *Client) Geocode(ctx context.Context, query string) (Location, error) {
 }
 
 func (c *Client) Current(ctx context.Context, latitude, longitude float64) (Conditions, error) {
-	if latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180 {
+	if math.IsNaN(latitude) || math.IsInf(latitude, 0) || math.IsNaN(longitude) || math.IsInf(longitude, 0) ||
+		latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180 {
 		return Conditions{}, errors.New("weather coordinates are invalid")
 	}
 	values := url.Values{

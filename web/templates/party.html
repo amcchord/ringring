@@ -73,8 +73,8 @@
         </label>
         <div class="service-choice">
           <label class="service-toggle">
-            <input type="checkbox" name="weather_enabled" value="1" {{if .Services.WeatherEnabled}}checked{{end}} {{if not $voiceReady}}disabled{{end}}>
-            <span><strong><span class="service-number">*12</span> Local weather</strong><small>{{if $voiceReady}}A clearly disclosed AI voice reads Open-Meteo data.{{else}}Available when this party's AI voice is ready.{{end}}</small></span>
+            <input type="checkbox" name="weather_enabled" value="1" {{if or .Services.WeatherEnabled .Services.WeatherSetupAllowed}}checked{{end}} {{if not $voiceReady}}disabled{{end}}>
+            <span><strong><span class="service-number">*12</span> Local weather</strong><small>{{if $voiceReady}}{{if .Services.WeatherLabel}}A clearly disclosed AI voice reads Open-Meteo data.{{else}}Dial *12 from a party phone and enter a five-digit U.S. ZIP, or type a place below.{{end}}{{else}}Available when this party's AI voice is ready.{{end}}</small></span>
           </label>
           <label class="weather-field" for="weather-location">Weather place</label>
           <input id="weather-location" name="weather_query" value="{{.Services.WeatherQuery}}" maxlength="80" placeholder="City, state or postal code" autocomplete="postal-code">

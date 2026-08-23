@@ -329,6 +329,15 @@ func TestFirstCallLinesMatchCurrentlyDialableServices(t *testing.T) {
 	if got := numbers(availableFirstCallLines(party, services, true, true)); got != "*10,*15,*11,*12,*13,*14" {
 		t.Fatalf("adult-extension first-call lines = %q", got)
 	}
+	setupServices := model.PartyServices{TimeEnabled: true, WeatherSetupAllowed: true}
+	setupLines := availableFirstCallLines(party, setupServices, false, false)
+	if got := numbers(setupLines); got != "*10,*15,*11,*12" || setupLines[len(setupLines)-1].Description != "Enter a ZIP once, then hear the local forecast." {
+		t.Fatalf("unknown-location first-call lines = %#v", setupLines)
+	}
+	disabledKnown := model.PartyServices{TimeEnabled: true, WeatherLabel: "Portland, Maine"}
+	if got := numbers(availableFirstCallLines(party, disabledKnown, false, false)); got != "*10,*15,*11" {
+		t.Fatalf("host-disabled known weather lines = %q", got)
+	}
 	party.OpenAISpendLimitStatus = "update-error"
 	if got := numbers(availableFirstCallLines(party, services, true, true)); got != "*10,*15,*11,*13" {
 		t.Fatalf("spend-paused first-call lines = %q", got)
@@ -602,6 +611,18 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	}
 	geocoder := &fakeWeatherGeocoder{}
 	app.weather = geocoder
+	setupPage := postForm(t, client, server.URL+"/parties/"+partyID+"/services", url.Values{
+		"csrf": {csrf}, "time_enabled": {"1"}, "weather_enabled": {"1"}, "radio_station": {"groove-salad"},
+	})
+	weatherSetupBody := readBody(t, setupPage)
+	services, err := database.PartyServices(t.Context(), partyID)
+	if setupPage.StatusCode != http.StatusOK || !strings.Contains(weatherSetupBody, "enter a five-digit U.S. ZIP") || err != nil || services.WeatherEnabled || !services.WeatherSetupAllowed || services.WeatherLabel != "" {
+		t.Fatalf("blank enabled weather did not preserve phone setup: status=%d services=%#v error=%v", setupPage.StatusCode, services, err)
+	}
+	routingServices, err := database.RoutingServices(t.Context())
+	if err != nil || len(routingServices) != 1 || routingServices[0].WeatherEnabled || !routingServices[0].WeatherSetupEnabled {
+		t.Fatalf("blank enabled weather did not expose setup-only routing: %#v error=%v", routingServices, err)
+	}
 	servicePage := postForm(t, client, server.URL+"/parties/"+partyID+"/services", url.Values{
 		"csrf": {csrf}, "time_enabled": {"1"}, "weather_enabled": {"1"},
 		"weather_query": {" Portland,   Maine "}, "radio_enabled": {"1"},
@@ -611,7 +632,7 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if servicePage.StatusCode != http.StatusOK || !strings.Contains(serviceBody, "Using Portland, Maine") || geocoder.query != "Portland, Maine" {
 		t.Fatalf("service settings were not saved: status=%d query=%q", servicePage.StatusCode, geocoder.query)
 	}
-	services, err := database.PartyServices(t.Context(), partyID)
+	services, err = database.PartyServices(t.Context(), partyID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -634,7 +655,7 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if err != nil || services.RadioStation != "drone-zone" || !services.RadioEnabled {
 		t.Fatalf("invalid radio update changed settings: %#v error=%v", services, err)
 	}
-	routingServices, err := database.RoutingServices(t.Context())
+	routingServices, err = database.RoutingServices(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}

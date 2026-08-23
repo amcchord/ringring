@@ -1324,7 +1324,8 @@ func (a *App) updateServices(w http.ResponseWriter, r *http.Request, session aut
 		return
 	}
 	query := strings.Join(strings.Fields(r.FormValue("weather_query")), " ")
-	weatherEnabled := r.FormValue("weather_enabled") != ""
+	weatherRequested := r.FormValue("weather_enabled") != ""
+	weatherEnabled := weatherRequested && query != ""
 	aiEnabled := r.FormValue("ai_enabled") != ""
 	if aiEnabled && !a.cfg.AIAdultOnlyEnabled {
 		a.errorPage(w, http.StatusConflict, "The AI conversation line is locked", "The server operator has not opened the adults-only preview. Weather and the other family lines still work.", "/parties/"+url.PathEscape(partyID), "Back to the party")
@@ -1339,7 +1340,7 @@ func (a *App) updateServices(w http.ResponseWriter, r *http.Request, session aut
 		a.errorPage(w, http.StatusBadRequest, "Choose a listed radio station", "RingRing only accepts the fixed stations shown on the party page.", "/parties/"+url.PathEscape(partyID), "Back to the party")
 		return
 	}
-	if (weatherEnabled || aiEnabled) && party.OpenAIStatus != "ready" {
+	if (weatherRequested || aiEnabled) && party.OpenAIStatus != "ready" {
 		a.errorPage(w, http.StatusConflict, "The AI lines need their voice", "Wait until this party's AI status says ready, then turn an AI-powered line on.", "/parties/"+url.PathEscape(partyID), "Back to the party")
 		return
 	}
@@ -1361,11 +1362,6 @@ func (a *App) updateServices(w http.ResponseWriter, r *http.Request, session aut
 			return
 		}
 	}
-	if weatherEnabled && query == "" {
-		a.errorPage(w, http.StatusBadRequest, "Add a weather location", "Enter a city or postal code before turning on the weather line.", "/parties/"+url.PathEscape(partyID), "Back to the party")
-		return
-	}
-
 	location := weather.Location{Query: query}
 	if query == existing.WeatherQuery {
 		location.Label = existing.WeatherLabel
@@ -1383,7 +1379,7 @@ func (a *App) updateServices(w http.ResponseWriter, r *http.Request, session aut
 		}
 	}
 	_, err = a.store.UpdatePartyServices(r.Context(), partyID, session.User.ID, store.ServiceSettingsInput{
-		TimeEnabled: r.FormValue("time_enabled") != "", WeatherEnabled: weatherEnabled,
+		TimeEnabled: r.FormValue("time_enabled") != "", WeatherEnabled: weatherEnabled, WeatherSetupAllowed: weatherRequested,
 		WeatherQuery: location.Query, WeatherLabel: location.Label,
 		WeatherLatitude: location.Latitude, WeatherLongitude: location.Longitude,
 		RadioEnabled: r.FormValue("radio_enabled") != "", RadioStation: radioStation.ID, AIEnabled: aiEnabled,
@@ -1999,8 +1995,12 @@ func availableFirstCallLines(party model.Party, services model.PartyServices, ad
 		lines = append(lines, firstCallLine{Number: "*11", Title: "The time", Description: "Hear the current date and time."})
 	}
 	voiceReady := party.OpenAIStatus == "ready" && !party.OpenAIUsagePausedForSpendLimit()
-	if services.WeatherEnabled && voiceReady {
-		lines = append(lines, firstCallLine{Number: "*12", Title: "Local weather", Description: "Hear the host's chosen forecast."})
+	if voiceReady && (services.WeatherEnabled || (services.WeatherSetupAllowed && services.WeatherLabel == "")) {
+		description := "Hear the host's chosen forecast."
+		if !services.WeatherEnabled {
+			description = "Enter a ZIP once, then hear the local forecast."
+		}
+		lines = append(lines, firstCallLine{Number: "*12", Title: "Local weather", Description: description})
 	}
 	if services.RadioEnabled {
 		lines = append(lines, firstCallLine{Number: "*13", Title: "Internet radio", Description: "Play the host's chosen station."})

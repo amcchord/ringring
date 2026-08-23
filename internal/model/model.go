@@ -41,26 +41,28 @@ func (p Party) OpenAIUsagePausedForSpendLimit() bool {
 }
 
 type PartyServices struct {
-	PartyID          string
-	TimeEnabled      bool
-	WeatherEnabled   bool
-	WeatherQuery     string
-	WeatherLabel     string
-	WeatherLatitude  float64
-	WeatherLongitude float64
-	RadioEnabled     bool
-	RadioStation     string
-	AIEnabled        bool
-	UpdatedAt        time.Time
+	PartyID             string
+	TimeEnabled         bool
+	WeatherEnabled      bool
+	WeatherSetupAllowed bool
+	WeatherQuery        string
+	WeatherLabel        string
+	WeatherLatitude     float64
+	WeatherLongitude    float64
+	RadioEnabled        bool
+	RadioStation        string
+	AIEnabled           bool
+	UpdatedAt           time.Time
 }
 
 type RoutingServices struct {
-	PartyID        string
-	TimeEnabled    bool
-	WeatherEnabled bool
-	RadioEnabled   bool
-	RadioStation   string
-	AIEnabled      bool
+	PartyID             string
+	TimeEnabled         bool
+	WeatherEnabled      bool
+	WeatherSetupEnabled bool
+	RadioEnabled        bool
+	RadioStation        string
+	AIEnabled           bool
 }
 
 type Invitation struct {

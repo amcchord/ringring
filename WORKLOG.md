@@ -2,6 +2,31 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-23 — Let a party phone teach `*12` its ZIP
+
+### Shipped
+
+- Made `*12` available as a setup-only route when a voice-ready party has weather turned on but no saved location. A friendly OpenAI-generated voice asks the authenticated party phone for exactly five U.S. ZIP digits, resolves the place through Open-Meteo, saves it once for the party, reconciles Asterisk, and reads the first forecast in the same call.
+- Bound the write to Asterisk's authenticated PJSIP endpoint and an active device in the same party. The phone can fill only an unknown, host-allowed location; it cannot replace another phone's result or the host's choice, and the atomic update preserves every unrelated service setting.
+- Kept the host in control from the mobile-friendly party page. Checking weather with a blank place allows phone setup, entering a city/state/postal code resolves it immediately, and unchecking weather removes both setup and forecast routing.
+- Added the setup route to the RingRing operator tour and the one-time phone menu, with a versioned upbeat voice prompt and the same bundled failure behavior as the existing weather line.
+
+### Decisions
+
+- Collect a ZIP with DTMF instead of caller speech. This works on analog keypads, records no caller audio, creates no transcript, and sends OpenAI only fixed setup text plus the fixed forecast sentence; Open-Meteo receives the ZIP and forecast coordinates.
+- Default the additive `weather_setup_allowed` migration to enabled so an existing voice-ready party with no known location can call `*12` immediately. The host can explicitly disable it, and forward-only rollback must preserve the added SQLite column even if older code ignores it.
+- Keep richer city/state/postal entry in the web app. Five-digit ZIP is the deliberately narrow phone interface because it is easy to validate and enter without speech capture.
+
+### Verification
+
+- Store tests cover setup-only routing, active endpoint authorization, input validation, first-writer behavior, no replacement, host disable, and additive migration. Voice tests cover the first prompt, invalid-digit retry, same-call forecast, atomic save/reconcile, fixed disclosure text, and the absence of recording/transcription commands; renderer and web tests cover endpoint forwarding and both host states.
+- A live Open-Meteo request resolved the representative five-digit ZIP `02138` to Cambridge, Massachusetts. The host page was inspected at 1280×900 and 390×844; it has no horizontal overflow, the setup explanation remains readable, and controls retain touch-friendly sizing.
+- `make check`, `make security`, `make admin-test`, and the complete local TLS/UDP/media/operator `make sip-smoke` gate pass. The race suite is clean and `govulncheck` reports no reachable vulnerability.
+
+### Remaining
+
+- Publish and deploy the exact validated commit, verify the additive migration and setup-only `*12` route on production, then dial `*12` on the Grandstream and enter the party ZIP to complete the physical handset check.
+
 ## 2026-08-23 — Remember the operator introduction per extension
 
 ### Shipped

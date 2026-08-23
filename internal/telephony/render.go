@@ -125,10 +125,10 @@ func Render(devices []DialDevice, services []model.RoutingServices) (Configurati
 			dialplan.WriteString(" same => n,SayUnix(${EPOCH},,ABdY 'digits/at' IMp)\n")
 			dialplan.WriteString(" same => n,Hangup()\n")
 		}
-		if service.WeatherEnabled {
+		if service.WeatherEnabled || service.WeatherSetupEnabled {
 			dialplan.WriteString("exten => *12,1,Answer()\n")
 			dialplan.WriteString(" same => n,Wait(1)\n")
-			fmt.Fprintf(&dialplan, " same => n,AGI(agi://app:4573/weather,%s)\n", service.PartyID)
+			fmt.Fprintf(&dialplan, " same => n,AGI(agi://app:4573/weather,%s,${CHANNEL(endpoint)})\n", service.PartyID)
 			writeAGIFailureFallback(&dialplan, partyIDs[contextName])
 		}
 		if service.RadioEnabled {

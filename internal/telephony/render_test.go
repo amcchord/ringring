@@ -221,6 +221,23 @@ func TestRenderOmitsDisabledSpecialNumbers(t *testing.T) {
 	}
 }
 
+func TestRenderOffersPartyScopedWeatherSetupWhenLocationIsUnknown(t *testing.T) {
+	config, err := Render([]DialDevice{{
+		PartyID: "pty_weather", DeviceID: "dev_weather", Extension: "101", SIPUsername: "123456", SIPSecret: "secret",
+	}}, []model.RoutingServices{{PartyID: "pty_weather", WeatherSetupEnabled: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialplan := string(config.Dialplan)
+	want := "exten => *12,1,Answer()\n same => n,Wait(1)\n same => n,AGI(agi://app:4573/weather,pty_weather,${CHANNEL(endpoint)})"
+	if !strings.Contains(dialplan, want) {
+		t.Fatalf("party weather setup route did not receive its authenticated endpoint:\n%s", dialplan)
+	}
+	if strings.Contains(dialplan, "weather,pty_weather,${CALLERID") {
+		t.Fatal("weather setup must not trust caller ID")
+	}
+}
+
 func TestRenderAnswersInvalidAndUnavailableCallsWithFriendlyPrompts(t *testing.T) {
 	config, err := Render([]DialDevice{
 		{PartyID: "pty_one", DeviceID: "dev_one", Extension: "101", SIPUsername: "rrd_one", SIPSecret: "secret-a"},

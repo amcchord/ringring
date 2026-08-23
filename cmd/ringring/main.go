@@ -196,7 +196,7 @@ func main() {
 	defer aiListener.Close()
 	voiceServer := &voice.Server{
 		Source: database, AIAdultAccess: database, OperatorDisclosure: database,
-		Extensions: database, Reconcile: app.ReconcileTelephony,
+		Extensions: database, WeatherLocations: database, Reconcile: app.ReconcileTelephony,
 		Cipher: cipher, Weather: weather.New(nil), Speech: openairuntime.New(nil),
 		AudioDir: cfg.VoiceAudioDir, PlaybackDir: cfg.VoicePlaybackDir, Logger: logger,
 		AIModel: cfg.AIRealtimeModel, AICallMaxDuration: cfg.AICallMaxDuration, AIMaxConcurrent: cfg.AIMaxConcurrent,
