@@ -23,9 +23,15 @@ This is the durable, chronological project record. Add new entries at the top. C
 - A live Open-Meteo request resolved the representative five-digit ZIP `02138` to Cambridge, Massachusetts. The host page was inspected at 1280×900 and 390×844; it has no horizontal overflow, the setup explanation remains readable, and controls retain touch-friendly sizing.
 - `make check`, `make security`, `make admin-test`, and the complete local TLS/UDP/media/operator `make sip-smoke` gate pass. The race suite is clean and `govulncheck` reports no reachable vulnerability.
 
+### Production
+
+- Published and deployed exact runtime commit `15e57e05c5b82f69a3e01e4e2fb435726962b321` with the guarded fast-forward upgrader. It created, checksummed, and restore-drilled pre/post archives `ringring-20260823T155002Z-dd5e34d.tar.gz` and `ringring-20260823T155149Z-15e57e0.tar.gz` before reporting success at the same commit.
+- The forward migration added one `weather_setup_allowed` column. The sole existing party remains intentionally unresolved with forecast disabled and phone setup allowed; no location was guessed or prefilled. Generated and loaded Asterisk state each contain exactly one endpoint-authenticated weather route.
+- Public health and readiness return 200; the app and Asterisk are healthy; `ringringctl doctor` passes with one live Grandstream contact; the production checkout is clean; and the post-upgrade app log contains no warning or error.
+
 ### Remaining
 
-- Publish and deploy the exact validated commit, verify the additive migration and setup-only `*12` route on production, then dial `*12` on the Grandstream and enter the party ZIP to complete the physical handset check.
+- Dial `*12` on the Grandstream, enter the party ZIP when asked, and listen for the immediate forecast to complete the physical handset check. The saved place should make later `*12` calls skip setup and go straight to weather.
 
 ## 2026-08-23 — Remember the operator introduction per extension
 
