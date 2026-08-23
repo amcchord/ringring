@@ -22,9 +22,15 @@ This is the durable, chronological project record. Add new entries at the top. C
 - `make check`, `make security`, `make admin-test`, and the complete local TLS/UDP/media/operator `make sip-smoke` gate pass. `govulncheck` reports no reachable vulnerability.
 - The changed setup guidance was inspected at 1280×900 and 390×844. The Grandstream card remains readable, its controls retain touch-sized targets, and the mobile document has no horizontal overflow.
 
+### Production
+
+- Published and deployed exact runtime commit `dd5e34d051c4925b0482f3e760995c4f74b0fd44` with the guarded fast-forward upgrader. It created, checksummed, and restore-drilled pre/post archives `ringring-20260823T151744Z-3fb8aae.tar.gz` and `ringring-20260823T151931Z-dd5e34d.tar.gz` before reporting success at the same commit.
+- Initialized the sole existing test extension's disclosure timestamp because its operator introduction had already been heard and confirmed. The database reports one disclosure row and no foreign-key violations; generated and loaded Asterisk dialplans each contain all eight endpoint-authenticated operator sites.
+- Public health and readiness return 200; the app and Asterisk are healthy; and `ringringctl doctor` passes after the Grandstream returned to one live SIP contact. The only deployment log warning was the known first reconcile racing Asterisk's container name during startup; generated state was present, all routes loaded, and no subsequent warning or error was observed.
+
 ### Remaining
 
-- Publish and deploy the exact validated commit, initialize the already-heard production extension's disclosure state, and verify both delayed off-hook routing and the shorter repeat greeting on the physical handset.
+- Verify delayed `*0` off-hook routing and the shorter repeat greeting on the physical handset.
 - Collect the host's city/state, enable weather for that party, and then physically verify `*12`.
 
 ## 2026-08-23 — Publish an open phone provisioning API
