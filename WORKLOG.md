@@ -25,9 +25,14 @@ This is the durable, chronological project record. Add new entries at the top. C
 - Browser QA at 1440×1000 and 390×844 confirms that the active-call board, join code, privacy note, and member cards stay legible without horizontal overflow. Claiming extension 103 in a separate tab updated the already-open host phone book to three members within one polling cycle while preserving the active call.
 - `make check`, `make security`, and `make admin-test` pass locally; the race-enabled full suite is clean and `govulncheck` reports no reachable vulnerability. The NAT gate also passes two authenticated registrations and bidirectional RTP across separate household translations. Its temporary-root override keeps Docker Desktop bind mounts and cleanup reproducible on macOS.
 
+### Production
+
+- Published and deployed exact runtime commit `eabc8d9422db4fc83deeecd112c6c89fe7f97830` with the guarded fast-forward upgrader. It created and restore-drilled pre/post archives `ringring-20260823T205848Z-6de65b5.tar.gz` and `ringring-20260823T210036Z-eabc8d9.tar.gz`; public health/readiness, database and credential integrity, private AMI access, SIP TLS synchronization, the loaded ConfBridge module and announcement context, the live-script SRI digest, and all container checks pass. Recent app logs contain no warning or error.
+- Production reported zero registered SIP contacts during verification, so deployment did not place, join, or interrupt a real family call.
+
 ### Remaining
 
-- Deploy the resulting commit and repeat one three-phone join on family hardware before treating the feature as production-ready.
+- Repeat one three-phone join on family hardware when phones are online before treating the feature as fully hardware-verified.
 
 ## 2026-08-23 — Finish general phone invitations in the iPhone app
 
