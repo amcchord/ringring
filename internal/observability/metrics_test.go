@@ -39,6 +39,7 @@ func TestMetricsHandlerRendersBoundedAggregates(t *testing.T) {
 	registry.ObserveReconciliation(true)
 	registry.ObserveReconciliation(false)
 	registry.ObserveVoice("ai_bridge", "completed")
+	registry.ObserveVoice("operator", "ready")
 	registry.ObserveVoice("caller-supplied-value", "caller-result")
 	registry.SetAIActive(2)
 
@@ -66,6 +67,7 @@ func TestMetricsHandlerRendersBoundedAggregates(t *testing.T) {
 		"ringring_telephony_reconciliations_total{result=\"success\"} 1",
 		"ringring_telephony_reconciliations_total{result=\"error\"} 1",
 		"ringring_voice_service_requests_total{service=\"ai_bridge\",result=\"completed\"} 1",
+		"ringring_voice_service_requests_total{service=\"operator\",result=\"ready\"} 1",
 		"ringring_voice_service_requests_total{service=\"other\",result=\"error\"} 1",
 		"ringring_ai_calls_active 2",
 	} {

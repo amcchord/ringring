@@ -99,10 +99,16 @@
       <div><dt>Name</dt><dd>RingRing {{.Claim.Member.Extension}}</dd></div>
       <div><dt>Outbound Proxy</dt><dd>Leave blank</dd></div>
       <div><dt>NAT Traversal</dt><dd>Keep-alive</dd></div>
+      <div><dt>Off Hook Auto Dial</dt><dd><strong>0</strong></dd></div>
+      <div><dt>Off Hook Auto Dial Delay</dt><dd><strong>8 seconds</strong></dd></div>
     </dl>
     <div class="device-guide-next">
       <span aria-hidden="true">→</span>
       <div><strong>Then open SIP Settings</strong><p>Keep <strong>SIP Registration</strong> on, set <strong>Register Expiration</strong> to <strong>5 minutes</strong>, choose <strong>TLS</strong> for SIP Transport, and keep the <strong>sips</strong> URI scheme. The shorter refresh helps the phone reconnect promptly after a RingRing server restart. Under Codec Settings, put <strong>PCMU / G.711 μ-law</strong> first and prefer DTMF <strong>via RTP (RFC2833)</strong>. Under Advanced Settings, turn <strong>Authenticate Server Certificate chain</strong> on.</p></div>
+    </div>
+    <div class="device-guide-next">
+      <span aria-hidden="true">☎</span>
+      <div><strong>Let the operator notice an off-hook phone</strong><p>In General Settings, set <strong>Off Hook Auto Dial</strong> to <strong>0</strong> and its delay to <strong>8 seconds</strong>. That gives you time to start dialing normally; when nobody dials, the adapter calls RingRing’s help line instead of leaving the handset in silence.</p></div>
     </div>
     <details class="device-guide-fallback">
       <summary>Use the UDP fallback only if TLS will not register</summary>
@@ -155,6 +161,10 @@
   </section>
   {{end}}
   <div class="phone-test-card">
+    <span class="service-number">0</span>
+    <div><strong>Ask the RingRing operator</strong><p>Dial <strong>0</strong> or <strong>*0</strong> for a quick, clearly disclosed AI-voice tour. The operator also explains a number that does not exist. On a supported telephone adapter, set its delayed off-hook or warmline destination to <strong>0</strong> after about 8 seconds.</p></div>
+  </div>
+  <div class="phone-test-card">
     <span class="service-number">*10</span>
     <div><strong>Test both directions</strong><p>After the phone says it is registered, dial <strong>*10</strong>. Speak after the beep: hearing your own voice proves its microphone, speaker, and two-way audio all work. Then the host can tap <strong>Ring this phone</strong> on the party page to prove incoming ringing without setting up a second phone first.</p></div>
   </div>
@@ -169,7 +179,7 @@
       <p>The labels vary by brand, but the six manual settings above are all most devices need.</p>
     </div>
     <div class="guide-grid">
-      <article><span aria-hidden="true">☎️</span><h3>Telephone adapter</h3><ol><li>Plug the telephone into <strong>PHONE 1</strong>, not the wall.</li><li>Open the adapter’s Line 1 or FXS page and use the field translator above.</li><li>Use TLS 1.2 with certificate checking when offered; otherwise choose the UDP fallback.</li><li>Keep NAT keep-alive or rport on when offered. Do not forward router ports.</li></ol></article>
+      <article><span aria-hidden="true">☎️</span><h3>Telephone adapter</h3><ol><li>Plug the telephone into <strong>PHONE 1</strong>, not the wall.</li><li>Open the adapter’s Line 1 or FXS page and use the field translator above.</li><li>Use TLS 1.2 with certificate checking when offered; otherwise choose the UDP fallback.</li><li>Keep NAT keep-alive or rport on when offered. Do not forward router ports.</li><li>If supported, set delayed off-hook, hotline, or warmline dialing to <strong>0</strong> after 8–10 seconds.</li></ol></article>
       <article><span aria-hidden="true">📟</span><h3>VoIP desk phone</h3><ol><li>Add a SIP account or line and use the field translator above.</li><li>Use the extension only as the display number; both SIP user and Auth ID get the generated username.</li><li>Choose TLS on port 5061 and a 300–600 second registration expiry.</li><li>Save, wait for Registered, then dial <strong>*10</strong>.</li></ol></article>
       <article><span aria-hidden="true">📱</span><h3>Other softphone app</h3><ol><li>Add a SIP account manually—do not choose a public phone provider.</li><li>Use the generated username for both SIP user and authentication ID.</li><li>Choose TLS, keep server-certificate verification on, and enter the settings exactly.</li><li>Allow microphone access, then call <strong>*10</strong> to test both directions.</li></ol></article>
     </div>

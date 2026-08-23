@@ -15,6 +15,8 @@ import (
 
 const defaultSpeechURL = "https://api.openai.com/v1/audio/speech"
 
+const ringRingSpeechInstructions = "Speak as the RingRing operator for a bright, colorful family phone service. Sound warm, playful, upbeat, and confident, with a smile in your voice and crisp telephone diction. Use lively natural intonation and a brisk but unhurried pace. Never sound corporate, robotic, sleepy, shrill, or like baby talk."
+
 type Client struct {
 	httpClient *http.Client
 	speechURL  string
@@ -35,8 +37,8 @@ func (c *Client) SpeechPCM(ctx context.Context, apiKey, input string) ([]byte, e
 		return nil, errors.New("speech input must be 1 to 1200 bytes")
 	}
 	body, err := json.Marshal(map[string]any{
-		"model": "gpt-4o-mini-tts", "voice": "coral", "input": input,
-		"instructions":    "Speak warmly, clearly, and briskly for a cheerful family phone service.",
+		"model": "gpt-4o-mini-tts", "voice": "marin", "input": input,
+		"instructions":    ringRingSpeechInstructions,
 		"response_format": "pcm",
 	})
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -21,8 +22,12 @@ func TestSpeechRequestAndPCMConversion(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if body["model"] != "gpt-4o-mini-tts" || body["response_format"] != "pcm" {
+		if body["model"] != "gpt-4o-mini-tts" || body["voice"] != "marin" || body["response_format"] != "pcm" {
 			t.Fatalf("unexpected speech request: %#v", body)
+		}
+		instructions, _ := body["instructions"].(string)
+		if instructions != ringRingSpeechInstructions || !strings.Contains(instructions, "bright, colorful") || !strings.Contains(instructions, "Never sound corporate") {
+			t.Fatalf("speech request lost the RingRing voice direction: %#v", body)
 		}
 		_, _ = w.Write(pcm)
 	}))

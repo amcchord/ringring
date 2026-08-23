@@ -25,6 +25,14 @@ import (
 
 var safePartyID = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
+const (
+	operatorReasonHelp               = "help"
+	operatorReasonMisdial            = "misdial"
+	operatorReasonPhoneUnavailable   = "phone-unavailable"
+	operatorReasonServiceUnavailable = "service-unavailable"
+	operatorCacheVersion             = "v1"
+)
+
 type PartySource interface {
 	PartyVoiceSettings(context.Context, string) (model.Party, model.PartyServices, error)
 }
@@ -102,6 +110,8 @@ func (s *Server) handle(connection net.Conn) {
 	switch environment["agi_network_script"] {
 	case "weather":
 		s.handleWeather(reader, writer, environment)
+	case "operator":
+		s.handleOperator(reader, writer, environment)
 	case "ai-authorize":
 		s.handleAIAuthorize(reader, writer, environment)
 	case "choose-extension":
@@ -110,6 +120,27 @@ func (s *Server) handle(connection net.Conn) {
 		_ = agiCommand(reader, writer, "EXEC Playback ss-noservice")
 	}
 	return
+}
+
+func (s *Server) handleOperator(reader *bufio.Reader, writer *bufio.Writer, environment map[string]string) {
+	result := "error"
+	defer func() { s.Metrics.ObserveVoice("operator", result) }()
+	_ = agiCommand(reader, writer, "SET VARIABLE RINGRING_OPERATOR_READY 0")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	path, err := s.operatorAudio(ctx, environment["agi_arg_1"], environment["agi_arg_2"])
+	if err != nil {
+		s.logger().Warn("prepare RingRing operator", "error_class", observability.ErrorClass(err))
+		return
+	}
+	if err := agiCommand(reader, writer, `STREAM FILE "`+path+`" ""`); err != nil {
+		return
+	}
+	if err := agiCommand(reader, writer, "SET VARIABLE RINGRING_OPERATOR_READY 1"); err != nil {
+		return
+	}
+	result = "ready"
 }
 
 func (s *Server) handleChooseExtension(reader *bufio.Reader, writer *bufio.Writer, environment map[string]string) {
@@ -214,6 +245,81 @@ func (s *Server) handleWeather(reader *bufio.Reader, writer *bufio.Writer, envir
 	}
 	if err := agiCommand(reader, writer, `STREAM FILE "`+path+`" ""`); err == nil {
 		result = "ready"
+	}
+}
+
+func (s *Server) operatorAudio(ctx context.Context, partyID, reason string) (string, error) {
+	if s.Source == nil || s.Cipher == nil || s.Speech == nil || s.AudioDir == "" || s.PlaybackDir == "" {
+		return "", errors.New("RingRing operator is not fully configured")
+	}
+	if !safePartyID.MatchString(partyID) {
+		return "", errors.New("invalid operator party ID")
+	}
+	party, services, err := s.Source.PartyVoiceSettings(ctx, partyID)
+	if err != nil {
+		return "", err
+	}
+	if party.OpenAIStatus != "ready" || party.OpenAIUsagePausedForSpendLimit() || party.OpenAIKeyCiphertext == "" {
+		return "", errors.New("party operator voice is unavailable")
+	}
+	promptName, phrase, err := operatorPrompt(reason, services)
+	if err != nil {
+		return "", err
+	}
+	filename := "operator-" + operatorCacheVersion + "-" + promptName + "-" + partyID + ".wav"
+	localPath := filepath.Join(s.AudioDir, filename)
+	if info, err := os.Stat(localPath); err == nil && info.Size() > 44 &&
+		(services.UpdatedAt.IsZero() || !info.ModTime().Before(services.UpdatedAt)) {
+		return filepath.Join(s.PlaybackDir, strings.TrimSuffix(filename, ".wav")), nil
+	}
+
+	apiKey, err := s.Cipher.Decrypt(party.OpenAIKeyCiphertext, []byte(party.ID))
+	if err != nil {
+		return "", fmt.Errorf("decrypt party OpenAI key for operator: %w", err)
+	}
+	pcm, err := s.Speech.SpeechPCM(ctx, apiKey, phrase)
+	if err != nil {
+		return "", err
+	}
+	wav, err := openairuntime.PCM24kToWAV8k(pcm)
+	if err != nil {
+		return "", fmt.Errorf("convert operator speech: %w", err)
+	}
+	if err := os.MkdirAll(s.AudioDir, 0o750); err != nil {
+		return "", fmt.Errorf("create operator audio directory: %w", err)
+	}
+	if err := atomicWrite(localPath, wav); err != nil {
+		return "", err
+	}
+	return filepath.Join(s.PlaybackDir, strings.TrimSuffix(filename, ".wav")), nil
+}
+
+func operatorPrompt(reason string, services model.PartyServices) (string, string, error) {
+	switch reason {
+	case operatorReasonHelp:
+		features := []string{
+			"For a sound check, dial star one zero",
+			"To choose a new extension, dial star one five",
+		}
+		if services.TimeEnabled {
+			features = append(features, "For the time, dial star one one")
+		}
+		if services.WeatherEnabled {
+			features = append(features, "For the weather, dial star one two")
+		}
+		if services.RadioEnabled {
+			features = append(features, "For radio, dial star one three")
+		}
+		return reason, "Ring ring! Hi! I'm the RingRing operator, an AI-generated voice, not a person. Dial a family extension to ring someone. " +
+			strings.Join(features, ". ") + ". Dial zero whenever you need this tour. RingRing cannot call regular or emergency numbers, so keep another way to get help.", nil
+	case operatorReasonMisdial:
+		return reason, "Oops-a-daisy! I'm the RingRing operator, an AI-generated voice, not a person. That number doesn't live in this party. Check the RingRing phonebook and try again, or dial zero for a quick tour. RingRing cannot call regular or emergency numbers.", nil
+	case operatorReasonPhoneUnavailable:
+		return reason, "Ring ring, operator here! I'm an AI-generated voice, not a person. That phone couldn't answer right now. Try again in a bit, or dial zero if you need help.", nil
+	case operatorReasonServiceUnavailable:
+		return reason, "Ring ring, operator here! I'm an AI-generated voice, not a person. That special line is taking a quick break. Try again soon, or dial zero if you need help.", nil
+	default:
+		return "", "", errors.New("invalid operator prompt")
 	}
 }
 

@@ -167,8 +167,11 @@ grep -Fq 'exten => *10,1,Answer()' "$work_directory/state/extensions.conf"
 grep -Fq ' same => n,Echo()' "$work_directory/state/extensions.conf"
 grep -Fq 'exten => *15,1,Answer()' "$work_directory/state/extensions.conf"
 grep -Fq "choose-extension,pty_smoke,\${CHANNEL(endpoint)}" "$work_directory/state/extensions.conf"
+grep -Fq 'exten => 0,1,Answer()' "$work_directory/state/extensions.conf"
+grep -Fq 'exten => *0,1,Answer()' "$work_directory/state/extensions.conf"
+grep -Fq 'AGI(agi://app:4573/operator,pty_smoke,help)' "$work_directory/state/extensions.conf"
 grep -q '^exten => 102,1,NoOp(RingRing party call)$' "$work_directory/state/extensions.conf"
-grep -Fq 'GotoIf($["${DIALSTATUS}"="ANSWER"]?done:unavailable)' "$work_directory/state/extensions.conf"
+grep -Fq 'GotoIf($["${DIALSTATUS}"="ANSWER"]?rr-phone-done:unavailable)' "$work_directory/state/extensions.conf"
 grep -Fq 'exten => _X!,1,Answer()' "$work_directory/state/extensions.conf"
 grep -Fq 'exten => _*X!,1,Answer()' "$work_directory/state/extensions.conf"
 
@@ -294,11 +297,18 @@ done
 invalid_number=$(docker exec ringring-sip-smoke-asterisk \
   asterisk -rx 'dialplan show 222@rr-party-pty_smoke')
 printf '%s\n' "$invalid_number" | grep -Fq "'_X!'"
+printf '%s\n' "$invalid_number" | grep -Fq 'operator,pty_smoke,misdial'
 printf '%s\n' "$invalid_number" | grep -Fq 'cannot-complete-as-dialed'
 invalid_service=$(docker exec ringring-sip-smoke-asterisk \
   asterisk -rx 'dialplan show *12@rr-party-pty_smoke')
 printf '%s\n' "$invalid_service" | grep -Fq "'_*X!'"
+printf '%s\n' "$invalid_service" | grep -Fq 'operator,pty_smoke,misdial'
 printf '%s\n' "$invalid_service" | grep -Fq 'cannot-complete-as-dialed'
+operator_line=$(docker exec ringring-sip-smoke-asterisk \
+  asterisk -rx 'dialplan show 0@rr-party-pty_smoke')
+printf '%s\n' "$operator_line" | grep -Fq "'0'"
+printf '%s\n' "$operator_line" | grep -Fq 'operator,pty_smoke,help'
+printf '%s\n' "$operator_line" | grep -Fq 'please-try-again'
 docker rm -f ringring-sip-smoke-register-a >/dev/null
 
 echo "Sending a host-scoped incoming ring test to phone B..."
@@ -412,7 +422,7 @@ printf '%s\n' "$channels" | grep -q '^0 active channels'
 
 docker rm ringring-sip-smoke-phone-a >/dev/null
 find "$work_directory/logs/ringring-sip-smoke-phone-a" -type f -delete
-for destination in 222 '*12'; do
+for destination in 222 '*12' 0; do
   echo "Calling unavailable destination $destination and checking for an answered spoken response..."
   failure_started=$(date +%s)
   run_and_wait ringring-sip-smoke-phone-a 20 \
@@ -426,7 +436,7 @@ for destination in 222 '*12'; do
     -s "$destination" -au rr_smoke_a -ap smoke-only-a-7Qm4s9Vx -m 1 -aa \
     -key branch_tag failure -trace_msg -trace_err
   failure_elapsed=$(($(date +%s) - failure_started))
-  if test "$failure_elapsed" -lt 3 || test "$failure_elapsed" -gt 15; then
+  if test "$failure_elapsed" -lt 2 || test "$failure_elapsed" -gt 15; then
     echo "The friendly failure prompt had an unexpected duration." >&2
     exit 1
   fi
@@ -499,4 +509,4 @@ if docker logs ringring-sip-smoke-app 2>&1 | grep -Eq 'change extension from pho
 fi
 channels=$(docker exec ringring-sip-smoke-asterisk asterisk -rx 'core show channels count')
 printf '%s\n' "$channels" | grep -q '^0 active channels'
-echo "SIP smoke test passed: verified TLS 1.2 plus UDP registration, host-added same-extension routing, mixed-transport extension calling, answered spoken fallbacks for unavailable numbers and star lines, *10 echo, bidirectional RTP, and authenticated *15 DTMF extension selection."
+echo "SIP smoke test passed: verified TLS 1.2 plus UDP registration, host-added same-extension routing, mixed-transport extension calling, party-scoped RingRing operator routing with bundled fallback, answered spoken responses for unavailable numbers and star lines, *10 echo, bidirectional RTP, and authenticated *15 DTMF extension selection."

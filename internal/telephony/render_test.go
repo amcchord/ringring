@@ -209,6 +209,11 @@ func TestRenderOmitsDisabledSpecialNumbers(t *testing.T) {
 	if !strings.Contains(dialplan, "exten => *15,1,Answer()") || !strings.Contains(dialplan, "choose-extension,pty_quiet,${CHANNEL(endpoint)}") {
 		t.Fatalf("voice extension selection must remain available when optional services are disabled:\n%s", dialplan)
 	}
+	for _, number := range []string{"0", "*0"} {
+		if !strings.Contains(dialplan, "exten => "+number+",1,Answer()") || !strings.Contains(dialplan, "operator,pty_quiet,help") {
+			t.Fatalf("RingRing operator %s must remain available when optional services are disabled:\n%s", number, dialplan)
+		}
+	}
 	for _, number := range []string{"*11", "*12", "*13", "*14"} {
 		if strings.Contains(dialplan, "exten => "+number) {
 			t.Fatalf("disabled service %s remained in dialplan:\n%s", number, dialplan)
@@ -229,11 +234,13 @@ func TestRenderAnswersInvalidAndUnavailableCallsWithFriendlyPrompts(t *testing.T
 	}
 	dialplan := string(config.Dialplan)
 	for _, required := range []string{
-		"same => n,GotoIf($[\"${DIALSTATUS}\"=\"ANSWER\"]?done:unavailable)",
-		"same => n(unavailable),Answer()\n same => n,Wait(1)\n same => n,Playback(sorry)\n same => n,Playback(number-not-answering)\n same => n,Playback(please-try-call-later)",
-		"exten => _X!,1,Answer()\n same => n,Wait(1)\n same => n,Playback(sorry)\n same => n,Playback(cannot-complete-as-dialed)\n same => n,Playback(please-try-again)",
-		"exten => _*X!,1,Answer()\n same => n,Wait(1)\n same => n,Playback(sorry)\n same => n,Playback(cannot-complete-as-dialed)\n same => n,Playback(please-try-again)",
-		"same => n,GotoIf($[\"${AGISTATUS}\"=\"SUCCESS\"]?done:unavailable)",
+		"same => n,GotoIf($[\"${DIALSTATUS}\"=\"ANSWER\"]?rr-phone-done:unavailable)",
+		"same => n,AGI(agi://app:4573/operator,pty_one,phone-unavailable)",
+		"exten => _X!,1,Answer()\n same => n,Wait(0.5)\n same => n,Set(RINGRING_OPERATOR_READY=0)\n same => n,AGI(agi://app:4573/operator,pty_one,misdial)",
+		"exten => _*X!,1,Answer()\n same => n,Wait(0.5)\n same => n,Set(RINGRING_OPERATOR_READY=0)\n same => n,AGI(agi://app:4573/operator,pty_two,misdial)",
+		"same => n,GotoIf($[\"${AGISTATUS}\"=\"SUCCESS\"]?rr-agi-done:rr-agi-unavailable)",
+		"same => n,AGI(agi://app:4573/operator,pty_one,service-unavailable)",
+		"same => n,Playback(cannot-complete-as-dialed)",
 	} {
 		if !strings.Contains(dialplan, required) {
 			t.Fatalf("friendly failure route missing %q:\n%s", required, dialplan)
@@ -243,6 +250,16 @@ func TestRenderAnswersInvalidAndUnavailableCallsWithFriendlyPrompts(t *testing.T
 		t.Fatalf("each party must own its numeric and star-code fallbacks:\n%s", dialplan)
 	}
 	if strings.Count(dialplan, "Playback(cannot-complete-as-dialed)") != 4 {
-		t.Fatalf("invalid-call prompts must remain inside each party context:\n%s", dialplan)
+		t.Fatalf("bundled invalid-call fallbacks must remain inside each party context:\n%s", dialplan)
+	}
+	oneStart := strings.Index(dialplan, "[rr-party-pty_one]")
+	twoStart := strings.Index(dialplan, "[rr-party-pty_two]")
+	if oneStart < 0 || twoStart < 0 {
+		t.Fatalf("missing party contexts:\n%s", dialplan)
+	}
+	one := dialplan[oneStart:twoStart]
+	two := dialplan[twoStart:]
+	if strings.Contains(one, "operator,pty_two,") || strings.Contains(two, "operator,pty_one,") {
+		t.Fatalf("operator request crossed a party boundary:\n%s", dialplan)
 	}
 }

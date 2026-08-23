@@ -2,6 +2,31 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-23 — Give every party a RingRing operator
+
+### Shipped
+
+- Added exact party-scoped `0` and `*0` help routes plus an OpenAI text-to-speech operator for help, misdialed numbers, unavailable phones, and temporarily unavailable services. The operator uses `gpt-4o-mini-tts` with the `marin` voice and explicit bright, playful RingRing performance direction; the adult-only Realtime line receives the same brand direction.
+- Kept every operator script fixed in code and clearly disclosed as AI-generated. OpenAI receives no caller audio, dialed digits, party/member names, extensions, or SIP credentials. Versioned 8 kHz WAV prompts cache per party and reason, invalidate after service changes, and never represent call activity.
+- Preserved a bundled Asterisk explanation behind every AI-assisted route so a missing/paused party key, provider failure, or private app failure still answers instead of returning fast busy. Added a bounded `operator` metric label without any party, caller, reason, or error value.
+- Added a visible operator card to the host and one-time setup pages. The Grandstream HT801 V2 guide now shows **Off Hook Auto Dial = 0** with an **8 second** delay, and the generic ATA guide maps equivalent hotline/warmline settings to the same help route.
+
+### Decisions
+
+- Use one-way text-to-speech for the family operator, not open-ended Realtime. This keeps the universally reachable line deterministic and suitable for every extension while the conversational `*14` preview remains restricted to adult extensions.
+- Implement idle-handset help at the ATA. SIP sends no request merely because an analog handset is off hook; the adapter must originate `0` after its delay. Any phone can still dial `0` or `*0` manually.
+- Mention only code-controlled, currently enabled family-safe lines in the tour. The operator never advertises the adult-only `*14` line and repeats that RingRing cannot place regular or emergency calls.
+
+### Verification
+
+- Focused operator, speech, observability, renderer, web, and security-contract tests pass. `make check`, `make security`, and `make admin-test` pass locally; `govulncheck` reports no reachable vulnerability.
+- The local SIP smoke suite passes with TLS and UDP registration, party-scoped operator generation, an authenticated answered call to `0`, bundled no-provider fallback, friendly invalid/disabled destinations, same-extension calling, `*10`, RTP, and `*15`.
+- The changed host and setup pages were inspected at 1280×900 and 390×844. The operator and HT801 guidance remain readable, and the mobile document has no horizontal overflow.
+
+### Remaining
+
+- Publish and deploy the exact locally validated commit, pre-generate the live party’s operator audio, and configure/read back the authorized test HT801 V2’s delayed off-hook destination. A person must lift the physical handset and listen to complete the final subjective voice/energy check.
+
 ## 2026-08-23 — Make the AI line an adult-extension choice
 
 ### Shipped

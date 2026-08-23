@@ -53,6 +53,7 @@ func (f fakeWeather) Current(context.Context, float64, float64) (weather.Conditi
 type fakeSpeech struct {
 	key   string
 	input string
+	calls int
 }
 
 type extensionChange struct {
@@ -82,11 +83,103 @@ func scriptedAGI(results ...string) *bufio.Reader {
 func (f *fakeSpeech) SpeechPCM(_ context.Context, key, input string) ([]byte, error) {
 	f.key = key
 	f.input = input
+	f.calls++
 	pcm := make([]byte, 600)
 	for i := 0; i < len(pcm); i += 2 {
 		binary.LittleEndian.PutUint16(pcm[i:i+2], uint16(int16(500)))
 	}
 	return pcm, nil
+}
+
+func TestOperatorAudioUsesPartyKeyDisclosesAIAndCaches(t *testing.T) {
+	cipher, err := secure.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ciphertext, err := cipher.Encrypt("party-operator-key", []byte("pty_operator"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	speech := &fakeSpeech{}
+	server := &Server{
+		Source: fakePartySource{
+			party: model.Party{ID: "pty_operator", Name: "Private Family Name", OpenAIStatus: "ready", OpenAIKeyCiphertext: ciphertext},
+			services: model.PartyServices{
+				PartyID: "pty_operator", TimeEnabled: true, WeatherEnabled: true, RadioEnabled: true, AIEnabled: true,
+			},
+		},
+		Cipher: cipher, Speech: speech, AudioDir: t.TempDir(), PlaybackDir: "/voice",
+	}
+
+	path, err := server.operatorAudio(t.Context(), "pty_operator", operatorReasonHelp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "/voice/operator-v1-help-pty_operator" || speech.key != "party-operator-key" || speech.calls != 1 {
+		t.Fatalf("unexpected operator output: path=%q key=%q calls=%d", path, speech.key, speech.calls)
+	}
+	for _, phrase := range []string{"RingRing operator", "AI-generated voice", "not a person", "star one zero", "star one one", "star one two", "star one three", "star one five", "regular or emergency"} {
+		if !strings.Contains(speech.input, phrase) {
+			t.Fatalf("operator tour omitted %q: %q", phrase, speech.input)
+		}
+	}
+	for _, privateOrAdultOnly := range []string{"Private Family Name", "star one four"} {
+		if strings.Contains(speech.input, privateOrAdultOnly) {
+			t.Fatalf("operator tour exposed or advertised %q: %q", privateOrAdultOnly, speech.input)
+		}
+	}
+
+	if _, err := server.operatorAudio(t.Context(), "pty_operator", operatorReasonHelp); err != nil {
+		t.Fatal(err)
+	}
+	if speech.calls != 1 {
+		t.Fatalf("operator audio was regenerated instead of using its cache: %d calls", speech.calls)
+	}
+}
+
+func TestOperatorPromptMentionsOnlyEnabledFamilySafeLines(t *testing.T) {
+	_, prompt, err := operatorPrompt(operatorReasonHelp, model.PartyServices{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, disabled := range []string{"star one one", "star one two", "star one three", "star one four"} {
+		if strings.Contains(prompt, disabled) {
+			t.Fatalf("disabled or adult-only line %q appeared in operator tour: %q", disabled, prompt)
+		}
+	}
+	if _, _, err := operatorPrompt("caller-supplied-value", model.PartyServices{}); err == nil {
+		t.Fatal("unrecognized operator reason was accepted")
+	}
+}
+
+func TestOperatorFastAGISetsReadyOnlyAfterPlayback(t *testing.T) {
+	cipher, err := secure.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ciphertext, err := cipher.Encrypt("party-operator-key", []byte("pty_operator"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{
+		Source: fakePartySource{
+			party:    model.Party{ID: "pty_operator", OpenAIStatus: "ready", OpenAIKeyCiphertext: ciphertext},
+			services: model.PartyServices{PartyID: "pty_operator"},
+		},
+		Cipher: cipher, Speech: &fakeSpeech{}, AudioDir: t.TempDir(), PlaybackDir: "/voice",
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Metrics: observability.New(),
+	}
+	reader := scriptedAGI("0", "0", "0")
+	var commands bytes.Buffer
+	server.handleOperator(reader, bufio.NewWriter(&commands), map[string]string{
+		"agi_arg_1": "pty_operator", "agi_arg_2": operatorReasonMisdial,
+	})
+	want := "SET VARIABLE RINGRING_OPERATOR_READY 0\n" +
+		`STREAM FILE "/voice/operator-v1-misdial-pty_operator" ""` + "\n" +
+		"SET VARIABLE RINGRING_OPERATOR_READY 1\n"
+	if commands.String() != want {
+		t.Fatalf("unexpected operator FastAGI exchange:\n%s", commands.String())
+	}
 }
 
 func TestWeatherAudioUsesDecryptedPartyKeyAndDisclosesAI(t *testing.T) {
@@ -167,6 +260,33 @@ func TestVoiceObservabilityKeepsRecordValuesOutOfLogsAndMetrics(t *testing.T) {
 	if !strings.Contains(logs.String(), "error_class=internal") ||
 		!strings.Contains(response.Body.String(), "ringring_voice_service_requests_total{service=\"weather\",result=\"error\"} 1") {
 		t.Fatalf("voice failure was not safely observable:\n%s", combined)
+	}
+}
+
+func TestOperatorFailureKeepsPartyAndReasonOutOfObservability(t *testing.T) {
+	metrics := observability.New()
+	var logs bytes.Buffer
+	server := &Server{
+		Source:  failingPartySource{err: errors.New("private-party-value from provider")},
+		Logger:  slog.New(slog.NewTextHandler(&logs, nil)),
+		Metrics: metrics,
+	}
+	reader := scriptedAGI("0")
+	var commands bytes.Buffer
+	server.handleOperator(reader, bufio.NewWriter(&commands), map[string]string{
+		"agi_arg_1": "private-party-value", "agi_arg_2": "private-reason-value",
+	})
+	response := httptest.NewRecorder()
+	metrics.Handler(nil).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	combined := logs.String() + response.Body.String()
+	for _, privateValue := range []string{"private-party-value", "private-reason-value"} {
+		if strings.Contains(combined, privateValue) {
+			t.Fatalf("operator observability exposed %q:\n%s", privateValue, combined)
+		}
+	}
+	if !strings.Contains(logs.String(), "error_class=internal") ||
+		!strings.Contains(response.Body.String(), "ringring_voice_service_requests_total{service=\"operator\",result=\"error\"} 1") {
+		t.Fatalf("operator failure was not safely observable:\n%s", combined)
 	}
 }
 
