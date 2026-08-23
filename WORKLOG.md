@@ -21,10 +21,16 @@ This is the durable, chronological project record. Add new entries at the top. C
 
 - Focused Go tests cover preview minimization/no-store headers, invalid JSON non-consumption, extension conflict, atomic successful claim, same-party call buttons, generic used/unknown errors, omission of a second provisioning token, safe metrics routing/rate limits, and the exact Apple association document.
 - The iOS simulator suite passes all 15 Swift tests, including strict invitation URL derivation, URL credential/query rejection, ASCII/reserved extension rules, preview validation, and documented claim JSON. An iPhone 17 Pro simulator rendered the complete setup sheet without clipping or horizontal overflow; controls retain touch-sized targets and the existing Memphis palette.
+- The isolated release commit passes `make check`, `make security`, and `make admin-test`; the race suite is clean and `govulncheck` reports no reachable vulnerability. Apple's App Store package validation also returned **VERIFY SUCCEEDED with no errors**.
+
+### Production and TestFlight
+
+- Published and deployed exact runtime commit `6de65b578cc6882c109b9bd74f2e31ea7dff437d` with the guarded fast-forward upgrader. It created and restore-drilled pre/post archives `ringring-20260823T203511Z-15e57e0.tar.gz` and `ringring-20260823T203658Z-6de65b5.tar.gz`; public health/readiness, the invitation/OpenAPI/Apple-association endpoints, generic unavailable response, private integrity/credential checks, one live SIP contact, and all container health checks pass. Post-upgrade app logs contain no warning or error.
+- Archived, App Store-signed, validated, and uploaded `0.1.0` build `4` with the AustinLand App Store Connect key. The 23,475,852-byte IPA has SHA-256 `7cb389b1a4f72ea7f517d1813720e60155dcb56de9936d48cb1d65a4723e2747`, includes the `applinks:ringring.live` entitlement, and declares no non-exempt encryption. Delivery `357053f5-3f5f-4e02-aeb1-7e4118d83bb2` is **VALID · APP_STORE_ELIGIBLE · IN_BETA_TESTING** with English test notes in **RingRing Internal**, now containing four builds.
 
 ### Remaining
 
-- Deploy the matching server commit, verify the public invitation/OpenAPI/association endpoints, upload signed iOS build 4 to TestFlight, and complete a physical scan/tap/claim/call check.
+- Install build 4 on a physical iPhone, scan and tap a fresh general invitation, finish the native claim, and complete the private two-way call/background matrix. PushKit/APNs and the Linphone licensing decision remain gates before a public App Store release.
 
 ## 2026-08-23 — Give the iPhone app a complete App Store presentation
 
