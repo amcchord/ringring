@@ -23,9 +23,15 @@ This is the durable, chronological project record. Add new entries at the top. C
 - The complete local `make sip-smoke` gate passes in Colima. It loads the generated patterns into pinned Asterisk 22.10.1, confirms every prompt file, places authenticated TLS calls to invalid `222` and disabled `*12`, observes answered calls of prompt-length duration with server BYE and zero remaining channels, and preserves the existing mixed-transport member call, bidirectional PCMU, `*10`, and authenticated `*15` checks.
 - `make check`, `make security`, and `make admin-test` all pass locally after the change, including formatting, shell/operator fixtures, `go vet`, the complete race-enabled suite, reachable-vulnerability scanning, and administrator tests. The physical adapter's five-minute registration refresh is saved and production reports one live contact again.
 
+### Production
+
+- Published exact runtime candidate `eef32621ce456c97ff6a957eddca5c3fa98dd467` to the public repository without a hosted GitHub workflow. The guarded fast-forward upgrade created and restore-drilled checksummed pre/post archives `ringring-20260823T025201Z-5522b93.tar.gz` and `ringring-20260823T025351Z-eef3262.tar.gz` before reporting completion at that exact commit.
+- Public health and readiness return 200, all three Compose services are running without an unhealthy or exited state, the checkout is clean, and the AI child-safety gate remains closed. The live Asterisk context contains one numeric fallback, one star fallback, and one member-unavailable handler; direct lookups for invalid `222` and disabled `*12` resolve to the friendly prompt sequence.
+- The app logged one initial reconciliation warning while Asterisk was still starting. The generated files were already written, Asterisk loaded the new routes on its own startup, and the direct live route checks pass. The Asterisk restart cleared its volatile contact; applying the unchanged HT801 SIP page prompted an immediate refresh, and production again reports one registered contact.
+
 ### Remaining
 
-- Publish the focused change, deploy it through the guarded backup/restore-drilled upgrade, and then retry invalid, disabled, `*11`, `*15`, and two-device member calls on physical hardware.
+- Retry invalid, disabled, `*11`, `*15`, and two-device member calls on physical hardware. The current one-phone/one-extension party still cannot prove an ordinary family call by dialing its only phone from itself.
 
 ## 2026-08-22 — Keep the release gate local
 
