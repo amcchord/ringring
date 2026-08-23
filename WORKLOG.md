@@ -25,6 +25,12 @@ This is the durable, chronological project record. Add new entries at the top. C
 - `make check`, `make security`, and `make admin-test` pass; the race-enabled suite is clean and `govulncheck` reports no reachable vulnerability. The native SIP smoke also passes verified TLS 1.2 and UDP registration, same-extension routing, party calling/joining, `*10`, bidirectional RTP, and authenticated `*15` selection.
 - The optional official-Linphone client stage is blocked on this ARM development host before XML import: its checksum-pinned upstream wheel is x86_64-only, while the legacy Docker builder emits an ARM image. The failure occurs while importing `pylinphone.so`, not in RingRing configuration, registration, or media; the native TLS gate above remains authoritative for this change.
 
+### Production
+
+- Published and deployed exact runtime commit `f020e0bd276e757d15857fb4c837a71251d5bd61` through the guarded fast-forward upgrader. It created and restore-drilled pre/post archives `ringring-20260823T214759Z-8b7e5cc.tar.gz` and `ringring-20260823T215050Z-f020e0b.tar.gz`.
+- The app, Asterisk, and Caddy are healthy; `ringringctl doctor`, public health/readiness, database and credential integrity, private AMI access, SIP TLS synchronization, the Memphis wallpaper, and all four ringtone downloads pass. A false-token WP826 request returns the generic `410` response with no-store, no-referrer, noindex, and same-origin-resource protections, and recent app logs contain no warning or error.
+- The first verification pass caught transient live-status AMI warnings while Asterisk was being recreated. Recreating only the app after Asterisk was healthy cleared the startup race; the exact pending upgrade then passed without changing production phone credentials or downloading any live provisioning document.
+
 ### Remaining
 
 - Reboot the physical handset after the complete theme is applied, verify all four custom ringtone slots, and complete the TLS registration, `*10`, incoming, outgoing, and cross-party hardware matrix.
