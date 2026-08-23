@@ -67,6 +67,7 @@ This is the durable, chronological project record. Add new entries at the top. C
 - Browser QA at 1440×1000 and 390×844 confirms the new setup card, touch-sized download, disclosure, and expandable upload steps remain readable with no horizontal overflow.
 - `make check`, `make security`, and `make admin-test` pass; the race-enabled suite is clean and `govulncheck` reports no reachable vulnerability. The native SIP smoke also passes verified TLS 1.2 and UDP registration, same-extension routing, party calling/joining, `*10`, bidirectional RTP, and authenticated `*15` selection.
 - The optional official-Linphone client stage is blocked on this ARM development host before XML import: its checksum-pinned upstream wheel is x86_64-only, while the legacy Docker builder emits an ARM image. The failure occurs while importing `pylinphone.so`, not in RingRing configuration, registration, or media; the native TLS gate above remains authoritative for this change.
+- Applied a secret-free maximum-theme XML to the physical test WP826 without changing its SIP credential. The web UI confirmed the `RingRing 103` account and idle labels, party-yellow Memphis wallpaper, four custom ringtone slots with Ring 1 selected, Contacts/History/Menu idle layout, verified HTTPS resource path, and a 60-second concise idle display. The handset returned normally after reboot and production AMI reported active contacts.
 
 ### Production
 
@@ -76,7 +77,7 @@ This is the durable, chronological project record. Add new entries at the top. C
 
 ### Remaining
 
-- Reboot the physical handset after the complete theme is applied, verify all four custom ringtone slots, and complete the TLS registration, `*10`, incoming, outgoing, and cross-party hardware matrix.
+- Audition the four custom ringtone binaries on the physical handset and complete the `*10`, incoming, outgoing, and cross-party hardware matrix before marking WP826 fully verified.
 
 ## 2026-08-23 — Simplify the phone book and personalize weather
 
