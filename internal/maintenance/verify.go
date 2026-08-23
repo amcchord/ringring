@@ -103,9 +103,10 @@ func VerifyState(ctx context.Context, databasePath string, masterKey []byte) (St
 	currentSchema, err := database.QueryContext(ctx, `
 		SELECT p.openai_api_key_id, p.openai_spend_limit_cents, p.openai_spend_pending_cents,
 			p.openai_spend_limit_status, s.ai_enabled, s.radio_station,
+			m.weather_query, m.weather_label, m.weather_latitude, m.weather_longitude, m.weather_updated_at,
 			t.token_hash, t.device_id, t.expires_at, t.used_at, t.created_at,
 			r.echo_tested_at, r.outgoing_call_tested_at, r.incoming_call_tested_at, r.updated_at
-		FROM parties p CROSS JOIN party_services s CROSS JOIN device_provisioning_tokens t
+		FROM parties p CROSS JOIN party_services s CROSS JOIN members m CROSS JOIN device_provisioning_tokens t
 		CROSS JOIN device_readiness r LIMIT 0`)
 	if err != nil {
 		return StateReport{}, errors.New("database schema is not current")

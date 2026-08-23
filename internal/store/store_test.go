@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/amcchord/ringring/internal/model"
 	"github.com/amcchord/ringring/internal/radio"
 	"github.com/amcchord/ringring/internal/secure"
 )
@@ -970,7 +971,7 @@ func TestPartyServiceSettingsAreHostScopedAndDefaultToTime(t *testing.T) {
 	}
 }
 
-func TestFirstActivePartyPhoneCanSetOnlyAnUnknownWeatherLocation(t *testing.T) {
+func TestActivePartyPhoneCanSetOnlyItsMembersUnknownWeatherLocation(t *testing.T) {
 	ctx := t.Context()
 	s, err := Open(":memory:")
 	if err != nil {
@@ -1002,9 +1003,15 @@ func TestFirstActivePartyPhoneCanSetOnlyAnUnknownWeatherLocation(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.UpdatePartyServices(ctx, party.ID, host.ID, ServiceSettingsInput{
+		TimeEnabled: true, WeatherEnabled: true, WeatherSetupAllowed: true,
+		RadioStation: radio.DefaultStationID, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	routing, err := s.RoutingServices(ctx)
-	if err != nil || len(routing) != 1 || routing[0].WeatherEnabled || !routing[0].WeatherSetupEnabled {
-		t.Fatalf("unknown weather location did not expose only setup routing: %#v error=%v", routing, err)
+	if err != nil || len(routing) != 1 || !routing[0].WeatherEnabled || !routing[0].WeatherSetupEnabled {
+		t.Fatalf("enabled weather did not expose its authenticated route: %#v error=%v", routing, err)
 	}
 	valid := WeatherLocationInput{
 		Query: "02138", Label: "Cambridge, Massachusetts", Latitude: 42.37, Longitude: -71.11, UpdatedAt: now.Add(time.Minute),
@@ -1017,24 +1024,49 @@ func TestFirstActivePartyPhoneCanSetOnlyAnUnknownWeatherLocation(t *testing.T) {
 	if _, _, err := s.SetWeatherLocationByDevice(ctx, party.ID, "345678", invalid); !errors.Is(err, ErrInvalidWeather) {
 		t.Fatalf("unsafe weather location error = %v", err)
 	}
-	services, changed, err := s.SetWeatherLocationByDevice(ctx, party.ID, "345678", valid)
-	if err != nil || !changed || !services.WeatherEnabled || services.WeatherQuery != "02138" || services.WeatherLabel != "Cambridge, Massachusetts" {
-		t.Fatalf("first phone weather update = %#v changed=%t error=%v", services, changed, err)
+	location, changed, err := s.SetWeatherLocationByDevice(ctx, party.ID, "345678", valid)
+	if err != nil || !changed || location.Query != "02138" || location.Label != "Cambridge, Massachusetts" || location.MemberID != "mem_weather_setup" {
+		t.Fatalf("first phone weather update = %#v changed=%t error=%v", location, changed, err)
+	}
+	if err := s.CreateInvitation(ctx, NewInvitation{
+		ID: "inv_weather_second", PartyID: party.ID, CreatedByUserID: host.ID,
+		TokenHash: secure.Hash("weather-second-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := s.ClaimInvitation(ctx, NewClaim{
+		TokenHash: secure.Hash("weather-second-token"), MemberID: "mem_weather_second", DisplayName: "Second phone", Extension: "102",
+		DeviceID: "dev_weather_second", DeviceLabel: "Desk phone", SIPUsername: "456789", SIPSecretCiphertext: "ciphertext",
+		Provisioning: testProvisioning("weather-second-provision", now), Now: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	secondLocation, err := s.WeatherLocationForDevice(ctx, party.ID, "456789")
+	if err != nil || secondLocation.MemberID != "mem_weather_second" || secondLocation.Label != "" {
+		t.Fatalf("new member inherited another member's weather: %#v error=%v", secondLocation, err)
+	}
+	if err := s.UpdateMemberWeatherLocationForHost(ctx, party.ID, host.ID, "mem_weather_second", WeatherLocationInput{
+		Query: "97205", Label: "Portland, Oregon", Latitude: 45.52, Longitude: -122.68, UpdatedAt: now.Add(2 * time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	firstLocation, err := s.WeatherLocationForDevice(ctx, party.ID, "345678")
+	if err != nil || firstLocation.Label != "Cambridge, Massachusetts" {
+		t.Fatalf("host update for a second member changed the first: %#v error=%v", firstLocation, err)
 	}
 	routing, err = s.RoutingServices(ctx)
-	if err != nil || !routing[0].WeatherEnabled || routing[0].WeatherSetupEnabled {
-		t.Fatalf("resolved weather did not switch from setup to forecast routing: %#v error=%v", routing, err)
+	if err != nil || !routing[0].WeatherEnabled || !routing[0].WeatherSetupEnabled {
+		t.Fatalf("member location incorrectly changed party routing: %#v error=%v", routing, err)
 	}
 	replacement := WeatherLocationInput{
 		Query: "97205", Label: "Portland, Oregon", Latitude: 45.52, Longitude: -122.68, UpdatedAt: now.Add(2 * time.Minute),
 	}
-	services, changed, err = s.SetWeatherLocationByDevice(ctx, party.ID, "345678", replacement)
-	if err != nil || changed || services.WeatherQuery != "02138" || services.WeatherLabel != "Cambridge, Massachusetts" {
-		t.Fatalf("phone replaced an already-known weather location: %#v changed=%t error=%v", services, changed, err)
+	location, changed, err = s.SetWeatherLocationByDevice(ctx, party.ID, "345678", replacement)
+	if err != nil || changed || location.Query != "02138" || location.Label != "Cambridge, Massachusetts" {
+		t.Fatalf("phone replaced an already-known weather location: %#v changed=%t error=%v", location, changed, err)
 	}
 	if _, err := s.UpdatePartyServices(ctx, party.ID, host.ID, ServiceSettingsInput{
-		TimeEnabled: true, WeatherEnabled: false, WeatherQuery: services.WeatherQuery, WeatherLabel: services.WeatherLabel,
-		WeatherLatitude: services.WeatherLatitude, WeatherLongitude: services.WeatherLongitude,
+		TimeEnabled: true, WeatherEnabled: false, WeatherSetupAllowed: false,
 		RadioStation: radio.DefaultStationID, UpdatedAt: now.Add(3 * time.Minute),
 	}); err != nil {
 		t.Fatal(err)
@@ -1043,15 +1075,9 @@ func TestFirstActivePartyPhoneCanSetOnlyAnUnknownWeatherLocation(t *testing.T) {
 	if err != nil || routing[0].WeatherEnabled || routing[0].WeatherSetupEnabled {
 		t.Fatalf("host-disabled known weather remained callable: %#v error=%v", routing, err)
 	}
-	if _, err := s.UpdatePartyServices(ctx, party.ID, host.ID, ServiceSettingsInput{
-		TimeEnabled: true, WeatherEnabled: false, WeatherSetupAllowed: false,
-		RadioStation: radio.DefaultStationID, UpdatedAt: now.Add(4 * time.Minute),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	services, changed, err = s.SetWeatherLocationByDevice(ctx, party.ID, "345678", replacement)
-	if err != nil || changed || services.WeatherEnabled || services.WeatherLabel != "" {
-		t.Fatalf("phone bypassed the host-disabled unknown weather setting: %#v changed=%t error=%v", services, changed, err)
+	location, changed, err = s.SetWeatherLocationByDevice(ctx, party.ID, "345678", replacement)
+	if err != nil || changed || location.Label != "Cambridge, Massachusetts" {
+		t.Fatalf("phone replaced its saved member location while party weather was off: %#v changed=%t error=%v", location, changed, err)
 	}
 }
 
@@ -1314,10 +1340,19 @@ func TestOpenAddsCurrentColumnsToLegacyDatabase(t *testing.T) {
 		radio_enabled INTEGER NOT NULL DEFAULT 0,
 		updated_at INTEGER NOT NULL
 	);
+	CREATE TABLE members (
+		id TEXT PRIMARY KEY,
+		party_id TEXT NOT NULL,
+		display_name TEXT NOT NULL,
+		extension TEXT NOT NULL,
+		created_at INTEGER NOT NULL
+	);
 	INSERT INTO parties (id, name, slug, host_user_id, openai_status, created_at)
 	VALUES ('pty_legacy', 'Legacy', 'legacy', 'usr_legacy', 'ready', 1);
-	INSERT INTO party_services (party_id, time_enabled, updated_at)
-	VALUES ('pty_legacy', 1, 1)`)
+	INSERT INTO party_services (party_id, time_enabled, weather_enabled, weather_query, weather_label, weather_latitude, weather_longitude, updated_at)
+	VALUES ('pty_legacy', 1, 1, '38103', 'Memphis, Tennessee', 35.15, -90.05, 2);
+	INSERT INTO members (id, party_id, display_name, extension, created_at)
+	VALUES ('mem_legacy_weather', 'pty_legacy', 'Legacy phone', '101', 1)`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1355,6 +1390,16 @@ func TestOpenAddsCurrentColumnsToLegacyDatabase(t *testing.T) {
 	}
 	if weatherSetupAllowed != 1 {
 		t.Fatalf("legacy weather setup allowed = %d", weatherSetupAllowed)
+	}
+	var memberWeather model.WeatherLocation
+	var memberWeatherUpdated sql.NullInt64
+	if err := store.db.QueryRow(`SELECT id, weather_query, weather_label, weather_latitude, weather_longitude, weather_updated_at FROM members WHERE id = 'mem_legacy_weather'`).Scan(
+		&memberWeather.MemberID, &memberWeather.Query, &memberWeather.Label, &memberWeather.Latitude, &memberWeather.Longitude, &memberWeatherUpdated,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if memberWeather.Query != "38103" || memberWeather.Label != "Memphis, Tennessee" || !memberWeatherUpdated.Valid || memberWeatherUpdated.Int64 != 2 {
+		t.Fatalf("legacy party weather was not copied to the existing member: %#v updated=%#v", memberWeather, memberWeatherUpdated)
 	}
 	var stationID string
 	if err := store.db.QueryRow(`SELECT radio_station FROM party_services WHERE party_id = 'pty_legacy'`).Scan(&stationID); err != nil {

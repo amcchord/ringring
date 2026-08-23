@@ -369,19 +369,19 @@ func TestPartyCallConferencesAreScopedEphemeralAndNeverRecorded(t *testing.T) {
 
 func TestAIConversationRequiresAdultExtensionAtEveryBoundary(t *testing.T) {
 	required := map[string][]string{
-		".env.example":                     {"AI_ADULT_ONLY_ENABLED=false"},
-		"ringringctl":                      {"AI_ADULT_ONLY_ENABLED=false", "AI_ADULT_ONLY_ENABLED must be true or false", "ringring verify-openai-retention"},
-		"cmd/ringring/main.go":             {"EnforceAIAdultOnlyGate", "AIAdultAccess: database", "AIAdultOnlyEnabled: cfg.AIAdultOnlyEnabled"},
-		"internal/config/config.go":        {`envStrictBool("AI_ADULT_ONLY_ENABLED", false)`},
-		"internal/openaiadmin/client.go":   {"/organization/data_retention", "/data_retention", "organization_default", "none", "zero_data_retention", "enhanced_zero_data_retention", "has not enabled Zero Data Retention"},
-		"internal/store/store.go":          {"ErrAIAdultOnly", "input.AIEnabled && !input.AIAdultOnlyEnabled", "EnforceAIAdultOnlyGate", "m.adult_extension = 1", "d.revoked_at IS NULL"},
-		"internal/telephony/reconciler.go": {"!r.AIAdultOnlyEnabled", "services[index].AIEnabled = false"},
-		"internal/telephony/render.go":     {"${CHANNEL(endpoint)}", "RINGRING_AI_DENIED"},
-		"internal/voice/ai.go":             {"!s.AIAdultOnlyEnabled", "AI conversation adult-only gate is closed", "AIAdultAccessForDevice"},
-		"internal/webapp/app.go":           {"aiEnabled && !a.cfg.AIAdultOnlyEnabled", `r.FormValue("adult_extension")`, "AdultExtension: adultExtension"},
-		"scripts/restore-drill.sh":         {"--env AI_ADULT_ONLY_ENABLED=false"},
-		"web/templates/join.html":          {`name="adult_extension"`, "Adult extension (18+)"},
-		"web/templates/party.html":         {"$conversationReady", "Only adult extensions can call", "provider retention may apply"},
+		".env.example":                      {"AI_ADULT_ONLY_ENABLED=false"},
+		"ringringctl":                       {"AI_ADULT_ONLY_ENABLED=false", "AI_ADULT_ONLY_ENABLED must be true or false", "ringring verify-openai-retention"},
+		"cmd/ringring/main.go":              {"EnforceAIAdultOnlyGate", "AIAdultAccess: database", "AIAdultOnlyEnabled: cfg.AIAdultOnlyEnabled"},
+		"internal/config/config.go":         {`envStrictBool("AI_ADULT_ONLY_ENABLED", false)`},
+		"internal/openaiadmin/client.go":    {"/organization/data_retention", "/data_retention", "organization_default", "none", "zero_data_retention", "enhanced_zero_data_retention", "has not enabled Zero Data Retention"},
+		"internal/store/store.go":           {"ErrAIAdultOnly", "input.AIEnabled && !input.AIAdultOnlyEnabled", "EnforceAIAdultOnlyGate", "m.adult_extension = 1", "d.revoked_at IS NULL"},
+		"internal/telephony/reconciler.go":  {"!r.AIAdultOnlyEnabled", "services[index].AIEnabled = false"},
+		"internal/telephony/render.go":      {"${CHANNEL(endpoint)}", "RINGRING_AI_DENIED"},
+		"internal/voice/ai.go":              {"!s.AIAdultOnlyEnabled", "AI conversation adult-only gate is closed", "AIAdultAccessForDevice"},
+		"internal/webapp/app.go":            {"aiEnabled && !a.cfg.AIAdultOnlyEnabled", `r.FormValue("adult_extension")`, "AdultExtension: adultExtension"},
+		"scripts/restore-drill.sh":          {"--env AI_ADULT_ONLY_ENABLED=false"},
+		"web/templates/join.html":           {`name="adult_extension"`, "Adult extension (18+)"},
+		"web/templates/party_settings.html": {"$conversationReady", "Only adult extensions can call", "provider retention may apply"},
 	}
 	for filename, markers := range required {
 		contents := readRepositoryFile(t, filename)
@@ -470,6 +470,36 @@ func TestHostAddedPhonesStayBoundedToOnePartyMember(t *testing.T) {
 		for _, marker := range markers {
 			if !strings.Contains(contents, marker) {
 				t.Errorf("%s is missing same-extension phone boundary %q", filename, marker)
+			}
+		}
+	}
+}
+
+func TestMemberWeatherStaysBoundedToAuthenticatedExtensionAndHostParty(t *testing.T) {
+	required := map[string][]string{
+		"internal/store/store.go": {
+			"WeatherLocationForDevice", "d.sip_username = ? AND d.revoked_at IS NULL",
+			"TRIM(weather_label) = ''", "weather_enabled = 1 AND weather_setup_allowed = 1",
+			"UpdateMemberWeatherLocationForHost", "host_user_id = ?",
+		},
+		"internal/voice/server.go": {
+			"WeatherLocationForDevice(ctx, partyID, endpoint)", "location.MemberID",
+			"weather-v2-", "save the place for this extension",
+		},
+		"internal/webapp/app.go": {
+			`POST /parties/{partyID}/members/{memberID}/weather`, "updateMemberWeather",
+			"a.parseSmallForm(w, r)", "a.validCSRF(r, session)", "UpdateMemberWeatherLocationForHost",
+		},
+		"internal/webapp/ratelimit.go": {`return "member-weather", 30, 5 * time.Minute`},
+		"web/templates/party.html": {
+			"Personal weather", "/members/{{.ID}}/weather", "uses this place only for",
+		},
+	}
+	for filename, markers := range required {
+		contents := readRepositoryFile(t, filename)
+		for _, marker := range markers {
+			if !strings.Contains(contents, marker) {
+				t.Errorf("%s is missing member-weather boundary %q", filename, marker)
 			}
 		}
 	}

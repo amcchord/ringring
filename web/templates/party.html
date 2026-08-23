@@ -2,340 +2,56 @@
 {{define "content"}}
 <section class="page-hero wrap compact party-title">
   <a class="back-link" href="/app">← All parties</a>
-  <span class="eyebrow">Private party</span>
-  <h1>{{.Party.Name}}</h1>
-  <div class="party-meta"><span>☎ {{len .Members}} members</span><span>AI voice: {{if or (eq .Party.OpenAIStatus "rotating") (eq .Party.OpenAIStatus "rotation-error")}}paused for key safety{{else if or (eq .Party.OpenAISpendLimitStatus "updating") (eq .Party.OpenAISpendLimitStatus "update-error")}}paused for limit safety{{else if eq .Party.OpenAIStatus "ready"}}ready{{else if eq .Party.OpenAIStatus "pending"}}getting ready{{else}}unavailable{{end}}</span></div>
-</section>
-<section class="party-layout wrap">
-  <div class="party-sidebar">
-    <div class="panel invite-panel">
-      <span class="panel-icon" aria-hidden="true">💌</span>
-      <h2>Invite one phone</h2>
-      <p>The link works once and expires after 48 hours. Send it privately to the person setting up the phone.</p>
-      <form method="post" action="/parties/{{.Party.ID}}/invites">
-        <input type="hidden" name="csrf" value="{{.CSRF}}">
-        <button class="button button-primary" type="submit">Make an invite link</button>
-      </form>
-      {{if .InviteURL}}
-      <div class="reveal-card" role="status">
-        <label for="invite-url"><strong>Your one-time link</strong></label>
-        <input id="invite-url" value="{{.InviteURL}}" readonly aria-describedby="invite-url-help" autocomplete="off" autocapitalize="none" spellcheck="false">
-        <p id="invite-url-help">Copy the whole link now—RingRing will not show this invitation again.</p>
-        {{if .InviteQR}}
-        <figure class="invite-qr" aria-describedby="invite-qr-help">
-          <img src="{{.InviteQR}}" alt="One-time RingRing invitation QR code">
-          <figcaption id="invite-qr-help"><strong>Or scan it.</strong> Point the invited phone’s Camera at this code to open the same link.</figcaption>
-        </figure>
-        {{end}}
-        <p class="invite-secret-note"><strong>Keep it private.</strong> Anyone with the link or code can claim this invitation until it is used or expires.</p>
-      </div>
-      {{end}}
-      {{if gt .ActiveInvitationCount 0}}
-      <details class="invite-actions">
-        <summary>Manage unused {{if eq .ActiveInvitationCount 1}}link{{else}}links{{end}} · {{.ActiveInvitationCount}} active</summary>
-        <div class="invite-action-card">
-          <p>{{if eq .ActiveInvitationCount 1}}This link still works{{else}}These links still work{{end}} until claimed or expired. Cancel {{if eq .ActiveInvitationCount 1}}it{{else}}them{{end}} if the wrong person received one or nobody needs to join.</p>
-          <form method="post" action="/parties/{{.Party.ID}}/invites/cancel">
-            <input type="hidden" name="csrf" value="{{.CSRF}}">
-            <button class="text-button danger-button" type="submit">Cancel unused {{if eq .ActiveInvitationCount 1}}link{{else}}links{{end}}</button>
-          </form>
-          <small>Used invitations and members are not changed.</small>
-        </div>
-      </details>
-      {{end}}
-    </div>
-
-    <div class="panel service-panel">
-      <span class="panel-icon" aria-hidden="true">✨</span>
-      <h2>Fun numbers</h2>
-      <p>Choose which special lines phones in this party can dial.</p>
-      <div class="always-line">
-        <span class="service-number">0</span>
-        <span><strong>RingRing operator</strong><small>Always ready. Dial 0 or *0 for a friendly tour; misdialed numbers get helpful guidance too.</small></span>
-      </div>
-      <div class="always-line">
-        <span class="service-number">*10</span>
-        <span><strong>Phone echo test</strong><small>Always ready. Speak after the beep and hear your voice come back; press # or hang up to finish.</small></span>
-      </div>
-      <div class="always-line">
-        <span class="service-number">*15</span>
-        <span><strong>Pick an extension</strong><small>Always ready. The authenticated phone enters a new 2–5 digit number, hears it back, and presses 1 to save.</small></span>
-      </div>
-      {{$keyReady := eq .Party.OpenAIStatus "ready"}}
-      {{$spendPaused := or (eq .Party.OpenAISpendLimitStatus "updating") (eq .Party.OpenAISpendLimitStatus "update-error")}}
-      {{$voiceReady := and $keyReady (not $spendPaused)}}
-	  {{$conversationReady := and $voiceReady .AIAdultOnlyEnabled}}
-      <form class="service-form" method="post" action="/parties/{{.Party.ID}}/services">
-        <input type="hidden" name="csrf" value="{{.CSRF}}">
-        <label class="service-toggle">
-          <input type="checkbox" name="time_enabled" value="1" {{if .Services.TimeEnabled}}checked{{end}}>
-          <span><strong><span class="service-number">*11</span> The time</strong><small>Speaks the current date and time.</small></span>
-        </label>
-        <div class="service-choice">
-          <label class="service-toggle">
-            <input type="checkbox" name="weather_enabled" value="1" {{if or .Services.WeatherEnabled .Services.WeatherSetupAllowed}}checked{{end}} {{if not $voiceReady}}disabled{{end}}>
-            <span><strong><span class="service-number">*12</span> Local weather</strong><small>{{if $voiceReady}}{{if .Services.WeatherLabel}}A clearly disclosed AI voice reads Open-Meteo data.{{else}}Dial *12 from a party phone and enter a five-digit U.S. ZIP, or type a place below.{{end}}{{else}}Available when this party's AI voice is ready.{{end}}</small></span>
-          </label>
-          <label class="weather-field" for="weather-location">Weather place</label>
-          <input id="weather-location" name="weather_query" value="{{.Services.WeatherQuery}}" maxlength="80" placeholder="City, state or postal code" autocomplete="postal-code">
-          {{if .Services.WeatherLabel}}<small class="resolved-place">Using {{.Services.WeatherLabel}}</small>{{end}}
-        </div>
-        <div class="service-choice radio-service-choice">
-          <label class="service-toggle">
-            <input type="checkbox" name="radio_enabled" value="1" {{if .Services.RadioEnabled}}checked{{end}}>
-            <span><strong><span class="service-number">*13</span> Internet radio</strong><small>Plays the host’s station choice until the phone hangs up.</small></span>
-          </label>
-          <label class="radio-field" for="radio-station">Station</label>
-          <select class="radio-select" id="radio-station" name="radio_station" aria-describedby="radio-station-note">
-            {{range .RadioStations}}<option value="{{.ID}}" {{if eq $.Services.RadioStation .ID}}selected{{end}}>{{.Name}} — {{.Description}}</option>{{end}}
-          </select>
-          <small class="radio-station-note" id="radio-station-note">Three fixed, instrumental-leaning SomaFM choices for personal family listening. Live programming is not reviewed by RingRing. <a href="https://somafm.com/support/" rel="external">Support SomaFM</a></small>
-        </div>
-        <div class="service-choice ai-service-choice">
-          <label class="service-toggle">
-			<input type="checkbox" name="ai_enabled" value="1" {{if and .Services.AIEnabled .AIAdultOnlyEnabled}}checked{{end}} {{if not $conversationReady}}disabled{{end}}>
-			<span><strong><span class="service-number">*14</span> RingRing AI · adults only</strong><small>{{if $conversationReady}}Only adult extensions can call. Audio goes to OpenAI; provider retention may apply. RingRing stores no call audio or transcript.{{else if not .AIAdultOnlyEnabled}}The server operator has not opened the adults-only preview.{{else}}Available when this party's AI status is ready.{{end}}</small></span>
-		  </label>
-        </div>
-        <button class="button button-primary" type="submit">Save fun numbers</button>
-      </form>
-      <p class="service-note">Special lines stay inside this party. RingRing never routes them to the regular phone network.</p>
-      {{if .Party.OpenAIProjectID}}
-      <div class="ai-spend-card">
-        <span class="panel-icon" aria-hidden="true">🛟</span>
-        <div>
-          <h3>Monthly AI guardrail</h3>
-          {{if .OpenAISpendLimit}}<p class="ai-spend-current"><strong>{{.OpenAISpendLimit}} each month</strong> {{if eq .Party.OpenAISpendLimitStatus "ready"}}· confirmed enforcing by OpenAI{{else}}· last confirmed by RingRing{{end}}</p>{{else}}<p class="ai-spend-current"><strong>Not yet verified here</strong></p>{{end}}
-          {{if $spendPaused}}
-          <p class="ai-key-alert" role="alert">AI-powered lines are paused while RingRing retries the exact {{.OpenAISpendPending}} monthly limit. A different amount cannot replace it mid-update.</p>
-          <form method="post" action="/parties/{{.Party.ID}}/openai-spend-limit">
-            <input type="hidden" name="csrf" value="{{.CSRF}}">
-            <button class="button button-primary" type="submit">Finish spend limit update</button>
-          </form>
-          {{else if and $keyReady .OpenAIAdminConfigured}}
-          <p>OpenAI treats this as a hard USD project limit. Choose any amount up to this server’s {{.OpenAISpendLimitMax}} monthly ceiling.</p>
-          <form class="ai-spend-form" method="post" action="/parties/{{.Party.ID}}/openai-spend-limit">
-            <input type="hidden" name="csrf" value="{{.CSRF}}">
-            <label for="openai-spend-limit">Monthly limit in US dollars</label>
-            <span class="money-field"><span aria-hidden="true">$</span><input id="openai-spend-limit" name="spend_limit_dollars" type="number" inputmode="decimal" min="0.01" max="{{.OpenAISpendLimitMaxInput}}" step="0.01" value="{{if .OpenAISpendLimitInput}}{{.OpenAISpendLimitInput}}{{else}}{{.OpenAISpendLimitMaxInput}}{{end}}" aria-describedby="openai-spend-help" required></span>
-            <small id="openai-spend-help">Enter $0.01–{{.OpenAISpendLimitMax}}.{{if eq .Party.OpenAISpendLimitStatus "unknown"}} Saving verifies an existing party’s limit with OpenAI before RingRing calls it confirmed.{{end}}</small>
-            <button class="button button-primary" type="submit">Set hard monthly limit</button>
-          </form>
-          {{else if not .OpenAIAdminConfigured}}
-          <p>The server’s OpenAI administrator connection is unavailable, so the limit cannot change right now.</p>
-          {{else}}
-          <p>Finish the party AI key update before changing its monthly limit.</p>
-          {{end}}
-        </div>
-      </div>
-      <div class="ai-key-card">
-        <span class="panel-icon" aria-hidden="true">🔐</span>
-        <div>
-          <h3>Party AI key</h3>
-          {{if and $keyReady (not $spendPaused)}}
-          <p>The private runtime key is encrypted and never shown to phones or browsers. Replace it immediately if you think it may have escaped.</p>
-          <details class="ai-key-actions">
-            <summary>Key safety controls</summary>
-            <p>RingRing installs a fresh key, pauses AI-powered lines, and revokes every older key owned by this party’s dedicated service account.</p>
-            <form method="post" action="/parties/{{.Party.ID}}/openai-key/rotate">
-              <input type="hidden" name="csrf" value="{{.CSRF}}">
-              <button class="button button-danger" type="submit">Replace the party AI key</button>
-            </form>
-          </details>
-          {{else if or (eq .Party.OpenAIStatus "rotating") (eq .Party.OpenAIStatus "rotation-error")}}
-          <p class="ai-key-alert" role="alert">AI-powered lines are paused until RingRing confirms every older key is revoked.</p>
-          <form method="post" action="/parties/{{.Party.ID}}/openai-key/rotate">
-            <input type="hidden" name="csrf" value="{{.CSRF}}">
-            <button class="button button-primary" type="submit">Finish key replacement</button>
-          </form>
-          {{else if $spendPaused}}
-          <p>Finish the monthly spend limit update before replacing this key.</p>
-          {{else}}
-          <p>Key safety controls will appear when this party’s OpenAI service account is ready.</p>
-          {{end}}
-        </div>
-      </div>
-      {{end}}
-    </div>
+  <div class="party-title-row">
+    <div><span class="eyebrow">Private party</span><h1>{{.Party.Name}}</h1><div class="party-meta"><span>☎ {{len .Members}} members</span><span>AI voice: {{if eq .Party.OpenAIStatus "ready"}}ready{{else if eq .Party.OpenAIStatus "pending"}}getting ready{{else}}unavailable{{end}}</span></div></div>
+    <a class="button party-settings-link" href="/parties/{{.Party.ID}}/settings"><span aria-hidden="true">⚙</span> Party settings</a>
   </div>
+</section>
+<section class="party-layout phonebook-layout wrap">
+  <aside class="party-sidebar">
+    <div class="panel invite-panel">
+      <span class="panel-icon" aria-hidden="true">💌</span><h2>Invite one phone</h2>
+      <p>The link works once and expires after 48 hours. Send it privately to the person setting up the phone.</p>
+      <form method="post" action="/parties/{{.Party.ID}}/invites"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="button button-primary" type="submit">Make an invite link</button></form>
+      {{if .InviteURL}}
+      <div class="reveal-card" role="status"><label for="invite-url"><strong>Your one-time link</strong></label><input id="invite-url" value="{{.InviteURL}}" readonly aria-describedby="invite-url-help" autocomplete="off" autocapitalize="none" spellcheck="false"><p id="invite-url-help">Copy the whole link now—RingRing will not show this invitation again.</p>
+        {{if .InviteQR}}<figure class="invite-qr" aria-describedby="invite-qr-help"><img src="{{.InviteQR}}" alt="One-time RingRing invitation QR code"><figcaption id="invite-qr-help"><strong>Or scan it.</strong> Point the invited phone’s Camera at this code.</figcaption></figure>{{end}}
+        <p class="invite-secret-note"><strong>Keep it private.</strong> Anyone with the link or code can claim this invitation until it is used or expires.</p>
+      </div>{{end}}
+      {{if gt .ActiveInvitationCount 0}}<details class="invite-actions"><summary>Manage unused {{if eq .ActiveInvitationCount 1}}link{{else}}links{{end}} · {{.ActiveInvitationCount}} active</summary><div class="invite-action-card"><p>Cancel {{if eq .ActiveInvitationCount 1}}this link{{else}}these links{{end}} if the wrong person received one or nobody needs to join.</p><form method="post" action="/parties/{{.Party.ID}}/invites/cancel"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="text-button danger-button" type="submit">Cancel unused {{if eq .ActiveInvitationCount 1}}link{{else}}links{{end}}</button></form><small>Used invitations and members are not changed.</small></div></details>{{end}}
+    </div>
+    <div class="panel quick-dial-panel"><span class="panel-icon" aria-hidden="true">✨</span><h2>Quick dial</h2><p><strong>RingRing operator.</strong> Dial 0 or *0 for help; misdialed numbers find the operator too.</p><p><strong>*10</strong> sound check · <strong>*15</strong> choose extension</p><a class="text-link" href="/parties/{{.Party.ID}}/settings">Choose optional party lines →</a></div>
+  </aside>
   {{block "phonebook-live" .}}
   <div class="directory phonebook" id="phonebook-live" data-party-live-url="{{.PartyLiveURL}}" aria-labelledby="phonebook-title">
-    <div class="phonebook-heading">
-      <div>
-        <span class="kicker">Party directory</span>
-        <h2 id="phonebook-title">Phone book</h2>
-        <p>Pick up any party phone and dial one of these extensions.</p>
-      </div>
-      {{if .Members}}
-      <div class="phonebook-count" aria-label="{{len .Members}} {{if eq (len .Members) 1}}member{{else}}members{{end}}">
-        <strong>{{len .Members}}</strong>
-        <span>{{if eq (len .Members) 1}}member{{else}}members{{end}}</span>
-      </div>
-      {{end}}
-    </div>
+    <div class="phonebook-heading"><div><span class="kicker">Party directory</span><h2 id="phonebook-title">Phone book</h2><p>Dial an extension to call. Live phone and call status refresh automatically.</p></div>{{if .Members}}<div class="phonebook-count" aria-label="{{len .Members}} members"><strong>{{len .Members}}</strong><span>members</span></div>{{end}}</div>
     <section class="active-call-board" aria-labelledby="active-calls-title" aria-live="polite">
-      <div class="active-call-heading">
-        <span class="active-call-icon" aria-hidden="true">🎉</span>
-        <div>
-          <span class="kicker">Happening now</span>
-          <h3 id="active-calls-title">Party calls</h3>
-        </div>
-        {{if .ActiveCalls}}<span class="live-call-badge"><span aria-hidden="true"></span> Live</span>{{end}}
-      </div>
-      {{if .ActiveCallNotice}}
-        <p class="presence-notice" role="status">{{.ActiveCallNotice}}</p>
-      {{else if .ActiveCalls}}
-        <div class="active-call-list">
-        {{range .ActiveCalls}}
-          <article class="active-call-card">
-            <div class="active-call-people">
-              <span class="call-wave" aria-hidden="true">)))</span>
-              <div>
-                <strong>{{range $index, $name := .Participants}}{{if $index}}, {{end}}{{$name}}{{end}}</strong>
-                <span>{{.PhoneCount}} {{if eq .PhoneCount 1}}phone{{else}}phones{{end}} in this call</span>
-              </div>
-            </div>
-            <div class="join-call-code">
-              <span>Dial to join</span>
-              <strong>{{.JoinNumber}}</strong>
-            </div>
-          </article>
-        {{end}}
-        </div>
-        <p class="active-call-privacy"><strong>Everybody hears who is joining.</strong> RingRing sends the joining member’s display name—not the call—to this party’s OpenAI project to make the announcement. No call audio, transcript, or call history is saved.</p>
-      {{else}}
-        <div class="active-call-empty"><span aria-hidden="true">☁</span><p><strong>No party calls right now.</strong> When two party phones connect, the join code will pop up here.</p></div>
-      {{end}}
+      <div class="active-call-heading"><span class="active-call-icon" aria-hidden="true">🎉</span><div><span class="kicker">Happening now</span><h3 id="active-calls-title">Party calls</h3></div>{{if .ActiveCalls}}<span class="live-call-badge"><span aria-hidden="true"></span> Live</span>{{end}}</div>
+      {{if .ActiveCallNotice}}<p class="presence-notice" role="status">{{.ActiveCallNotice}}</p>
+      {{else if .ActiveCalls}}<div class="active-call-list">{{range .ActiveCalls}}<article class="active-call-card"><div class="active-call-people"><span class="call-wave" aria-hidden="true">)))</span><div><strong>{{range $index, $name := .Participants}}{{if $index}}, {{end}}{{$name}}{{end}}</strong><span>{{.PhoneCount}} phones in this call</span></div></div><div class="join-call-code"><span>Dial to join</span><strong>{{.JoinNumber}}</strong></div></article>{{end}}</div><p class="active-call-privacy"><strong>Everybody hears who is joining.</strong> RingRing sends the joining member’s display name—not the call—to make the announcement. No call audio, transcript, or call history is saved.</p>
+      {{else}}<div class="active-call-empty"><span aria-hidden="true">☁</span><p><strong>No party calls right now.</strong> A join code appears here when a call is active.</p></div>{{end}}
     </section>
     {{if .PresenceNotice}}<p class="presence-notice" role="status">{{.PresenceNotice}}</p>{{end}}
-    {{if .Members}}
-      {{$root := .}}{{$party := .Party}}{{$csrf := .CSRF}}
-      <div class="member-list">
-      {{range .Members}}
-      {{$member := .}}
-      {{$memberStatus := index $root.MemberPresence .ID}}
-      <article class="member-card">
-        <header class="member-card-heading">
-          <div class="extension-tile" aria-label="Extension {{.Extension}}">
-            <span>EXT</span>
-            <strong>{{.Extension}}</strong>
-          </div>
-          <div class="member-identity">
-            <span class="member-kicker">Party member</span>
-            <h3>{{.DisplayName}}</h3>
-            <span class="member-status-pill {{$memberStatus.CSSClass}}">
-              <span class="presence-indicator" aria-hidden="true"></span>
-              {{$memberStatus.Label}}
-            </span>
-          </div>
-        </header>
-        <div class="member-phones">
-          <div class="member-section-heading">
-            <h4>Phones</h4>
-            <span>{{len .Devices}} saved {{if eq (len .Devices) 1}}phone{{else}}phones{{end}}</span>
-          </div>
-          <div class="device-list">
-          {{range .Devices}}
-          {{$phone := index $root.DevicePresence .ID}}
-          <section class="device-card {{$phone.CSSClass}}" id="phone-checks-{{.ID}}" aria-labelledby="device-title-{{.ID}}">
-            <div class="device-card-heading">
-              <span class="device-icon" aria-hidden="true">☎</span>
-              <div>
-                <h5 id="device-title-{{.ID}}">{{.Label}}</h5>
-                <span class="device-status-pill {{$phone.CSSClass}}">
-                  <span class="presence-indicator" aria-hidden="true"></span>
-                  {{$phone.Label}}
-                </span>
-              </div>
-            </div>
-            {{if not .RevokedAt}}
-            <div class="device-ring-row">
-              <form class="device-ring-test" method="post" action="/parties/{{$party.ID}}/devices/{{.ID}}/ring-test">
-                <input type="hidden" name="csrf" value="{{$csrf}}">
-                <button class="button device-ring-button" type="submit" aria-label="Ring {{.Label}}" aria-describedby="ring-test-help-{{.ID}}" {{if ne $phone.CSSClass "presence-online"}}disabled{{end}}><span aria-hidden="true">📳</span> Ring this phone</button>
-              </form>
-              <p id="ring-test-help-{{.ID}}">{{if eq $phone.CSSClass "presence-online"}}It will say extension {{$member.Extension}} after someone answers.{{else}}Available when live status says online.{{end}}</p>
-            </div>
-            {{end}}
-            <div class="device-card-tools">
-              {{if not .RevokedAt}}
-              <details class="device-readiness">
-                <summary aria-label="Setup checklist for {{.Label}}, {{.Readiness.CompletedCount}} of 3 complete">
-                  <span class="tool-summary-copy"><strong>Setup checklist</strong><small>{{.Readiness.CompletedCount}} of 3 complete</small></span>
-                  <span class="readiness-track" aria-hidden="true"><span class="readiness-fill readiness-{{.Readiness.CompletedCount}}"></span></span>
-                </summary>
-                <form class="device-readiness-card" method="post" action="/parties/{{$party.ID}}/devices/{{.ID}}/readiness">
-                  <input type="hidden" name="csrf" value="{{$csrf}}">
-                  <p><strong>{{if .Readiness.Complete}}All three checks are host-confirmed.{{else}}Try these after the phone says it is online.{{end}}</strong> Registration above is automatic; these checkmarks are saved only when you confirm them.</p>
-                  <label class="readiness-check">
-                    <input type="checkbox" name="echo_tested" value="1" {{if .Readiness.EchoTestedAt}}checked{{end}}>
-                    <span>I dialed <strong>*10</strong> and heard my voice come back.</span>
-                  </label>
-                  <label class="readiness-check">
-                    <input type="checkbox" name="outgoing_call_tested" value="1" {{if .Readiness.OutgoingCallTestedAt}}checked{{end}}>
-                    <span>This phone called another party phone on a different internet connection; it connected and both people heard each other.</span>
-                  </label>
-                  <label class="readiness-check">
-                    <input type="checkbox" name="incoming_call_tested" value="1" {{if .Readiness.IncomingCallTestedAt}}checked{{end}}>
-                    <span>I used <strong>Ring this phone</strong> (or called extension <strong>{{$member.Extension}}</strong> from another party phone); this phone rang and played or connected correctly.</span>
-                  </label>
-                  <p class="readiness-privacy">RingRing saves only when each item was confirmed. It does not save who called, network details, call audio, or a call log.</p>
-                  <button class="button button-primary" type="submit">Save phone checks</button>
-                </form>
-              </details>
-              {{end}}
-              <details class="device-actions">
-                <summary aria-label="{{if .RevokedAt}}Reconnect {{.Label}}{{else}}Phone settings for {{.Label}}{{end}}"><span class="tool-summary-copy"><strong>{{if .RevokedAt}}Reconnect phone{{else}}Phone settings{{end}}</strong><small>{{if .RevokedAt}}Get fresh sign-in details{{else}}Password and connection{{end}}</small></span></summary>
-                <div class="device-action-card">
-                  <form method="post" action="/parties/{{$party.ID}}/devices/{{.ID}}/rotate">
-                    <input type="hidden" name="csrf" value="{{$csrf}}">
-                    <button class="text-button" type="submit">{{if .RevokedAt}}Reconnect with fresh settings{{else}}Make a fresh password{{end}}</button>
-                  </form>
-                  {{if not .RevokedAt}}
-                  <form method="post" action="/parties/{{$party.ID}}/devices/{{.ID}}/revoke">
-                    <input type="hidden" name="csrf" value="{{$csrf}}">
-                    <button class="text-button danger-button" type="submit">Disconnect this phone</button>
-                  </form>
-                  {{end}}
-                  <small>Fresh settings immediately replace the old username and password.</small>
-                </div>
-              </details>
-            </div>
-          </section>
-          {{end}}
-          </div>
-        </div>
-		<footer class="member-card-footer">
-		  <details class="device-actions member-add-device">
-            <summary aria-label="Add another phone for {{$member.DisplayName}} on extension {{$member.Extension}}"><span aria-hidden="true">＋</span> Add another phone</summary>
-            <div class="device-action-card add-device-card">
-              <p>It will share extension <strong>{{$member.Extension}}</strong>. Every active phone gets its own password, and calls to this extension ring them together.</p>
-              <form method="post" action="/parties/{{$party.ID}}/members/{{$member.ID}}/devices">
-                <input type="hidden" name="csrf" value="{{$csrf}}">
-                <label for="new-device-label-{{$member.ID}}">Phone name</label>
-                <input id="new-device-label-{{$member.ID}}" name="device_label" maxlength="40" placeholder="Bedroom phone" autocomplete="off" aria-describedby="new-device-help-{{$member.ID}}" required>
-                <small id="new-device-help-{{$member.ID}}">Name the actual adapter, desk phone, or app so it is easy to disconnect later.</small>
-                <button class="button button-quiet" type="submit">Create phone settings</button>
-              </form>
+    {{if .Members}}{{$root := .}}{{$party := .Party}}{{$csrf := .CSRF}}<div class="member-list">
+      {{range .Members}}{{$member := .}}{{$memberStatus := index $root.MemberPresence .ID}}{{$callStatus := index $root.MemberCallStatus .ID}}
+      <article class="member-card compact-member-card">
+        <header class="member-card-heading compact-member-heading">
+          <div class="extension-tile" aria-label="Extension {{.Extension}}"><span>EXT</span><strong>{{.Extension}}</strong></div>
+          <div class="member-identity"><span class="member-kicker">Party member</span><h3>{{.DisplayName}}</h3>{{if $callStatus}}<span class="member-status-pill member-on-call"><span class="presence-indicator" aria-hidden="true"></span>{{$callStatus}}</span>{{else}}<span class="member-status-pill {{$memberStatus.CSSClass}}"><span class="presence-indicator" aria-hidden="true"></span>{{$memberStatus.Label}}</span>{{end}}</div>
+          <details class="member-settings"><summary aria-label="Settings for {{.DisplayName}}"><span aria-hidden="true">⚙</span></summary>
+            <div class="member-settings-card">
+              <section class="member-weather-setting" aria-labelledby="weather-title-{{.ID}}"><h4 id="weather-title-{{.ID}}">Personal weather</h4><p>*12 uses this place only for {{.DisplayName}}’s extension. Leave it blank and the phone will ask for a ZIP.</p><form method="post" action="/parties/{{$party.ID}}/members/{{.ID}}/weather"><input type="hidden" name="csrf" value="{{$csrf}}"><label for="weather-location-{{.ID}}">City, state, or ZIP</label><input id="weather-location-{{.ID}}" name="weather_query" value="{{.Weather.Query}}" maxlength="80" placeholder="38103" autocomplete="postal-code">{{if .Weather.Label}}<small>Using {{.Weather.Label}}</small>{{end}}<button class="button button-quiet" type="submit">Save weather place</button></form></section>
+              <section class="member-phone-settings" aria-labelledby="phones-title-{{.ID}}"><h4 id="phones-title-{{.ID}}">Phones</h4><div class="settings-phone-list">
+                {{range .Devices}}{{$phone := index $root.DevicePresence .ID}}<div class="settings-phone-row"><div><strong>{{.Label}}</strong><span class="device-status-pill {{$phone.CSSClass}}"><span class="presence-indicator" aria-hidden="true"></span>{{$phone.Label}}</span></div><div class="settings-phone-actions">{{if not .RevokedAt}}<form method="post" action="/parties/{{$party.ID}}/devices/{{.ID}}/ring-test"><input type="hidden" name="csrf" value="{{$csrf}}"><button class="text-button" type="submit" {{if ne $phone.CSSClass "presence-online"}}disabled{{end}}><span aria-hidden="true">📳</span> Ring this phone</button></form>{{end}}<form method="post" action="/parties/{{$party.ID}}/devices/{{.ID}}/rotate"><input type="hidden" name="csrf" value="{{$csrf}}"><button class="text-button" type="submit">{{if .RevokedAt}}Reconnect{{else}}New password{{end}}</button></form>{{if not .RevokedAt}}<form method="post" action="/parties/{{$party.ID}}/devices/{{.ID}}/revoke"><input type="hidden" name="csrf" value="{{$csrf}}"><button class="text-button danger-button" type="submit">Disconnect</button></form>{{end}}</div></div>{{end}}
+              </div><details class="member-add-device"><summary><span aria-hidden="true">＋</span> Add another phone</summary><form class="add-device-form" method="post" action="/parties/{{$party.ID}}/members/{{$member.ID}}/devices"><input type="hidden" name="csrf" value="{{$csrf}}"><p>It shares extension <strong>{{$member.Extension}}</strong>; calls to this extension ring them together.</p><label for="new-device-label-{{$member.ID}}">Phone name</label><input id="new-device-label-{{$member.ID}}" name="device_label" maxlength="40" placeholder="Kitchen phone" autocomplete="off" required><button class="button button-quiet" type="submit">Create phone settings</button></form></details></section>
+              <a class="member-remove-link" href="/parties/{{$party.ID}}/members/{{.ID}}/delete">Remove {{.DisplayName}} from this party</a>
             </div>
           </details>
-          <a class="member-remove-link" href="/parties/{{$party.ID}}/members/{{.ID}}/delete" aria-label="Remove {{.DisplayName}} from this party">Remove member</a>
-        </footer>
-      </article>
-      {{end}}
-      </div>
-    {{else}}
-      <div class="empty-state phonebook-empty"><span aria-hidden="true">📞</span><h3>Your phone book is ready</h3><p>Make the first invite link and someone will appear here.</p></div>
-    {{end}}
+        </header>
+        <div class="member-phone-chips" aria-label="Phones for {{.DisplayName}}">{{range .Devices}}{{$phone := index $root.DevicePresence .ID}}<span class="phone-chip {{$phone.CSSClass}}"><span class="presence-indicator" aria-hidden="true"></span><strong>{{.Label}}</strong> · {{$phone.Label}}</span>{{end}}</div>
+      </article>{{end}}
+    </div>{{else}}<div class="empty-state phonebook-empty"><span aria-hidden="true">📞</span><h3>Your phone book is ready</h3><p>Make the first invite link and someone will appear here.</p></div>{{end}}
   </div>
   {{end}}
-</section>
-<section class="danger-zone wrap" aria-labelledby="party-danger-title">
-  <div>
-    <span class="eyebrow">Host controls</span>
-    <h2 id="party-danger-title">Retire this party</h2>
-    <p>Deletes every invitation, member, and phone credential after a separate confirmation. Any OpenAI project is archived first.</p>
-  </div>
-  <a class="button button-danger" href="/parties/{{.Party.ID}}/delete">Delete this party</a>
 </section>
 {{end}}

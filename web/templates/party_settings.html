@@ -1,0 +1,39 @@
+{{define "title"}}Party settings · {{.Party.Name}}{{end}}
+{{define "content"}}
+<section class="page-hero wrap compact party-title settings-hero">
+  <a class="back-link" href="/parties/{{.Party.ID}}">← Back to {{.Party.Name}}</a><span class="eyebrow">Host controls</span><h1>Party settings</h1><p>Choose the special lines for every phone and keep the party’s AI budget and key safe.</p>
+</section>
+<section class="settings-grid wrap">
+  <div class="panel service-panel settings-service-panel">
+    <span class="panel-icon" aria-hidden="true">✨</span><h2>Fun numbers</h2><p>These lines stay inside this party. RingRing never routes calls to the regular phone network.</p>
+    <div class="always-line"><span class="service-number">0</span><span><strong>RingRing operator</strong><small>Friendly help, always ready.</small></span></div>
+    <div class="always-line"><span class="service-number">*10</span><span><strong>Phone sound check</strong><small>Hear your voice come back.</small></span></div>
+    <div class="always-line"><span class="service-number">*15</span><span><strong>Pick an extension</strong><small>Change this phone’s extension by voice.</small></span></div>
+    {{$keyReady := eq .Party.OpenAIStatus "ready"}}{{$spendPaused := or (eq .Party.OpenAISpendLimitStatus "updating") (eq .Party.OpenAISpendLimitStatus "update-error")}}{{$voiceReady := and $keyReady (not $spendPaused)}}{{$conversationReady := and $voiceReady .AIAdultOnlyEnabled}}
+    <form class="service-form" method="post" action="/parties/{{.Party.ID}}/services">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <label class="service-toggle"><input type="checkbox" name="time_enabled" value="1" {{if .Services.TimeEnabled}}checked{{end}}><span><strong><span class="service-number">*11</span> The time</strong><small>Speaks the current date and time.</small></span></label>
+      <label class="service-toggle"><input type="checkbox" name="weather_enabled" value="1" {{if .Services.WeatherEnabled}}checked{{end}} {{if not $voiceReady}}disabled{{end}}><span><strong><span class="service-number">*12</span> Personal weather</strong><small>{{if $voiceReady}}Each extension keeps its own place. If it is blank, *12 asks that extension for a five-digit ZIP.{{else}}Available when the party’s AI voice is ready.{{end}}</small></span></label>
+      <div class="service-choice radio-service-choice"><label class="service-toggle"><input type="checkbox" name="radio_enabled" value="1" {{if .Services.RadioEnabled}}checked{{end}}><span><strong><span class="service-number">*13</span> Internet radio</strong><small>Plays the host’s station choice.</small></span></label><label class="radio-field" for="radio-station">Station</label><select class="radio-select" id="radio-station" name="radio_station">{{range .RadioStations}}<option value="{{.ID}}" {{if eq $.Services.RadioStation .ID}}selected{{end}}>{{.Name}} — {{.Description}}</option>{{end}}</select></div>
+      <label class="service-toggle"><input type="checkbox" name="ai_enabled" value="1" {{if and .Services.AIEnabled .AIAdultOnlyEnabled}}checked{{end}} {{if not $conversationReady}}disabled{{end}}><span><strong><span class="service-number">*14</span> RingRing AI · adults only</strong><small>{{if $conversationReady}}Only adult extensions can call. RingRing stores no call audio or transcript; provider retention may apply.{{else if not .AIAdultOnlyEnabled}}The server operator has not opened the adults-only preview.{{else}}Available when the party AI voice is ready.{{end}}</small></span></label>
+      <button class="button button-primary" type="submit">Save fun numbers</button>
+    </form>
+  </div>
+  <div class="panel ai-settings-panel">
+    <span class="panel-icon" aria-hidden="true">🛟</span><h2>AI budget &amp; key</h2><p class="ai-status-line"><strong>Status:</strong> {{if $spendPaused}}paused for limit safety{{else if or (eq .Party.OpenAIStatus "rotating") (eq .Party.OpenAIStatus "rotation-error")}}paused for key safety{{else if eq .Party.OpenAIStatus "ready"}}ready{{else if eq .Party.OpenAIStatus "pending"}}getting ready{{else}}unavailable{{end}}</p>
+    {{if .Party.OpenAIProjectID}}
+    <section class="ai-settings-bubble" aria-labelledby="ai-budget-title"><h3 id="ai-budget-title">Monthly AI guardrail</h3>
+      {{if .OpenAISpendLimit}}<p><strong>{{.OpenAISpendLimit}} each month</strong> · {{if eq .Party.OpenAISpendLimitStatus "ready"}}confirmed enforcing by OpenAI{{else}}last confirmed by RingRing{{end}}</p>{{else}}<p><strong>Not yet verified here</strong></p>{{end}}
+      {{if $spendPaused}}<p class="ai-key-alert" role="alert">AI lines are paused while RingRing retries the exact {{.OpenAISpendPending}} limit.</p><form method="post" action="/parties/{{.Party.ID}}/openai-spend-limit"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="button button-primary" type="submit">Finish spend limit update</button></form>
+      {{else if and $keyReady .OpenAIAdminConfigured}}<form class="ai-spend-form" method="post" action="/parties/{{.Party.ID}}/openai-spend-limit"><input type="hidden" name="csrf" value="{{.CSRF}}"><label for="openai-spend-limit">Monthly limit in US dollars</label><span class="money-field"><span aria-hidden="true">$</span><input id="openai-spend-limit" name="spend_limit_dollars" type="number" inputmode="decimal" min="0.01" max="{{.OpenAISpendLimitMaxInput}}" step="0.01" value="{{if .OpenAISpendLimitInput}}{{.OpenAISpendLimitInput}}{{else}}{{.OpenAISpendLimitMaxInput}}{{end}}" required></span><small>Choose $0.01–{{.OpenAISpendLimitMax}}.</small><button class="button button-primary" type="submit">Set hard monthly limit</button></form>
+      {{else}}<p>The OpenAI administrator connection must be ready before this limit can change.</p>{{end}}
+    </section>
+    <section class="ai-settings-bubble" aria-labelledby="ai-key-title"><h3 id="ai-key-title">Private runtime key</h3><p>Encrypted on the server and never shown to phones or browsers.</p>
+      {{if and $keyReady (not $spendPaused)}}<details class="ai-key-actions"><summary>Key safety controls</summary><p>Replacing the key pauses AI lines and revokes every older key for this party.</p><form method="post" action="/parties/{{.Party.ID}}/openai-key/rotate"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="button button-danger" type="submit">Replace the party AI key</button></form></details>
+      {{else if or (eq .Party.OpenAIStatus "rotating") (eq .Party.OpenAIStatus "rotation-error")}}<form method="post" action="/parties/{{.Party.ID}}/openai-key/rotate"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="button button-primary" type="submit">Finish key replacement</button></form>{{end}}
+    </section>
+    {{else}}<p>Key and budget controls appear when this party’s private OpenAI project is ready.</p>{{end}}
+  </div>
+</section>
+<section class="danger-zone wrap" aria-labelledby="party-danger-title"><div><span class="eyebrow">Danger zone</span><h2 id="party-danger-title">Retire this party</h2><p>Deletes every invitation, member, and phone credential after a separate confirmation. Any OpenAI project is archived first.</p></div><a class="button button-danger" href="/parties/{{.Party.ID}}/delete">Delete this party</a></section>
+{{end}}

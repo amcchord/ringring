@@ -270,20 +270,26 @@ type fakeWeatherLocationManager struct {
 	source *mutablePartySource
 	calls  []weatherLocationCall
 	err    error
+	value  model.WeatherLocation
 }
 
-func (f *fakeWeatherLocationManager) SetWeatherLocationByDevice(_ context.Context, partyID, endpoint string, input store.WeatherLocationInput) (model.PartyServices, bool, error) {
+func (f *fakeWeatherLocationManager) WeatherLocationForDevice(context.Context, string, string) (model.WeatherLocation, error) {
+	if f.err != nil {
+		return model.WeatherLocation{}, f.err
+	}
+	if f.value.MemberID == "" {
+		f.value.MemberID = "mem_weather"
+	}
+	return f.value, nil
+}
+
+func (f *fakeWeatherLocationManager) SetWeatherLocationByDevice(_ context.Context, partyID, endpoint string, input store.WeatherLocationInput) (model.WeatherLocation, bool, error) {
 	f.calls = append(f.calls, weatherLocationCall{partyID: partyID, endpoint: endpoint, input: input})
 	if f.err != nil {
-		return model.PartyServices{}, false, f.err
+		return model.WeatherLocation{}, false, f.err
 	}
-	f.source.services.WeatherEnabled = true
-	f.source.services.WeatherQuery = input.Query
-	f.source.services.WeatherLabel = input.Label
-	f.source.services.WeatherLatitude = input.Latitude
-	f.source.services.WeatherLongitude = input.Longitude
-	f.source.services.UpdatedAt = input.UpdatedAt
-	return f.source.services, true, nil
+	f.value = model.WeatherLocation{MemberID: "mem_weather", Query: input.Query, Label: input.Label, Latitude: input.Latitude, Longitude: input.Longitude, UpdatedAt: input.UpdatedAt}
+	return f.value, true, nil
 }
 
 func TestOperatorAudioUsesPartyKeyDisclosesAIAndCaches(t *testing.T) {
@@ -333,7 +339,7 @@ func TestOperatorAudioUsesPartyKeyDisclosesAIAndCaches(t *testing.T) {
 }
 
 func TestOperatorPromptMentionsOnlyEnabledFamilySafeLines(t *testing.T) {
-	_, prompt, err := operatorPrompt(operatorReasonHelp, model.PartyServices{}, false, false)
+	_, prompt, err := operatorPrompt(operatorReasonHelp, model.PartyServices{}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,15 +351,15 @@ func TestOperatorPromptMentionsOnlyEnabledFamilySafeLines(t *testing.T) {
 			t.Fatalf("disabled or adult-only line %q appeared in operator tour: %q", disabled, prompt)
 		}
 	}
-	_, firstPrompt, err := operatorPrompt(operatorReasonHelp, model.PartyServices{}, true, false)
+	_, firstPrompt, err := operatorPrompt(operatorReasonHelp, model.PartyServices{}, true)
 	if err != nil || !strings.Contains(firstPrompt, "AI-generated voice, not a person") {
 		t.Fatalf("first operator prompt lacked its disclosure: %q, %v", firstPrompt, err)
 	}
-	_, setupPrompt, err := operatorPrompt(operatorReasonHelp, model.PartyServices{WeatherSetupAllowed: true}, false, true)
-	if err != nil || !strings.Contains(setupPrompt, "set up local weather") || !strings.Contains(setupPrompt, "five digit ZIP code") {
-		t.Fatalf("operator omitted weather setup route: %q, %v", setupPrompt, err)
+	_, setupPrompt, err := operatorPrompt(operatorReasonHelp, model.PartyServices{WeatherEnabled: true, WeatherSetupAllowed: true}, false)
+	if err != nil || !strings.Contains(setupPrompt, "For the weather, dial star one two") {
+		t.Fatalf("operator omitted member weather route: %q, %v", setupPrompt, err)
 	}
-	if _, _, err := operatorPrompt("caller-supplied-value", model.PartyServices{}, true, false); err == nil {
+	if _, _, err := operatorPrompt("caller-supplied-value", model.PartyServices{}, true); err == nil {
 		t.Fatal("unrecognized operator reason was accepted")
 	}
 }
@@ -455,18 +461,19 @@ func TestWeatherAudioUsesDecryptedPartyKeyAndDisclosesAI(t *testing.T) {
 	server := &Server{
 		Source: fakePartySource{
 			party:    model.Party{ID: "pty_voice", OpenAIStatus: "ready", OpenAIKeyCiphertext: ciphertext},
-			services: model.PartyServices{PartyID: "pty_voice", WeatherEnabled: true, WeatherLabel: "Portland, Maine", WeatherLatitude: 43.66, WeatherLongitude: -70.25},
+			services: model.PartyServices{PartyID: "pty_voice", WeatherEnabled: true},
 		},
 		Cipher:  cipher,
 		Weather: fakeWeather{conditions: weather.Conditions{Temperature: 72, ApparentTemperature: 70, High: 77, Low: 59, PrecipitationChance: 20, WeatherCode: 2}},
 		Speech:  speech, AudioDir: temporary, PlaybackDir: "/voice", Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Now: func() time.Time { return time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC) },
 	}
-	path, err := server.weatherAudio(t.Context(), "pty_voice")
+	location := model.WeatherLocation{MemberID: "mem_voice", Label: "Portland, Maine", Latitude: 43.66, Longitude: -70.25}
+	path, err := server.weatherAudio(t.Context(), "pty_voice", location)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if path != "/voice/weather-pty_voice" || speech.key != "party-runtime-key" {
+	if path != "/voice/weather-v2-mem_voice" || speech.key != "party-runtime-key" {
 		t.Fatalf("unexpected output path or key: %q %q", path, speech.key)
 	}
 	if !strings.Contains(speech.input, "AI-generated voice") || !strings.Contains(speech.input, "Open-Meteo") {
@@ -480,7 +487,7 @@ func TestSpendLimitReconciliationDoesNotUseCachedWeatherAudio(t *testing.T) {
 		t.Fatal(err)
 	}
 	temporary := t.TempDir()
-	if err := os.WriteFile(temporary+"/weather-pty_voice.wav", []byte("cached"), 0o640); err != nil {
+	if err := os.WriteFile(temporary+"/weather-v2-mem_voice.wav", []byte("cached"), 0o640); err != nil {
 		t.Fatal(err)
 	}
 	server := &Server{
@@ -489,12 +496,12 @@ func TestSpendLimitReconciliationDoesNotUseCachedWeatherAudio(t *testing.T) {
 				ID: "pty_voice", OpenAIStatus: "ready", OpenAIKeyCiphertext: "unused",
 				OpenAISpendLimitStatus: "updating", OpenAISpendPendingCents: 725,
 			},
-			services: model.PartyServices{PartyID: "pty_voice", WeatherEnabled: true, WeatherLabel: "Portland, Maine"},
+			services: model.PartyServices{PartyID: "pty_voice", WeatherEnabled: true},
 		},
 		Cipher: cipher, Weather: fakeWeather{}, Speech: &fakeSpeech{},
 		AudioDir: temporary, PlaybackDir: "/voice",
 	}
-	if _, err := server.weatherAudio(t.Context(), "pty_voice"); err == nil {
+	if _, err := server.weatherAudio(t.Context(), "pty_voice", model.WeatherLocation{MemberID: "mem_voice", Label: "Portland, Maine"}); err == nil {
 		t.Fatal("spend-limit reconciliation served cached weather audio")
 	}
 }
@@ -511,13 +518,12 @@ func TestWeatherFastAGICollectsAndSavesFirstZIPThenReadsForecast(t *testing.T) {
 	now := time.Date(2026, 8, 23, 20, 0, 0, 0, time.UTC)
 	source := &mutablePartySource{
 		party:    model.Party{ID: "pty_weather", OpenAIStatus: "ready", OpenAIKeyCiphertext: ciphertext},
-		services: model.PartyServices{PartyID: "pty_weather", TimeEnabled: true},
+		services: model.PartyServices{PartyID: "pty_weather", TimeEnabled: true, WeatherEnabled: true, WeatherSetupAllowed: true},
 	}
 	locations := &fakeWeatherLocationManager{source: source}
 	speech := &fakeSpeech{}
-	reconciles := 0
 	server := &Server{
-		Source: source, WeatherLocations: locations, Reconcile: func(context.Context) error { reconciles++; return nil },
+		Source: source, WeatherLocations: locations,
 		Cipher: cipher, Weather: fakeWeather{conditions: weather.Conditions{
 			Temperature: 75, ApparentTemperature: 76, High: 81, Low: 64, PrecipitationChance: 30, WeatherCode: 1,
 		}}, Speech: speech, AudioDir: t.TempDir(), PlaybackDir: "/voice",
@@ -529,15 +535,15 @@ func TestWeatherFastAGICollectsAndSavesFirstZIPThenReadsForecast(t *testing.T) {
 		"agi_arg_1": "pty_weather", "agi_arg_2": "123456",
 	})
 	want := "GET DATA \"/voice/weather-setup-v1-initial-pty_weather\" 12000 5\n" +
-		"STREAM FILE \"/voice/weather-pty_weather\" \"\"\n"
+		"STREAM FILE \"/voice/weather-v2-mem_weather\" \"\"\n"
 	if commands.String() != want {
 		t.Fatalf("unexpected weather setup exchange:\n%s", commands.String())
 	}
 	if len(locations.calls) != 1 || locations.calls[0].partyID != "pty_weather" || locations.calls[0].endpoint != "123456" || locations.calls[0].input.Query != "02138" {
 		t.Fatalf("unexpected saved weather location: %#v", locations.calls)
 	}
-	if reconciles != 1 || !source.services.WeatherEnabled || source.services.WeatherLabel != "Cambridge, Massachusetts" {
-		t.Fatalf("weather location was not enabled and reconciled: reconciles=%d services=%#v", reconciles, source.services)
+	if locations.value.Label != "Cambridge, Massachusetts" || locations.value.MemberID != "mem_weather" {
+		t.Fatalf("weather location was not saved for the member: %#v", locations.value)
 	}
 	if len(speech.inputs) != 2 || !strings.Contains(speech.inputs[0], "AI-generated voice") || !strings.Contains(speech.inputs[0], "five digit U.S. ZIP code") ||
 		!strings.Contains(speech.inputs[1], "Cambridge, Massachusetts") || !strings.Contains(speech.inputs[1], "Open-Meteo") {
@@ -555,7 +561,7 @@ func TestWeatherFastAGIRetriesInvalidZIPWithoutRecordingSpeech(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := &mutablePartySource{
-		party: model.Party{ID: "pty_weather", OpenAIStatus: "ready", OpenAIKeyCiphertext: ciphertext}, services: model.PartyServices{PartyID: "pty_weather"},
+		party: model.Party{ID: "pty_weather", OpenAIStatus: "ready", OpenAIKeyCiphertext: ciphertext}, services: model.PartyServices{PartyID: "pty_weather", WeatherEnabled: true, WeatherSetupAllowed: true},
 	}
 	locations := &fakeWeatherLocationManager{source: source}
 	server := &Server{

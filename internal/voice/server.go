@@ -47,7 +47,8 @@ type ExtensionManager interface {
 }
 
 type WeatherLocationManager interface {
-	SetWeatherLocationByDevice(context.Context, string, string, store.WeatherLocationInput) (model.PartyServices, bool, error)
+	WeatherLocationForDevice(context.Context, string, string) (model.WeatherLocation, error)
+	SetWeatherLocationByDevice(context.Context, string, string, store.WeatherLocationInput) (model.WeatherLocation, bool, error)
 }
 
 type AIAdultAccessSource interface {
@@ -298,7 +299,17 @@ func (s *Server) handleWeather(reader *bufio.Reader, writer *bufio.Writer, envir
 		_ = agiCommand(reader, writer, "EXEC Playback ss-noservice")
 		return
 	}
-	if !services.WeatherEnabled || services.WeatherLabel == "" {
+	if !services.WeatherEnabled || s.WeatherLocations == nil {
+		_ = agiCommand(reader, writer, "EXEC Playback ss-noservice")
+		return
+	}
+	location, err := s.WeatherLocations.WeatherLocationForDevice(ctx, partyID, endpoint)
+	if err != nil {
+		s.logger().Warn("load member weather location", "error_class", observability.ErrorClass(err))
+		_ = agiCommand(reader, writer, "EXEC Playback ss-noservice")
+		return
+	}
+	if location.Label == "" {
 		if err := s.collectWeatherLocation(ctx, reader, writer, partyID, endpoint); err != nil {
 			if errors.Is(err, errWeatherLocationNotResolved) || errors.Is(err, context.Canceled) {
 				return
@@ -307,8 +318,13 @@ func (s *Server) handleWeather(reader *bufio.Reader, writer *bufio.Writer, envir
 			_ = agiCommand(reader, writer, "EXEC Playback ss-noservice")
 			return
 		}
+		location, err = s.WeatherLocations.WeatherLocationForDevice(ctx, partyID, endpoint)
+		if err != nil || location.Label == "" {
+			_ = agiCommand(reader, writer, "EXEC Playback ss-noservice")
+			return
+		}
 	}
-	path, err := s.weatherAudio(ctx, partyID)
+	path, err := s.weatherAudio(ctx, partyID, location)
 	if err != nil {
 		s.logger().Warn("prepare weather line", "error_class", observability.ErrorClass(err))
 		_ = agiCommand(reader, writer, "EXEC Playback ss-noservice")
@@ -350,16 +366,11 @@ func (s *Server) collectWeatherLocation(ctx context.Context, reader *bufio.Reade
 		if s.Now != nil {
 			now = s.Now()
 		}
-		_, changed, err := s.WeatherLocations.SetWeatherLocationByDevice(ctx, partyID, endpoint, store.WeatherLocationInput{
+		_, _, err = s.WeatherLocations.SetWeatherLocationByDevice(ctx, partyID, endpoint, store.WeatherLocationInput{
 			Query: location.Query, Label: location.Label, Latitude: location.Latitude, Longitude: location.Longitude, UpdatedAt: now,
 		})
 		if err != nil {
 			return err
-		}
-		if changed && s.Reconcile != nil {
-			if err := s.Reconcile(ctx); err != nil {
-				s.logger().Warn("reconcile phones after weather setup", "error_class", observability.ErrorClass(err))
-			}
 		}
 		return nil
 	}
@@ -387,8 +398,7 @@ func (s *Server) operatorAudio(ctx context.Context, partyID, reason string, disc
 	if party.OpenAIStatus != "ready" || party.OpenAIUsagePausedForSpendLimit() || party.OpenAIKeyCiphertext == "" {
 		return "", errors.New("party operator voice is unavailable")
 	}
-	weatherSetupAvailable := services.WeatherSetupAllowed && services.WeatherLabel == ""
-	promptName, phrase, err := operatorPrompt(reason, services, discloseAI, weatherSetupAvailable)
+	promptName, phrase, err := operatorPrompt(reason, services, discloseAI)
 	if err != nil {
 		return "", err
 	}
@@ -438,7 +448,7 @@ func (s *Server) weatherSetupAudio(ctx context.Context, partyID, promptName stri
 	phrase := ""
 	switch promptName {
 	case "initial":
-		phrase = "Ring ring! RingRing doesn't know which local weather to fetch yet. This is an AI-generated voice. Enter your party's five digit U.S. ZIP code. RingRing will save the place it finds for everyone in this party. The host can change it or turn weather off later."
+		phrase = "Ring ring! RingRing doesn't know which local weather you want yet. This is an AI-generated voice. Enter your five digit U.S. ZIP code. RingRing will save the place for this extension. Your party host can change it or turn weather off later."
 	case "retry":
 		phrase = "Let's try that again. Enter five digits for a U.S. ZIP code."
 	case "failed":
@@ -472,7 +482,7 @@ func (s *Server) weatherSetupAudio(ctx context.Context, partyID, promptName stri
 	return filepath.Join(s.PlaybackDir, strings.TrimSuffix(filename, ".wav")), nil
 }
 
-func operatorPrompt(reason string, services model.PartyServices, discloseAI, weatherSetupAvailable bool) (string, string, error) {
+func operatorPrompt(reason string, services model.PartyServices, discloseAI bool) (string, string, error) {
 	disclosure := ""
 	if discloseAI {
 		disclosure = " I'm an AI-generated voice, not a person."
@@ -488,8 +498,6 @@ func operatorPrompt(reason string, services model.PartyServices, discloseAI, wea
 		}
 		if services.WeatherEnabled {
 			features = append(features, "For the weather, dial star one two")
-		} else if weatherSetupAvailable {
-			features = append(features, "To set up local weather with a five digit ZIP code, dial star one two")
 		}
 		if services.RadioEnabled {
 			features = append(features, "For radio, dial star one three")
@@ -507,7 +515,7 @@ func operatorPrompt(reason string, services model.PartyServices, discloseAI, wea
 	}
 }
 
-func (s *Server) weatherAudio(ctx context.Context, partyID string) (string, error) {
+func (s *Server) weatherAudio(ctx context.Context, partyID string, location model.WeatherLocation) (string, error) {
 	if s.Source == nil || s.Cipher == nil || s.Weather == nil || s.Speech == nil || s.AudioDir == "" || s.PlaybackDir == "" {
 		return "", errors.New("weather voice service is not fully configured")
 	}
@@ -515,10 +523,13 @@ func (s *Server) weatherAudio(ctx context.Context, partyID string) (string, erro
 	if err != nil {
 		return "", err
 	}
-	if !services.WeatherEnabled || services.WeatherLabel == "" || party.OpenAIStatus != "ready" || party.OpenAIUsagePausedForSpendLimit() || party.OpenAIKeyCiphertext == "" {
+	if !services.WeatherEnabled || location.MemberID == "" || location.Label == "" || party.OpenAIStatus != "ready" || party.OpenAIUsagePausedForSpendLimit() || party.OpenAIKeyCiphertext == "" {
 		return "", errors.New("party weather line is unavailable")
 	}
-	filename := "weather-" + partyID + ".wav"
+	if !safePartyID.MatchString(location.MemberID) {
+		return "", errors.New("invalid weather member ID")
+	}
+	filename := "weather-v2-" + location.MemberID + ".wav"
 	localPath := filepath.Join(s.AudioDir, filename)
 	cacheDuration := s.CacheDuration
 	if cacheDuration == 0 {
@@ -530,7 +541,8 @@ func (s *Server) weatherAudio(ctx context.Context, partyID string) (string, erro
 	}
 	if info, err := os.Stat(localPath); err == nil &&
 		now.Sub(info.ModTime()) >= 0 && now.Sub(info.ModTime()) < cacheDuration &&
-		(services.UpdatedAt.IsZero() || !info.ModTime().Before(services.UpdatedAt)) {
+		(services.UpdatedAt.IsZero() || !info.ModTime().Before(services.UpdatedAt)) &&
+		(location.UpdatedAt.IsZero() || !info.ModTime().Before(location.UpdatedAt)) {
 		return filepath.Join(s.PlaybackDir, strings.TrimSuffix(filename, ".wav")), nil
 	}
 
@@ -538,11 +550,11 @@ func (s *Server) weatherAudio(ctx context.Context, partyID string) (string, erro
 	if err != nil {
 		return "", fmt.Errorf("decrypt party OpenAI key: %w", err)
 	}
-	conditions, err := s.Weather.Current(ctx, services.WeatherLatitude, services.WeatherLongitude)
+	conditions, err := s.Weather.Current(ctx, location.Latitude, location.Longitude)
 	if err != nil {
 		return "", err
 	}
-	phrase := weatherPhrase(services.WeatherLabel, conditions)
+	phrase := weatherPhrase(location.Label, conditions)
 	pcm, err := s.Speech.SpeechPCM(ctx, apiKey, phrase)
 	if err != nil {
 		return "", err

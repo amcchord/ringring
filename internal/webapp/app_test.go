@@ -481,12 +481,15 @@ func TestActivePartyCallsExposeOnlyKnownSamePartyPhones(t *testing.T) {
 		{ID: "mem_c", PartyID: "pty_family", DisplayName: "Casey", Extension: "103", Devices: []model.Device{{ID: "dev_c", SIPUsername: "333333"}}},
 	}
 
-	active, notice := app.activePartyCalls(t.Context(), "pty_family", members)
+	active, memberStatus, notice := app.activePartyCalls(t.Context(), "pty_family", members)
 	if notice != "" || len(active) != 1 {
 		t.Fatalf("same-party active calls = %#v notice=%q", active, notice)
 	}
 	if got := active[0]; got.JoinNumber != "*16102" || got.JoinExtension != "102" || got.PhoneCount != 2 || strings.Join(got.Participants, ",") != "Austin,Bea" {
 		t.Fatalf("active call view = %#v", got)
+	}
+	if memberStatus["mem_a"] != "On a call with Bea" || memberStatus["mem_b"] != "On a call with Austin" || memberStatus["mem_c"] != "" {
+		t.Fatalf("member call status = %#v", memberStatus)
 	}
 }
 
@@ -688,9 +691,11 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if !strings.Contains(partyPage, "Cousins Club") || !strings.Contains(partyPage, "AI voice: unavailable") {
 		t.Fatal("party page missing expected details")
 	}
+	settingsPage := get(t, client, created.Request.URL.String()+"/settings")
+	settingsBody := readBody(t, settingsPage)
 	for _, stationID := range []string{"groove-salad", "drone-zone", "deep-space-one"} {
-		if !strings.Contains(partyPage, `value="`+stationID+`"`) {
-			t.Fatalf("party page missing catalog station %q", stationID)
+		if !strings.Contains(settingsBody, `value="`+stationID+`"`) {
+			t.Fatalf("party settings missing catalog station %q", stationID)
 		}
 	}
 	initialPartyKey, err := cipher.Encrypt("sk-old-party", []byte(partyID))
@@ -706,7 +711,7 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if lockedAI.StatusCode != http.StatusConflict || !strings.Contains(readBody(t, lockedAI), "server operator") {
 		t.Fatal("AI line was not held behind the operator adult-only gate")
 	}
-	lockedPartyPage := get(t, client, server.URL+"/parties/"+partyID)
+	lockedPartyPage := get(t, client, server.URL+"/parties/"+partyID+"/settings")
 	lockedPartyBody := readBody(t, lockedPartyPage)
 	if !strings.Contains(lockedPartyBody, "server operator has not opened the adults-only preview") || !strings.Contains(lockedPartyBody, `name="ai_enabled" value="1"  disabled`) {
 		t.Fatal("party page did not explain or disable the closed AI conversation gate")
@@ -743,31 +748,41 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	})
 	weatherSetupBody := readBody(t, setupPage)
 	services, err := database.PartyServices(t.Context(), partyID)
-	if setupPage.StatusCode != http.StatusOK || !strings.Contains(weatherSetupBody, "enter a five-digit U.S. ZIP") || err != nil || services.WeatherEnabled || !services.WeatherSetupAllowed || services.WeatherLabel != "" {
+	if setupPage.StatusCode != http.StatusOK || !strings.Contains(weatherSetupBody, "five-digit ZIP") || err != nil || !services.WeatherEnabled || !services.WeatherSetupAllowed {
 		t.Fatalf("blank enabled weather did not preserve phone setup: status=%d services=%#v error=%v", setupPage.StatusCode, services, err)
 	}
 	routingServices, err := database.RoutingServices(t.Context())
-	if err != nil || len(routingServices) != 1 || routingServices[0].WeatherEnabled || !routingServices[0].WeatherSetupEnabled {
-		t.Fatalf("blank enabled weather did not expose setup-only routing: %#v error=%v", routingServices, err)
+	if err != nil || len(routingServices) != 1 || !routingServices[0].WeatherEnabled || !routingServices[0].WeatherSetupEnabled {
+		t.Fatalf("enabled member weather did not expose authenticated routing: %#v error=%v", routingServices, err)
 	}
 	servicePage := postForm(t, client, server.URL+"/parties/"+partyID+"/services", url.Values{
 		"csrf": {csrf}, "time_enabled": {"1"}, "weather_enabled": {"1"},
-		"weather_query": {" Portland,   Maine "}, "radio_enabled": {"1"},
-		"radio_station": {"drone-zone"}, "ai_enabled": {"1"},
+		"radio_enabled": {"1"}, "radio_station": {"drone-zone"}, "ai_enabled": {"1"},
 	})
 	serviceBody := readBody(t, servicePage)
-	if servicePage.StatusCode != http.StatusOK || !strings.Contains(serviceBody, "Using Portland, Maine") || geocoder.query != "Portland, Maine" {
-		t.Fatalf("service settings were not saved: status=%d query=%q", servicePage.StatusCode, geocoder.query)
+	if servicePage.StatusCode != http.StatusOK || !strings.Contains(serviceBody, "Personal weather") || geocoder.query != "" {
+		t.Fatalf("service settings were not saved independently of member weather: status=%d query=%q", servicePage.StatusCode, geocoder.query)
 	}
 	services, err = database.PartyServices(t.Context(), partyID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !services.TimeEnabled || !services.WeatherEnabled || !services.RadioEnabled || services.RadioStation != "drone-zone" || !services.AIEnabled || services.WeatherLatitude != 43.66 {
+	if !services.TimeEnabled || !services.WeatherEnabled || !services.RadioEnabled || services.RadioStation != "drone-zone" || !services.AIEnabled {
 		t.Fatalf("unexpected service settings: %#v", services)
 	}
 	if !strings.Contains(serviceBody, `value="drone-zone" selected`) {
 		t.Fatal("party page did not keep the selected radio station")
+	}
+	memberWeather := postForm(t, client, server.URL+"/parties/"+partyID+"/members/mem_adult_service/weather", url.Values{
+		"csrf": {csrf}, "weather_query": {" Portland,   Maine "},
+	})
+	memberWeatherBody := readBody(t, memberWeather)
+	if memberWeather.StatusCode != http.StatusOK || geocoder.query != "Portland, Maine" || !strings.Contains(memberWeatherBody, "Using Portland, Maine") {
+		t.Fatalf("member weather was not resolved and rendered: status=%d query=%q", memberWeather.StatusCode, geocoder.query)
+	}
+	membersWithWeather, err := database.ListMembers(t.Context(), partyID)
+	if err != nil || len(membersWithWeather) != 1 || membersWithWeather[0].Weather.Label != "Portland, Maine" {
+		t.Fatalf("member weather location = %#v error=%v", membersWithWeather, err)
 	}
 	if err := database.DeleteMember(t.Context(), partyID, devHost.ID, "mem_adult_service"); err != nil {
 		t.Fatal(err)
@@ -795,10 +810,15 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 		keyIDs:     []string{"key_old", "key_fresh"}, deleteFailures: 1, spendFailures: 1,
 	}
 	app.openAI = keyManager
-	spendPage := get(t, client, server.URL+"/parties/"+partyID)
+	spendPage := get(t, client, server.URL+"/parties/"+partyID+"/settings")
 	spendPageBody := readBody(t, spendPage)
 	if spendPage.StatusCode != http.StatusOK || !strings.Contains(spendPageBody, "Monthly AI guardrail") || !strings.Contains(spendPageBody, "$10.00 each month") || !strings.Contains(spendPageBody, `max="10.00"`) {
-		t.Fatal("party page did not show the bounded existing spend limit")
+		t.Fatal("party settings did not show the bounded existing spend limit")
+	}
+	cleanPhonebook := get(t, client, server.URL+"/parties/"+partyID)
+	cleanPhonebookBody := readBody(t, cleanPhonebook)
+	if cleanPhonebook.StatusCode != http.StatusOK || !strings.Contains(cleanPhonebookBody, "Party settings") || strings.Contains(cleanPhonebookBody, "Monthly AI guardrail") || strings.Contains(cleanPhonebookBody, "/openai-key/rotate") || strings.Contains(cleanPhonebookBody, `name="ai_enabled"`) {
+		t.Fatal("AI administration remained mixed into the phone book")
 	}
 	missingSpendCSRF := postForm(t, client, server.URL+"/parties/"+partyID+"/openai-spend-limit", url.Values{"spend_limit_dollars": {"7.25"}})
 	if missingSpendCSRF.StatusCode != http.StatusForbidden || keyManager.spendAttempts != 0 {
@@ -829,7 +849,7 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if blockedRotation.StatusCode != http.StatusConflict || keyManager.createAttempts != 0 || !strings.Contains(readBody(t, blockedRotation), "Finish the spend limit") {
 		t.Fatal("key rotation was not held behind pending spend reconciliation")
 	}
-	spendRetryPage := get(t, client, server.URL+"/parties/"+partyID)
+	spendRetryPage := get(t, client, server.URL+"/parties/"+partyID+"/settings")
 	spendRetryBody := readBody(t, spendRetryPage)
 	if spendRetryPage.StatusCode != http.StatusOK || !strings.Contains(spendRetryBody, "Finish spend limit update") || !strings.Contains(spendRetryBody, "paused for limit safety") || strings.Contains(spendRetryBody, "update-error") || strings.Contains(spendRetryBody, "proj_test") {
 		t.Fatal("party page did not offer a private retry for the immutable pending amount")
@@ -860,7 +880,7 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if failedRotation.StatusCode != http.StatusBadGateway || !strings.Contains(failedRotationBody, "needs one more try") || strings.Contains(failedRotationBody, "sk-fresh-party") {
 		t.Fatalf("partial key rotation did not fail safely: status=%d", failedRotation.StatusCode)
 	}
-	retryPage := get(t, client, server.URL+"/parties/"+partyID)
+	retryPage := get(t, client, server.URL+"/parties/"+partyID+"/settings")
 	retryPageBody := readBody(t, retryPage)
 	if retryPage.StatusCode != http.StatusOK || !strings.Contains(retryPageBody, "Finish key replacement") || !strings.Contains(retryPageBody, "paused for key safety") || strings.Contains(retryPageBody, "rotation-error") || strings.Contains(retryPageBody, "key_fresh") || strings.Contains(retryPageBody, "sk-fresh-party") {
 		t.Fatal("party page did not offer a private, retryable rotation state")
@@ -1055,7 +1075,7 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 
 	hostParty := get(t, client, server.URL+"/parties/"+partyID)
 	hostPartyBody := readBody(t, hostParty)
-	if !strings.Contains(hostPartyBody, "Phone echo test") || !strings.Contains(hostPartyBody, "Always ready") || !strings.Contains(hostPartyBody, "Pick an extension") || !strings.Contains(hostPartyBody, "*15") || !strings.Contains(hostPartyBody, "authenticated phone") {
+	if !strings.Contains(hostPartyBody, "Quick dial") || !strings.Contains(hostPartyBody, "sound check") || !strings.Contains(hostPartyBody, "choose extension") || !strings.Contains(hostPartyBody, "*15") || !strings.Contains(hostPartyBody, "Dial 0 or *0") {
 		t.Fatal("party page omitted an always-available phone utility")
 	}
 	if !strings.Contains(hostPartyBody, "status unavailable") || !strings.Contains(hostPartyBody, "Live phone status is temporarily unavailable") {
@@ -1093,6 +1113,11 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 		t.Fatalf("another host reached live call state: status=%d calls=%d", outsiderLive.StatusCode, callCounter.count)
 	}
 	_ = readBody(t, outsiderLive)
+	outsiderSettings := get(t, outsiderClient, server.URL+"/parties/"+partyID+"/settings")
+	if outsiderSettings.StatusCode != http.StatusNotFound {
+		t.Fatalf("another host reached party settings: status=%d", outsiderSettings.StatusCode)
+	}
+	_ = readBody(t, outsiderSettings)
 	cancelInvitesPath := server.URL + "/parties/" + partyID + "/invites/cancel"
 	missingCancelCSRF := postForm(t, client, cancelInvitesPath, nil)
 	if missingCancelCSRF.StatusCode != http.StatusForbidden {
@@ -1121,17 +1146,17 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	presenceCounter.calls = 0
 	hostParty = get(t, client, server.URL+"/parties/"+partyID)
 	hostPartyBody = readBody(t, hostParty)
-	onlineRendered := strings.Contains(hostPartyBody, `class="device-card presence-online"`) && strings.Contains(hostPartyBody, `class="device-status-pill presence-online"`)
+	onlineRendered := strings.Contains(hostPartyBody, `class="phone-chip presence-online"`) && strings.Contains(hostPartyBody, `class="device-status-pill presence-online"`)
 	memberLabelRendered := strings.Contains(hostPartyBody, `class="member-status-pill presence-online"`) && strings.Contains(hostPartyBody, "At least one phone is online")
 	unavailableRendered := strings.Contains(hostPartyBody, "Live phone status is temporarily unavailable")
-	readinessRendered := strings.Contains(hostPartyBody, "Setup checklist") && strings.Contains(hostPartyBody, "0 of 3 complete") && strings.Contains(hostPartyBody, "different internet connection") && strings.Contains(hostPartyBody, "does not save who called, network details, call audio, or a call log")
-	phonebookHierarchyRendered := strings.Contains(hostPartyBody, `class="phonebook-heading"`) && strings.Contains(hostPartyBody, `class="phonebook-count"`) && strings.Contains(hostPartyBody, `class="member-card"`) && strings.Contains(hostPartyBody, `class="extension-tile"`) && strings.Contains(hostPartyBody, `class="device-ring-row"`) && strings.Contains(hostPartyBody, `class="member-card-footer"`) && !strings.Contains(hostPartyBody, `class="member-row"`)
-	if presenceCounter.calls != 1 || !onlineRendered || !memberLabelRendered || unavailableRendered || !readinessRendered || !phonebookHierarchyRendered {
-		t.Fatalf("party live presence calls=%d online=%t member_label=%t unavailable=%t readiness=%t hierarchy=%t", presenceCounter.calls, onlineRendered, memberLabelRendered, unavailableRendered, readinessRendered, phonebookHierarchyRendered)
+	checklistRemoved := !strings.Contains(hostPartyBody, "Setup checklist") && !strings.Contains(hostPartyBody, "/readiness")
+	phonebookHierarchyRendered := strings.Contains(hostPartyBody, `class="phonebook-heading"`) && strings.Contains(hostPartyBody, `class="phonebook-count"`) && strings.Contains(hostPartyBody, `class="member-card compact-member-card"`) && strings.Contains(hostPartyBody, `class="extension-tile"`) && strings.Contains(hostPartyBody, `class="member-settings"`) && strings.Contains(hostPartyBody, `Personal weather`) && !strings.Contains(hostPartyBody, `class="member-row"`)
+	if presenceCounter.calls != 1 || !onlineRendered || !memberLabelRendered || unavailableRendered || !checklistRemoved || !phonebookHierarchyRendered {
+		t.Fatalf("party live presence calls=%d online=%t member_label=%t unavailable=%t checklist_removed=%t hierarchy=%t", presenceCounter.calls, onlineRendered, memberLabelRendered, unavailableRendered, checklistRemoved, phonebookHierarchyRendered)
 	}
 	memberID := firstMatch(t, hostPartyBody, `/members/([^/]+)/devices`)
 	addDevicePath := server.URL + "/parties/" + partyID + "/members/" + memberID + "/devices"
-	if !strings.Contains(hostPartyBody, "Add another phone") || !strings.Contains(hostPartyBody, "calls to this extension ring them together") ||
+	if !strings.Contains(hostPartyBody, "Add another phone") ||
 		!strings.Contains(hostPartyBody, `id="new-device-label-`+memberID+`"`) {
 		t.Fatal("member row omitted the same-extension phone setup flow")
 	}
@@ -1241,7 +1266,7 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	ringer := &fakeDeviceRinger{statuses: map[string]telephony.ContactState{oldUsername: telephony.ContactReachable}}
 	app.ringer = ringer
 	ringPath := server.URL + "/parties/" + partyID + "/devices/" + deviceID + "/ring-test"
-	if !strings.Contains(hostPartyBody, `action="/parties/`+partyID+`/devices/`+deviceID+`/ring-test"`) || !strings.Contains(hostPartyBody, `class="button device-ring-button"`) || !strings.Contains(hostPartyBody, "Ring this phone") || !strings.Contains(hostPartyBody, "It will say extension 101") {
+	if !strings.Contains(hostPartyBody, `action="/parties/`+partyID+`/devices/`+deviceID+`/ring-test"`) || !strings.Contains(hostPartyBody, `<button class="text-button" type="submit"`) || !strings.Contains(hostPartyBody, "Ring this phone</button>") || !strings.Contains(hostPartyBody, `aria-label="Settings for Blue phone"`) {
 		t.Fatal("online phone did not show the incoming ring test")
 	}
 	outsiderRing := postForm(t, outsiderClient, ringPath, url.Values{"csrf": {outsiderCSRF}})
@@ -1279,7 +1304,7 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 		"csrf": {csrf}, "echo_tested": {"1"}, "outgoing_call_tested": {"1"}, "incoming_call_tested": {"1"},
 	})
 	checkedPhoneBody := readBody(t, checkedPhone)
-	if checkedPhone.StatusCode != http.StatusOK || !strings.Contains(checkedPhoneBody, "host-confirmed real-phone checks were saved") || !strings.Contains(checkedPhoneBody, "3 of 3 complete") || !strings.Contains(checkedPhoneBody, "All three checks are host-confirmed") {
+	if checkedPhone.StatusCode != http.StatusOK || !strings.Contains(checkedPhoneBody, "host-confirmed real-phone checks were saved") || strings.Contains(checkedPhoneBody, "Setup checklist") || strings.Contains(checkedPhoneBody, "3 of 3 complete") {
 		t.Fatalf("phone readiness response was not successful: status=%d", checkedPhone.StatusCode)
 	}
 	rotated := postForm(t, client, server.URL+"/parties/"+partyID+"/devices/"+deviceID+"/rotate", url.Values{"csrf": {csrf}})
@@ -1350,7 +1375,19 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	}
 	app.presence = fakeContactPresence{statuses: map[string]telephony.ContactState{freshUsername: telephony.ContactReachable}}
 	hostParty = get(t, client, server.URL+"/parties/"+partyID)
-	if !strings.Contains(readBody(t, hostParty), "0 of 3 complete") {
+	if strings.Contains(readBody(t, hostParty), "Setup checklist") {
+		t.Fatal("removed setup checklist returned after credential rotation")
+	}
+	membersAfterRotation, err := database.ListMembers(t.Context(), partyID)
+	rotationChecksCleared := false
+	if err == nil && len(membersAfterRotation) == 1 {
+		for _, device := range membersAfterRotation[0].Devices {
+			if device.ID == deviceID {
+				rotationChecksCleared = device.Readiness.CompletedCount() == 0
+			}
+		}
+	}
+	if !rotationChecksCleared {
 		t.Fatal("credential rotation did not clear host-confirmed phone checks")
 	}
 

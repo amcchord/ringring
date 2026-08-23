@@ -206,11 +206,60 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate adult extension setting: %w", err)
 	}
+	if err := ensureMemberWeatherColumns(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate member weather locations: %w", err)
+	}
 	if err := migrateReservedMemberExtensions(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate reserved member extensions: %w", err)
 	}
 	return &Store{db: db}, nil
+}
+
+func ensureMemberWeatherColumns(db *sql.DB) error {
+	columns := []struct {
+		name       string
+		definition string
+	}{
+		{"weather_query", "TEXT NOT NULL DEFAULT ''"},
+		{"weather_label", "TEXT NOT NULL DEFAULT ''"},
+		{"weather_latitude", "REAL NOT NULL DEFAULT 0"},
+		{"weather_longitude", "REAL NOT NULL DEFAULT 0"},
+		{"weather_updated_at", "INTEGER"},
+	}
+	missingQuery := false
+	for _, column := range columns {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('members') WHERE name = ?`, column.name).Scan(&count); err != nil {
+			return err
+		}
+		if count == 0 {
+			if column.name == "weather_query" {
+				missingQuery = true
+			}
+			if _, err := db.Exec(`ALTER TABLE members ADD COLUMN ` + column.name + ` ` + column.definition); err != nil {
+				return err
+			}
+		}
+	}
+	if !missingQuery {
+		return nil
+	}
+	// Preserve an existing party-wide location for members present at upgrade
+	// time. New members start empty and are prompted for their own ZIP.
+	_, err := db.Exec(`
+		UPDATE members SET
+			weather_query = COALESCE((SELECT weather_query FROM party_services WHERE party_id = members.party_id), ''),
+			weather_label = COALESCE((SELECT weather_label FROM party_services WHERE party_id = members.party_id), ''),
+			weather_latitude = COALESCE((SELECT weather_latitude FROM party_services WHERE party_id = members.party_id), 0),
+			weather_longitude = COALESCE((SELECT weather_longitude FROM party_services WHERE party_id = members.party_id), 0),
+			weather_updated_at = (SELECT updated_at FROM party_services WHERE party_id = members.party_id)
+		WHERE EXISTS (
+			SELECT 1 FROM party_services
+			WHERE party_id = members.party_id AND TRIM(weather_label) <> ''
+		)`)
+	return err
 }
 
 func ensureMemberAdultExtensionColumn(db *sql.DB) error {
@@ -770,64 +819,87 @@ func (s *Store) UpdatePartyServices(ctx context.Context, partyID, hostUserID str
 	}, nil
 }
 
-// SetWeatherLocationByDevice lets the first active phone in a party fill an
-// otherwise unknown weather location. It never replaces a location the host
-// or another phone has already resolved, and it preserves every unrelated
-// service preference.
-func (s *Store) SetWeatherLocationByDevice(ctx context.Context, partyID, sipUsername string, input WeatherLocationInput) (model.PartyServices, bool, error) {
+// WeatherLocationForDevice resolves an active authenticated SIP endpoint to
+// its member-scoped weather location. Caller ID is deliberately not trusted.
+func (s *Store) WeatherLocationForDevice(ctx context.Context, partyID, sipUsername string) (model.WeatherLocation, error) {
+	var location model.WeatherLocation
+	var updated sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT m.id, m.weather_query, m.weather_label, m.weather_latitude,
+			m.weather_longitude, m.weather_updated_at
+		FROM devices d JOIN members m ON m.id = d.member_id
+		WHERE m.party_id = ? AND d.sip_username = ? AND d.revoked_at IS NULL`, partyID, sipUsername).Scan(
+		&location.MemberID, &location.Query, &location.Label, &location.Latitude, &location.Longitude, &updated,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.WeatherLocation{}, ErrNotFound
+	}
+	if err != nil {
+		return model.WeatherLocation{}, fmt.Errorf("load member weather location from phone: %w", err)
+	}
+	if updated.Valid {
+		location.UpdatedAt = fromUnix(updated.Int64)
+	}
+	return location, nil
+}
+
+// SetWeatherLocationByDevice lets an active phone fill its extension's
+// otherwise unknown weather location. It never replaces an already-resolved
+// location, and it cannot affect another member in the party.
+func (s *Store) SetWeatherLocationByDevice(ctx context.Context, partyID, sipUsername string, input WeatherLocationInput) (model.WeatherLocation, bool, error) {
 	if !validWeatherLocation(input) {
-		return model.PartyServices{}, false, ErrInvalidWeather
+		return model.WeatherLocation{}, false, ErrInvalidWeather
 	}
 	result, err := s.db.ExecContext(ctx, `
-		INSERT INTO party_services (
-			party_id, time_enabled, weather_enabled, weather_setup_allowed, weather_query, weather_label,
-			weather_latitude, weather_longitude, radio_enabled, radio_station, ai_enabled, updated_at
-		)
-		SELECT p.id, 1, 1, 1, ?, ?, ?, ?, 0, ?, 0, ?
-		FROM parties p
-		WHERE p.id = ? AND EXISTS (
-			SELECT 1 FROM devices d
-			JOIN members m ON m.id = d.member_id
-			WHERE m.party_id = p.id AND d.sip_username = ? AND d.revoked_at IS NULL
-		)
-		ON CONFLICT(party_id) DO UPDATE SET
-			weather_enabled = 1,
-			weather_setup_allowed = 1,
-			weather_query = excluded.weather_query,
-			weather_label = excluded.weather_label,
-			weather_latitude = excluded.weather_latitude,
-			weather_longitude = excluded.weather_longitude,
-			updated_at = excluded.updated_at
-		WHERE party_services.weather_setup_allowed = 1 AND TRIM(party_services.weather_label) = ''`,
-		input.Query, input.Label, input.Latitude, input.Longitude, radio.DefaultStationID,
-		unix(input.UpdatedAt), partyID, sipUsername,
+		UPDATE members SET weather_query = ?, weather_label = ?, weather_latitude = ?,
+			weather_longitude = ?, weather_updated_at = ?
+		WHERE party_id = ? AND TRIM(weather_label) = '' AND id = (
+			SELECT member_id FROM devices WHERE sip_username = ? AND revoked_at IS NULL
+		) AND EXISTS (
+			SELECT 1 FROM party_services
+			WHERE party_id = ? AND weather_enabled = 1 AND weather_setup_allowed = 1
+		)`,
+		input.Query, input.Label, input.Latitude, input.Longitude, unix(input.UpdatedAt), partyID, sipUsername, partyID,
 	)
 	if err != nil {
-		return model.PartyServices{}, false, fmt.Errorf("set weather location from phone: %w", err)
+		return model.WeatherLocation{}, false, fmt.Errorf("set member weather location from phone: %w", err)
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return model.PartyServices{}, false, fmt.Errorf("count weather location update: %w", err)
+		return model.WeatherLocation{}, false, fmt.Errorf("count member weather location update: %w", err)
 	}
-	if rows == 0 {
-		var active int
-		if err := s.db.QueryRowContext(ctx, `
-			SELECT EXISTS (
-				SELECT 1 FROM devices d
-				JOIN members m ON m.id = d.member_id
-				WHERE m.party_id = ? AND d.sip_username = ? AND d.revoked_at IS NULL
-			)`, partyID, sipUsername).Scan(&active); err != nil {
-			return model.PartyServices{}, false, fmt.Errorf("verify weather setup device: %w", err)
-		}
-		if active == 0 {
-			return model.PartyServices{}, false, ErrNotFound
-		}
-	}
-	services, err := s.PartyServices(ctx, partyID)
+	location, err := s.WeatherLocationForDevice(ctx, partyID, sipUsername)
 	if err != nil {
-		return model.PartyServices{}, false, err
+		return model.WeatherLocation{}, false, err
 	}
-	return services, rows == 1, nil
+	return location, rows == 1, nil
+}
+
+// UpdateMemberWeatherLocationForHost replaces or clears one member's location
+// after proving both party ownership and member scope in the write itself.
+func (s *Store) UpdateMemberWeatherLocationForHost(ctx context.Context, partyID, hostUserID, memberID string, input WeatherLocationInput) error {
+	clearing := input.Query == "" && input.Label == ""
+	if !clearing && !validWeatherLocation(input) {
+		return ErrInvalidWeather
+	}
+	var updated any
+	if !clearing {
+		updated = unix(input.UpdatedAt)
+	}
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE members SET weather_query = ?, weather_label = ?, weather_latitude = ?,
+			weather_longitude = ?, weather_updated_at = ?
+		WHERE id = ? AND party_id = ? AND EXISTS (
+			SELECT 1 FROM parties WHERE id = ? AND host_user_id = ?
+		)`, input.Query, input.Label, input.Latitude, input.Longitude, updated,
+		memberID, partyID, partyID, hostUserID)
+	if err != nil {
+		return fmt.Errorf("update hosted member weather location: %w", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func validWeatherLocation(input WeatherLocationInput) bool {
@@ -1232,7 +1304,8 @@ func (s *Store) SuggestedExtension(ctx context.Context, partyID string) (string,
 
 func (s *Store) ListMembers(ctx context.Context, partyID string) ([]model.Member, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.id, m.party_id, m.display_name, m.extension, m.adult_extension, m.created_at,
+		SELECT m.id, m.party_id, m.display_name, m.extension, m.adult_extension,
+			m.weather_query, m.weather_label, m.weather_latitude, m.weather_longitude, m.weather_updated_at, m.created_at,
 			d.id, d.label, d.sip_username, d.created_at, d.revoked_at,
 			r.echo_tested_at, r.outgoing_call_tested_at, r.incoming_call_tested_at
 		FROM members m
@@ -1251,9 +1324,11 @@ func (s *Store) ListMembers(ctx context.Context, partyID string) ([]model.Member
 		var member model.Member
 		var adultExtension int
 		var memberCreated int64
+		var weatherUpdated sql.NullInt64
 		var deviceID, deviceLabel, sipUsername sql.NullString
 		var deviceCreated, revoked, echoTested, outgoingTested, incomingTested sql.NullInt64
-		if err := rows.Scan(&member.ID, &member.PartyID, &member.DisplayName, &member.Extension, &adultExtension, &memberCreated,
+		if err := rows.Scan(&member.ID, &member.PartyID, &member.DisplayName, &member.Extension, &adultExtension,
+			&member.Weather.Query, &member.Weather.Label, &member.Weather.Latitude, &member.Weather.Longitude, &weatherUpdated, &memberCreated,
 			&deviceID, &deviceLabel, &sipUsername, &deviceCreated, &revoked,
 			&echoTested, &outgoingTested, &incomingTested); err != nil {
 			return nil, fmt.Errorf("scan member: %w", err)
@@ -1261,6 +1336,10 @@ func (s *Store) ListMembers(ctx context.Context, partyID string) ([]model.Member
 		index, ok := byID[member.ID]
 		if !ok {
 			member.AdultExtension = adultExtension == 1
+			member.Weather.MemberID = member.ID
+			if weatherUpdated.Valid {
+				member.Weather.UpdatedAt = fromUnix(weatherUpdated.Int64)
+			}
 			member.CreatedAt = fromUnix(memberCreated)
 			members = append(members, member)
 			index = len(members) - 1
@@ -1706,7 +1785,7 @@ func (s *Store) RoutingServices(ctx context.Context) ([]model.RoutingServices, e
 			COALESCE(s.time_enabled, 1),
 			CASE WHEN COALESCE(s.weather_enabled, 0) = 1 AND p.openai_status = 'ready'
 				AND p.openai_spend_limit_status NOT IN ('updating', 'update-error') THEN 1 ELSE 0 END,
-			CASE WHEN COALESCE(s.weather_setup_allowed, 1) = 1 AND COALESCE(s.weather_label, '') = '' AND p.openai_status = 'ready'
+			CASE WHEN COALESCE(s.weather_enabled, 0) = 1 AND COALESCE(s.weather_setup_allowed, 1) = 1 AND p.openai_status = 'ready'
 				AND p.openai_spend_limit_status NOT IN ('updating', 'update-error') THEN 1 ELSE 0 END,
 			COALESCE(s.radio_enabled, 0),
 			COALESCE(s.radio_station, 'groove-salad'),
@@ -1944,6 +2023,11 @@ CREATE TABLE IF NOT EXISTS members (
     display_name TEXT NOT NULL,
     extension TEXT NOT NULL,
     adult_extension INTEGER NOT NULL DEFAULT 0 CHECK(adult_extension IN (0, 1)),
+	weather_query TEXT NOT NULL DEFAULT '',
+	weather_label TEXT NOT NULL DEFAULT '',
+	weather_latitude REAL NOT NULL DEFAULT 0,
+	weather_longitude REAL NOT NULL DEFAULT 0,
+	weather_updated_at INTEGER,
     created_at INTEGER NOT NULL,
     UNIQUE(party_id, extension)
 );

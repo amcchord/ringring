@@ -80,8 +80,21 @@ type Member struct {
 	DisplayName    string
 	Extension      string
 	AdultExtension bool
+	Weather        WeatherLocation
 	CreatedAt      time.Time
 	Devices        []Device
+}
+
+// WeatherLocation belongs to one member/extension. Multiple phones on that
+// extension share it, while other members in the party may choose a different
+// place. The resolved coordinates never leave the server-side weather flow.
+type WeatherLocation struct {
+	MemberID  string
+	Query     string
+	Label     string
+	Latitude  float64
+	Longitude float64
+	UpdatedAt time.Time
 }
 
 type Device struct {

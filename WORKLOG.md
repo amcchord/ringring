@@ -34,7 +34,32 @@ This is the durable, chronological project record. Add new entries at the top. C
 ### Remaining
 
 - Reboot the physical handset after the complete theme is applied, verify all four custom ringtone slots, and complete the TLS registration, `*10`, incoming, outgoing, and cross-party hardware matrix.
+## 2026-08-23 — Simplify the phone book and personalize weather
 
+### Shipped
+
+- Rebuilt the host phone book around compact member cards. The default view now shows extension, member presence or live-call companions, and small per-phone status chips; one 52px gear opens personal weather, ring/password/disconnect controls, add-phone, and remove-member actions. The host-confirmed setup checklist is no longer presented in the primary UI, while its storage and endpoint remain compatible for rollback.
+- Added per-member live-call labels such as `On a call with Bea` from the same ephemeral, same-party AMI reduction used by the join board. The no-store phone-book fragment continues to refresh members, presence, calls, and companion labels every three seconds without adding call history.
+- Moved optional lines into a dedicated host-only party settings page. Fun-number switches occupy one bright card; AI status, hard monthly spend guardrail, and encrypted runtime-key controls occupy a separate card with two focused safety bubbles. Party deletion moved into that settings page's danger zone.
+- Made weather locations member-scoped. Phones on one extension share a place, other members stay independent, and `*12` maps Asterisk's authenticated endpoint to the member before it reads or fills a ZIP. The member gear lets the host set, replace, or clear a city/state/postal code. An enabled weather route asks an empty member for five ZIP digits, and the storage write independently rechecks active endpoint, party, member, host setting, and empty-value boundaries.
+
+### Decisions
+
+- Keep the high-frequency phone-book surface about people and calls; treat credentials, device lifecycle, personal weather, optional services, AI money/key controls, and party deletion as settings.
+- Preserve the legacy party-wide weather columns and copy a resolved place once to members present at upgrade time. New code reads member columns; older code can still use its last party-wide value after rollback, and new members start empty.
+- Keep the existing checklist data model for compatibility but remove the checklist from the everyday interface. Physical two-way-device acceptance remains a deployment/release gate rather than permanent phone-book clutter.
+- Rate-limit member-weather writes in their own bucket so repeated location edits cannot starve unrelated party administration.
+
+### Verification
+
+- Focused store, voice, web, maintenance, and executable security-contract tests cover forward migration/backfill, new-member independence, authenticated endpoint lookup, host/member scoping, first-ZIP behavior, per-member cache names, service enablement recheck, AI/settings separation, call-companion labels, checklist omission, CSRF, outsider rejection, and independent throttling.
+- `make check`, `make security`, and `make admin-test` pass locally. This includes formatting, shell/admin lifecycle tests, `go vet`, the complete race-enabled Go suite, and `govulncheck` with no called vulnerabilities.
+- `make sip-smoke` passes from the repository's Docker-shareable temporary root: TLS and UDP phones register, same-extension fanout and the live three-phone join stay intact, unavailable `*12` gets an answered operator response, and the existing mixed-transport RTP, `*10`, and authenticated `*15` checks remain green. The default macOS `/tmp` attempt could not open its bind-mounted disposable SQLite file; rerunning from the documented override removed that Docker Desktop path artifact.
+- In-app browser review with an empty and populated party covered the compact directory, collapsed and expanded member gear, separate settings page, disabled/offline states, keyboard-visible semantic controls, horizontal bounds, and a clean console. The visual pass caught and fixed a cramped phone-action row. The browser's documented viewport override remained at its 1280×720 surface, so the embedded CSS/accessibility contract—not a second rendered screenshot—currently covers the one-column 850px and full-width 520px breakpoints.
+
+### Remaining
+
+- Repeat the host-page visual check in a true 390px production browser after deployment, then place `*12` calls from two different physical extensions and confirm that each hears only its own saved ZIP.
 ## 2026-08-23 — Package a Memphis WP826 handset experience
 
 ### Shipped

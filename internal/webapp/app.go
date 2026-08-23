@@ -115,6 +115,7 @@ type ActiveCallView struct {
 	JoinExtension string
 	JoinNumber    string
 	Participants  []string
+	MemberIDs     []string
 	PhoneCount    int
 }
 
@@ -146,6 +147,7 @@ type PageData struct {
 	MemberPresence           map[string]PresenceView
 	PresenceNotice           string
 	ActiveCalls              []ActiveCallView
+	MemberCallStatus         map[string]string
 	ActiveCallNotice         string
 	PartyLiveURL             string
 	Services                 model.PartyServices
@@ -334,6 +336,7 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 	mux.HandleFunc("POST /parties", app.requireUser(app.createParty))
 	mux.HandleFunc("GET /parties/{partyID}", app.requireUser(app.party))
 	mux.HandleFunc("GET /parties/{partyID}/live", app.requireUser(app.partyLive))
+	mux.HandleFunc("GET /parties/{partyID}/settings", app.requireUser(app.partySettings))
 	mux.HandleFunc("POST /parties/{partyID}/invites", app.requireUser(app.createInvitation))
 	mux.HandleFunc("POST /parties/{partyID}/invites/cancel", app.requireUser(app.cancelInvitations))
 	mux.HandleFunc("POST /parties/{partyID}/services", app.requireUser(app.updateServices))
@@ -341,6 +344,7 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 	mux.HandleFunc("POST /parties/{partyID}/openai-key/rotate", app.requireUser(app.rotatePartyOpenAIKey))
 	mux.HandleFunc("GET /parties/{partyID}/setup", app.requireUser(app.rotatedSetup))
 	mux.HandleFunc("POST /parties/{partyID}/members/{memberID}/devices", app.requireUser(app.addMemberDevice))
+	mux.HandleFunc("POST /parties/{partyID}/members/{memberID}/weather", app.requireUser(app.updateMemberWeather))
 	mux.HandleFunc("POST /parties/{partyID}/devices/{deviceID}/readiness", app.requireUser(app.updateDeviceReadiness))
 	mux.HandleFunc("POST /parties/{partyID}/devices/{deviceID}/ring-test", app.requireUser(app.ringDeviceTest))
 	mux.HandleFunc("POST /parties/{partyID}/devices/{deviceID}/rotate", app.requireUser(app.rotateDevice))
@@ -971,29 +975,12 @@ func (a *App) party(w http.ResponseWriter, r *http.Request, session authSession)
 		a.internalError(w, r, err)
 		return
 	}
-	services, err := a.store.PartyServices(r.Context(), party.ID)
-	if err != nil {
-		a.internalError(w, r, err)
-		return
-	}
 	data := a.pageData(&session)
 	data.Party = party
 	data.Members = members
 	data.DevicePresence, data.MemberPresence, data.PresenceNotice = a.phonePresence(r.Context(), members)
-	data.ActiveCalls, data.ActiveCallNotice = a.activePartyCalls(r.Context(), party.ID, members)
+	data.ActiveCalls, data.MemberCallStatus, data.ActiveCallNotice = a.activePartyCalls(r.Context(), party.ID, members)
 	data.PartyLiveURL = "/parties/" + url.PathEscape(party.ID) + "/live"
-	data.Services = services
-	data.RadioStations = radio.All()
-	data.OpenAIAdminConfigured = a.openAI != nil
-	data.OpenAISpendLimitMax = formatDollars(a.maxOpenAISpendLimitCents())
-	data.OpenAISpendLimitMaxInput = formatDollarInput(a.maxOpenAISpendLimitCents())
-	if party.OpenAISpendLimitCents > 0 {
-		data.OpenAISpendLimit = formatDollars(party.OpenAISpendLimitCents)
-		data.OpenAISpendLimitInput = formatDollarInput(party.OpenAISpendLimitCents)
-	}
-	if party.OpenAISpendPendingCents > 0 {
-		data.OpenAISpendPending = formatDollars(party.OpenAISpendPendingCents)
-	}
 	data.InviteURL = a.readInviteFlash(w, r, party.ID)
 	if data.InviteURL != "" {
 		inviteQR, err := provisioning.QRCodeDataURI(data.InviteURL)
@@ -1014,17 +1001,14 @@ func (a *App) party(w http.ResponseWriter, r *http.Request, session authSession)
 			data.Notice += " Phone routing cleanup needs an operator retry."
 		}
 	}
-	if r.URL.Query().Get("ai-key") == "fresh" {
-		data.Notice = "This party has a fresh OpenAI key. Every older key for its private service account was revoked."
-	}
-	if r.URL.Query().Get("ai-spend") == "updated" {
-		data.Notice = "OpenAI confirmed this party’s hard monthly spend limit is enforcing."
-	}
 	if r.URL.Query().Get("phone-checks") == "saved" {
 		data.Notice = "The host-confirmed real-phone checks were saved."
 	}
 	if r.URL.Query().Get("ring-test") == "sent" {
 		data.Notice = "Ring test sent. The selected phone should ring and say its extension after it is answered."
+	}
+	if r.URL.Query().Get("weather") == "saved" {
+		data.Notice = "That extension’s weather place was saved. Dial *12 from one of its phones to hear the forecast."
 	}
 	if r.URL.Query().Get("invites") == "canceled" {
 		data.Notice = "Unused invitation links were canceled. Make a fresh link when someone is ready to join."
@@ -1053,10 +1037,50 @@ func (a *App) partyLive(w http.ResponseWriter, r *http.Request, session authSess
 	data.Party = party
 	data.Members = members
 	data.DevicePresence, data.MemberPresence, data.PresenceNotice = a.phonePresence(r.Context(), members)
-	data.ActiveCalls, data.ActiveCallNotice = a.activePartyCalls(r.Context(), party.ID, members)
+	data.ActiveCalls, data.MemberCallStatus, data.ActiveCallNotice = a.activePartyCalls(r.Context(), party.ID, members)
 	data.PartyLiveURL = "/parties/" + url.PathEscape(party.ID) + "/live"
 	w.Header().Set("Cache-Control", "no-store")
 	a.renderFragment(w, "party", "phonebook-live", data)
+}
+
+func (a *App) partySettings(w http.ResponseWriter, r *http.Request, session authSession) {
+	partyID := r.PathValue("partyID")
+	party, err := a.store.PartyForHost(r.Context(), partyID, session.User.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		a.errorPage(w, http.StatusNotFound, "Those settings are not here", "This party may belong to another host or no longer exist.", "/app", "Back to my parties")
+		return
+	}
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	services, err := a.store.PartyServices(r.Context(), party.ID)
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	data := a.pageData(&session)
+	data.Party = party
+	data.Services = services
+	data.RadioStations = radio.All()
+	data.OpenAIAdminConfigured = a.openAI != nil
+	data.OpenAISpendLimitMax = formatDollars(a.maxOpenAISpendLimitCents())
+	data.OpenAISpendLimitMaxInput = formatDollarInput(a.maxOpenAISpendLimitCents())
+	if party.OpenAISpendLimitCents > 0 {
+		data.OpenAISpendLimit = formatDollars(party.OpenAISpendLimitCents)
+		data.OpenAISpendLimitInput = formatDollarInput(party.OpenAISpendLimitCents)
+	}
+	if party.OpenAISpendPendingCents > 0 {
+		data.OpenAISpendPending = formatDollars(party.OpenAISpendPendingCents)
+	}
+	if r.URL.Query().Get("ai-key") == "fresh" {
+		data.Notice = "This party has a fresh OpenAI key. Every older key for its private service account was revoked."
+	}
+	if r.URL.Query().Get("ai-spend") == "updated" {
+		data.Notice = "OpenAI confirmed this party’s hard monthly spend limit is enforcing."
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	a.render(w, "party_settings", data)
 }
 
 func (a *App) updatePartyOpenAISpendLimit(w http.ResponseWriter, r *http.Request, session authSession) {
@@ -1074,7 +1098,7 @@ func (a *App) updatePartyOpenAISpendLimit(w http.ResponseWriter, r *http.Request
 		a.internalError(w, r, err)
 		return
 	}
-	backURL := "/parties/" + url.PathEscape(partyID)
+	backURL := "/parties/" + url.PathEscape(partyID) + "/settings"
 	cents := party.OpenAISpendPendingCents
 	resuming := (party.OpenAISpendLimitStatus == "updating" || party.OpenAISpendLimitStatus == "update-error") && cents > 0 &&
 		(party.OpenAIStatus == "spend-updating" || party.OpenAIStatus == "spend-update-error")
@@ -1193,7 +1217,7 @@ func (a *App) rotatePartyOpenAIKey(w http.ResponseWriter, r *http.Request, sessi
 		a.internalError(w, r, err)
 		return
 	}
-	backURL := "/parties/" + url.PathEscape(partyID)
+	backURL := "/parties/" + url.PathEscape(partyID) + "/settings"
 	if a.openAI == nil || party.OpenAIProjectID == "" || party.OpenAIServiceAccountID == "" {
 		a.errorPage(w, http.StatusConflict, "Key replacement is unavailable", "This party does not have an OpenAI administrator connection and private service account to rotate.", backURL, "Back to the party")
 		return
@@ -1331,16 +1355,16 @@ func (a *App) phonePresence(ctx context.Context, members []model.Member) (map[st
 	return deviceViews, memberViews, notice
 }
 
-func (a *App) activePartyCalls(ctx context.Context, partyID string, members []model.Member) ([]ActiveCallView, string) {
+func (a *App) activePartyCalls(ctx context.Context, partyID string, members []model.Member) ([]ActiveCallView, map[string]string, string) {
 	if a.calls == nil {
-		return nil, "Live call activity is temporarily unavailable. Calls still work normally."
+		return nil, nil, "Live call activity is temporarily unavailable. Calls still work normally."
 	}
 	queryContext, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	conferences, err := a.calls.ActiveConferenceCalls(queryContext)
 	if err != nil {
 		a.logger.Warn("load live party calls", "error_class", observability.ErrorClass(err))
-		return nil, "Live call activity is temporarily unavailable. Calls still work normally."
+		return nil, nil, "Live call activity is temporarily unavailable. Calls still work normally."
 	}
 
 	membersByEndpoint := make(map[string]model.Member)
@@ -1363,6 +1387,7 @@ func (a *App) activePartyCalls(ctx context.Context, partyID string, members []mo
 		}
 		seenMembers := make(map[string]struct{})
 		participants := make([]string, 0, len(conference.Endpoints))
+		memberIDs := make([]string, 0, len(conference.Endpoints))
 		knownPhones := 0
 		for _, endpoint := range conference.Endpoints {
 			member, exists := membersByEndpoint[endpoint]
@@ -1375,6 +1400,7 @@ func (a *App) activePartyCalls(ctx context.Context, partyID string, members []mo
 			}
 			seenMembers[member.ID] = struct{}{}
 			participants = append(participants, member.DisplayName)
+			memberIDs = append(memberIDs, member.ID)
 		}
 		if knownPhones < 2 {
 			continue
@@ -1384,11 +1410,32 @@ func (a *App) activePartyCalls(ctx context.Context, partyID string, members []mo
 			JoinExtension: conference.JoinExtension,
 			JoinNumber:    telephony.JoinNumber(conference.JoinExtension),
 			Participants:  participants,
+			MemberIDs:     memberIDs,
 			PhoneCount:    knownPhones,
 		})
 	}
 	sort.Slice(active, func(i, j int) bool { return active[i].JoinExtension < active[j].JoinExtension })
-	return active, ""
+	memberStatus := make(map[string]string)
+	memberNames := make(map[string]string, len(members))
+	for _, member := range members {
+		memberNames[member.ID] = member.DisplayName
+	}
+	for _, call := range active {
+		for _, memberID := range call.MemberIDs {
+			others := make([]string, 0, len(call.MemberIDs)-1)
+			for _, otherID := range call.MemberIDs {
+				if otherID != memberID {
+					others = append(others, memberNames[otherID])
+				}
+			}
+			if len(others) == 0 {
+				memberStatus[memberID] = "On a party call"
+			} else {
+				memberStatus[memberID] = "On a call with " + strings.Join(others, ", ")
+			}
+		}
+	}
+	return active, memberStatus, ""
 }
 
 func devicePresenceView(device model.Device, statuses map[string]telephony.ContactState, available bool) (PresenceView, int) {
@@ -1449,12 +1496,11 @@ func (a *App) updateServices(w http.ResponseWriter, r *http.Request, session aut
 		a.internalError(w, r, err)
 		return
 	}
-	query := strings.Join(strings.Fields(r.FormValue("weather_query")), " ")
 	weatherRequested := r.FormValue("weather_enabled") != ""
-	weatherEnabled := weatherRequested && query != ""
 	aiEnabled := r.FormValue("ai_enabled") != ""
+	settingsURL := "/parties/" + url.PathEscape(partyID) + "/settings"
 	if aiEnabled && !a.cfg.AIAdultOnlyEnabled {
-		a.errorPage(w, http.StatusConflict, "The AI conversation line is locked", "The server operator has not opened the adults-only preview. Weather and the other family lines still work.", "/parties/"+url.PathEscape(partyID), "Back to the party")
+		a.errorPage(w, http.StatusConflict, "The AI conversation line is locked", "The server operator has not opened the adults-only preview. Weather and the other family lines still work.", settingsURL, "Back to party settings")
 		return
 	}
 	radioStationID := r.FormValue("radio_station")
@@ -1463,11 +1509,11 @@ func (a *App) updateServices(w http.ResponseWriter, r *http.Request, session aut
 	}
 	radioStation, ok := radio.Resolve(radioStationID)
 	if !ok {
-		a.errorPage(w, http.StatusBadRequest, "Choose a listed radio station", "RingRing only accepts the fixed stations shown on the party page.", "/parties/"+url.PathEscape(partyID), "Back to the party")
+		a.errorPage(w, http.StatusBadRequest, "Choose a listed radio station", "RingRing only accepts the fixed stations shown on the party settings page.", settingsURL, "Back to party settings")
 		return
 	}
 	if (weatherRequested || aiEnabled) && party.OpenAIStatus != "ready" {
-		a.errorPage(w, http.StatusConflict, "The AI lines need their voice", "Wait until this party's AI status says ready, then turn an AI-powered line on.", "/parties/"+url.PathEscape(partyID), "Back to the party")
+		a.errorPage(w, http.StatusConflict, "The AI lines need their voice", "Wait until this party's AI status says ready, then turn an AI-powered line on.", settingsURL, "Back to party settings")
 		return
 	}
 	if aiEnabled && !existing.AIEnabled {
@@ -1484,30 +1530,14 @@ func (a *App) updateServices(w http.ResponseWriter, r *http.Request, session aut
 			}
 		}
 		if !adultAllowed {
-			a.errorPage(w, http.StatusConflict, "Create an adult extension first", "At least one extension must be marked Adult extension (18+) before you can turn on *14.", "/parties/"+url.PathEscape(partyID), "Back to the party")
-			return
-		}
-	}
-	location := weather.Location{Query: query}
-	if query == existing.WeatherQuery {
-		location.Label = existing.WeatherLabel
-		location.Latitude = existing.WeatherLatitude
-		location.Longitude = existing.WeatherLongitude
-	}
-	if query != "" && (query != existing.WeatherQuery || location.Label == "") {
-		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-		defer cancel()
-		location, err = a.weather.Geocode(ctx, query)
-		if err != nil {
-			a.logger.Warn("weather location lookup failed", "error_class", observability.ErrorClass(err))
-			a.errorPage(w, http.StatusBadRequest, "We could not find that place", "Try a city with its state or country, or use a postal code.", "/parties/"+url.PathEscape(partyID), "Back to the party")
+			a.errorPage(w, http.StatusConflict, "Create an adult extension first", "At least one extension must be marked Adult extension (18+) before you can turn on *14.", settingsURL, "Back to party settings")
 			return
 		}
 	}
 	_, err = a.store.UpdatePartyServices(r.Context(), partyID, session.User.ID, store.ServiceSettingsInput{
-		TimeEnabled: r.FormValue("time_enabled") != "", WeatherEnabled: weatherEnabled, WeatherSetupAllowed: weatherRequested,
-		WeatherQuery: location.Query, WeatherLabel: location.Label,
-		WeatherLatitude: location.Latitude, WeatherLongitude: location.Longitude,
+		TimeEnabled: r.FormValue("time_enabled") != "", WeatherEnabled: weatherRequested, WeatherSetupAllowed: weatherRequested,
+		WeatherQuery: existing.WeatherQuery, WeatherLabel: existing.WeatherLabel,
+		WeatherLatitude: existing.WeatherLatitude, WeatherLongitude: existing.WeatherLongitude,
 		RadioEnabled: r.FormValue("radio_enabled") != "", RadioStation: radioStation.ID, AIEnabled: aiEnabled,
 		AIAdultOnlyEnabled: a.cfg.AIAdultOnlyEnabled, UpdatedAt: a.now(),
 	})
@@ -1518,7 +1548,48 @@ func (a *App) updateServices(w http.ResponseWriter, r *http.Request, session aut
 	if err := a.ReconcileTelephony(r.Context()); err != nil {
 		a.logger.Error("telephony reconcile after service update", "error_class", observability.ErrorClass(err))
 	}
-	http.Redirect(w, r, "/parties/"+url.PathEscape(partyID), http.StatusSeeOther)
+	http.Redirect(w, r, settingsURL, http.StatusSeeOther)
+}
+
+func (a *App) updateMemberWeather(w http.ResponseWriter, r *http.Request, session authSession) {
+	if !a.parseSmallForm(w, r) {
+		return
+	}
+	if !a.validCSRF(r, session) {
+		http.Error(w, "invalid request", http.StatusForbidden)
+		return
+	}
+	partyID := r.PathValue("partyID")
+	memberID := r.PathValue("memberID")
+	partyURL := "/parties/" + url.PathEscape(partyID)
+	if _, _, err := a.store.MemberForHost(r.Context(), partyID, session.User.ID, memberID); errors.Is(err, store.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	} else if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	query := strings.Join(strings.Fields(r.FormValue("weather_query")), " ")
+	input := store.WeatherLocationInput{}
+	if query != "" {
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+		location, err := a.weather.Geocode(ctx, query)
+		if err != nil {
+			a.logger.Warn("member weather location lookup failed", "error_class", observability.ErrorClass(err))
+			a.errorPage(w, http.StatusBadRequest, "We could not find that place", "Try a city with its state or country, or use a postal code.", partyURL, "Back to the phone book")
+			return
+		}
+		input = store.WeatherLocationInput{
+			Query: location.Query, Label: location.Label, Latitude: location.Latitude,
+			Longitude: location.Longitude, UpdatedAt: a.now(),
+		}
+	}
+	if err := a.store.UpdateMemberWeatherLocationForHost(r.Context(), partyID, session.User.ID, memberID, input); err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	http.Redirect(w, r, partyURL+"?weather=saved", http.StatusSeeOther)
 }
 
 func (a *App) createInvitation(w http.ResponseWriter, r *http.Request, session authSession) {
