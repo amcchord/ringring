@@ -19,6 +19,7 @@
 		73E83AC4D18104D80BBD2395 /* Views.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46D995B0C4B55F78449B842B /* Views.swift */; };
 		C271175D6241D219217E887F /* Provisioning.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5B408CFA8F7BFC35FF49C4E /* Provisioning.swift */; };
 		DD40D3175EA3C5FD2A18F569 /* CallKitCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F9526B441901472A601BC25 /* CallKitCoordinator.swift */; };
+		F5BD9EB660EAD2FAAC4B04DA /* Invitation.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF9268D66C8D2D39CBC4DFB1 /* Invitation.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -44,7 +45,9 @@
 		A728D7A87F53ADBD3AEFA5D6 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		B5B408CFA8F7BFC35FF49C4E /* Provisioning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Provisioning.swift; sourceTree = "<group>"; };
 		CF8B03AED4EDB7F865DDE982 /* RingRing.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RingRing.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		DD5A6A0AB59C6E04A1924518 /* RingRing.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = RingRing.entitlements; sourceTree = "<group>"; };
 		E27225ABF4FE03C8504B19AC /* RingRingApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RingRingApp.swift; sourceTree = "<group>"; };
+		FF9268D66C8D2D39CBC4DFB1 /* Invitation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Invitation.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -84,9 +87,11 @@
 				306D5DC14719FC4F79F0FBF5 /* Assets.xcassets */,
 				6F9526B441901472A601BC25 /* CallKitCoordinator.swift */,
 				5571D5896C258F8379DA8483 /* CredentialStore.swift */,
+				FF9268D66C8D2D39CBC4DFB1 /* Invitation.swift */,
 				26287E4B948CCBB7069F817F /* PhoneService.swift */,
 				B5B408CFA8F7BFC35FF49C4E /* Provisioning.swift */,
 				1B19867B1C613ACBC1E6C8DD /* QRScannerView.swift */,
+				DD5A6A0AB59C6E04A1924518 /* RingRing.entitlements */,
 				E27225ABF4FE03C8504B19AC /* RingRingApp.swift */,
 				A4FA845F8618DA40AD2D8FFF /* Theme.swift */,
 				46D995B0C4B55F78449B842B /* Views.swift */,
@@ -212,6 +217,7 @@
 				5B55AD5074DE874313120F2F /* AppModel.swift in Sources */,
 				DD40D3175EA3C5FD2A18F569 /* CallKitCoordinator.swift in Sources */,
 				014B6FFB67A65FCBAEECFCF1 /* CredentialStore.swift in Sources */,
+				F5BD9EB660EAD2FAAC4B04DA /* Invitation.swift in Sources */,
 				38A4D89DE5A5B4954DEA7D33 /* PhoneService.swift in Sources */,
 				C271175D6241D219217E887F /* Provisioning.swift in Sources */,
 				2053721B6D0AA126D676DC77 /* QRScannerView.swift in Sources */,
@@ -237,6 +243,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = RingRing/RingRing.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				INFOPLIST_FILE = RingRing/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
@@ -254,6 +261,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = RingRing/RingRing.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				INFOPLIST_FILE = RingRing/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
@@ -302,7 +310,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 7PTN7E8EDS;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -398,7 +406,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 7PTN7E8EDS;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;

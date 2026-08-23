@@ -38,7 +38,7 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSCameraUsageDescription</key>
-	<string>RingRing scans the private setup code made by your party host.</string>
+	<string>RingRing scans the private invitation or setup code made by your party host.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>RingRing uses the microphone only while you are on a private party call.</string>
 	<key>UIApplicationSceneManifest</key>

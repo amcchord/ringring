@@ -40,6 +40,12 @@ struct RootView: View {
         .sheet(isPresented: $model.showingSettings) {
             SettingsView(model: model, phone: model.phone)
         }
+        .sheet(item: $model.pendingInvitation) { invitation in
+            InvitationSetupView(model: model, invitation: invitation)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .interactiveDismissDisabled(model.isProvisioning)
+        }
         .alert(
             "Couldn’t finish that",
             isPresented: Binding(
@@ -83,7 +89,7 @@ private struct WelcomeView: View {
                     Text("Your party is calling.")
                         .font(.system(.largeTitle, design: .rounded, weight: .black))
                         .multilineTextAlignment(.center)
-                    Text("Scan one code and this iPhone becomes your private family phone.")
+                    Text("Scan an invite and finish choosing this phone’s name and extension right here.")
                         .font(.title3)
                         .multilineTextAlignment(.center)
                         .foregroundStyle(.secondary)
@@ -94,16 +100,16 @@ private struct WelcomeView: View {
                         Button {
                             model.showingScanner = true
                         } label: {
-                            Label("Scan setup code", systemImage: "qrcode.viewfinder")
+                            Label("Scan invite or setup code", systemImage: "qrcode.viewfinder")
                         }
                         .buttonStyle(PrimaryButtonStyle())
-                        .accessibilityHint("Opens the camera to scan a RingRing setup code")
+                        .accessibilityHint("Opens the camera to scan a RingRing invitation or phone setup code")
 
                         Button {
                             pastedLink = UIPasteboard.general.string ?? ""
                             showingPaste = true
                         } label: {
-                            Label("Paste setup link", systemImage: "doc.on.clipboard")
+                            Label("Paste invite or setup link", systemImage: "doc.on.clipboard")
                                 .font(.headline)
                                 .frame(maxWidth: .infinity, minHeight: 52)
                         }
@@ -122,14 +128,14 @@ private struct WelcomeView: View {
             .frame(maxWidth: 560)
             .frame(maxWidth: .infinity)
         }
-        .alert("Paste setup link", isPresented: $showingPaste) {
+        .alert("Paste a RingRing link", isPresented: $showingPaste) {
             TextField("ringring://join…", text: $pastedLink)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
             Button("Join") { model.join(using: pastedLink) }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Paste the private link from your RingRing setup card.")
+            Text("Paste the private invitation or phone setup link from your RingRing host.")
         }
     }
 }
@@ -173,7 +179,7 @@ private struct ScannerScreen: View {
                     .shadow(color: .black.opacity(0.25), radius: 12)
                     .accessibilityHidden(true)
 
-                Text("Point at the RingRing setup code")
+                Text("Point at the RingRing invite or setup code")
                     .font(.title3.weight(.bold))
                     .foregroundStyle(.white)
                     .padding(.top, 24)
@@ -182,6 +188,177 @@ private struct ScannerScreen: View {
                 Spacer()
             }
             .padding(24)
+        }
+    }
+}
+
+private struct InvitationSetupView: View {
+    @ObservedObject var model: AppModel
+    let invitation: PendingInvitation
+    @Environment(\.dismiss) private var dismiss
+    @State private var displayName = ""
+    @State private var extensionValue: String
+    @State private var adultExtension = false
+    @FocusState private var focusedField: Field?
+
+    private enum Field {
+        case name
+        case `extension`
+    }
+
+    init(model: AppModel, invitation: PendingInvitation) {
+        self.model = model
+        self.invitation = invitation
+        _extensionValue = State(initialValue: invitation.preview.suggestedExtension)
+    }
+
+    private var currentInvitation: PendingInvitation {
+        model.pendingInvitation ?? invitation
+    }
+
+    private var normalizedName: String {
+        PhoneInvitationDetails.normalizedName(displayName)
+    }
+
+    private var canJoin: Bool {
+        PhoneInvitationDetails.isText(normalizedName, maximum: 40) &&
+            PhoneInvitationDetails.isExtension(extensionValue) &&
+            !model.isProvisioning
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                MemphisBackground()
+
+                ScrollView {
+                    VStack(spacing: 20) {
+                        VStack(spacing: 9) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                    .fill(RingRingTheme.yellow)
+                                    .frame(width: 82, height: 82)
+                                    .rotationEffect(.degrees(5))
+                                Image(systemName: "phone.badge.plus.fill")
+                                    .font(.system(size: 35, weight: .black))
+                                    .foregroundStyle(RingRingTheme.ink)
+                            }
+                            .accessibilityHidden(true)
+
+                            Text("Join \(currentInvitation.preview.partyName)")
+                                .font(.system(.largeTitle, design: .rounded, weight: .black))
+                                .multilineTextAlignment(.center)
+                            Text("Pick how this phone appears to the rest of the party.")
+                                .font(.body.weight(.medium))
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+
+                        RingRingCard {
+                            VStack(alignment: .leading, spacing: 18) {
+                                VStack(alignment: .leading, spacing: 7) {
+                                    Text("Phone name")
+                                        .font(.headline.weight(.black))
+                                    TextField("Kitchen phone", text: $displayName)
+                                        .textInputAutocapitalization(.words)
+                                        .autocorrectionDisabled()
+                                        .focused($focusedField, equals: .name)
+                                        .submitLabel(.next)
+                                        .onSubmit { focusedField = .extension }
+                                        .padding(.horizontal, 15)
+                                        .frame(minHeight: 52)
+                                        .background(RingRingTheme.canvas, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                                    Text("Shown only to people in this private party.")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                VStack(alignment: .leading, spacing: 7) {
+                                    Text("Extension")
+                                        .font(.headline.weight(.black))
+                                    TextField("101", text: $extensionValue)
+                                        .keyboardType(.numberPad)
+                                        .textContentType(.oneTimeCode)
+                                        .focused($focusedField, equals: .extension)
+                                        .font(.title3.monospacedDigit().weight(.bold))
+                                        .padding(.horizontal, 15)
+                                        .frame(minHeight: 52)
+                                        .background(RingRingTheme.canvas, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                                        .onChange(of: extensionValue) { _, value in
+                                            extensionValue = String(value.filter(\.isNumber).prefix(5))
+                                        }
+                                    Text("Use 2–5 digits. RingRing suggested \(currentInvitation.preview.suggestedExtension).")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                Toggle(isOn: $adultExtension) {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text("Adult extension (18+)")
+                                            .font(.headline.weight(.black))
+                                        Text("Allows any adult-only voice service your host has enabled. It does not enable public calls.")
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .tint(RingRingTheme.purple)
+                                .frame(minHeight: 58)
+                            }
+                        }
+
+                        if let error = model.invitationErrorMessage {
+                            Label(error, systemImage: "exclamationmark.triangle.fill")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.red)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal)
+                        }
+
+                        Button {
+                            focusedField = nil
+                            model.claimInvitation(displayName: displayName, extension: extensionValue, adultExtension: adultExtension)
+                        } label: {
+                            if model.isProvisioning {
+                                ProgressView()
+                                    .tint(.white)
+                                    .accessibilityLabel("Joining party")
+                            } else {
+                                Label("Join and set up this iPhone", systemImage: "phone.fill")
+                            }
+                        }
+                        .buttonStyle(PrimaryButtonStyle())
+                        .disabled(!canJoin)
+                        .opacity(canJoin || model.isProvisioning ? 1 : 0.45)
+
+                        Label("Private party calls only — no public or emergency calling", systemImage: "lock.shield.fill")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.horizontal, 22)
+                    .padding(.top, 12)
+                    .padding(.bottom, 32)
+                    .frame(maxWidth: 560)
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .foregroundStyle(RingRingTheme.ink)
+            .navigationTitle("Set up phone")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        model.cancelInvitation()
+                        dismiss()
+                    }
+                    .disabled(model.isProvisioning)
+                }
+            }
+            .onChange(of: model.pendingInvitation?.preview.suggestedExtension) { _, suggestion in
+                if let suggestion {
+                    extensionValue = suggestion
+                }
+            }
         }
     }
 }

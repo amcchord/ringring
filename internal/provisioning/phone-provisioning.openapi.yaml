@@ -1,18 +1,21 @@
 openapi: 3.1.2
 info:
-  title: RingRing Phone Provisioning API
-  version: 1.0.0
-  summary: One-time SIP setup and private party call-menu provisioning.
+  title: RingRing Phone API
+  version: 1.1.0
+  summary: One-time party joining, SIP setup, and private call-menu provisioning.
   description: |
-    This API lets a trusted native phone application turn a RingRing one-time
-    setup link into one SIP-over-TLS account and a bounded snapshot of buttons
-    the phone may call. It never provides a PSTN route, a public directory, or
+    This API lets a trusted native phone application either finish a general
+    RingRing invitation or consume an already-configured phone setup link. Both
+    flows return one SIP-over-TLS account and a bounded snapshot of buttons the
+    phone may call. It never provides a PSTN route, a public directory, or
     a persistent directory credential.
 
-    The token is a secret bearer value. A successful GET consumes it atomically,
-    so clients must not preflight, preview, log, crawl, or retry the URL after a
-    successful response. Store the returned SIP password only in device-protected
-    secret storage. Credential responses intentionally do not enable browser CORS.
+    Every token is a secret bearer value. A phone invitation may be previewed
+    without consuming it, then one successful claim consumes it atomically. A
+    phone provisioning token is consumed by its one successful GET. Clients must
+    not log, crawl, or disclose token-bearing URLs. Store returned SIP passwords
+    only in device-protected secret storage. Token and credential responses
+    intentionally do not enable browser CORS.
   license:
     name: MIT
     url: https://github.com/amcchord/ringring/blob/main/LICENSE
@@ -20,6 +23,7 @@ servers:
   - url: /
     description: The RingRing deployment that issued the setup link.
 tags:
+  - name: Phone invitations
   - name: Phone provisioning
 paths:
   /openapi.yaml:
@@ -33,6 +37,86 @@ paths:
             application/yaml:
               schema:
                 type: string
+  /api/v1/phone-invitations/{token}:
+    get:
+      operationId: previewPhoneInvitation
+      tags: [Phone invitations]
+      summary: Preview a general one-time invitation without consuming it.
+      description: |
+        Returns only the party name and one currently available extension
+        suggestion. The suggestion is advisory; a concurrent claim can take it
+        before this client posts. A `410` response deliberately does not reveal
+        whether a token is malformed, unknown, canceled, expired, or already used.
+      parameters:
+        - $ref: "#/components/parameters/InvitationToken"
+      responses:
+        "200":
+          description: The minimal details needed to render native setup.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store, max-age=0
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhoneInvitationPreview"
+        "410":
+          $ref: "#/components/responses/InvitationUnavailable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: claimPhoneInvitation
+      tags: [Phone invitations]
+      summary: Choose an extension and atomically claim a general invitation.
+      description: |
+        Creates exactly one member and device, consumes the invitation, and
+        returns that device's SIP credential and same-party call-menu snapshot in
+        one transaction-backed flow. The high-entropy path token authenticates
+        this JSON request; clients must not attach cookies or browser credentials.
+      parameters:
+        - $ref: "#/components/parameters/InvitationToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PhoneInvitationClaim"
+      responses:
+        "200":
+          $ref: "#/components/responses/PhoneProvisioning"
+        "400":
+          description: The JSON or requested phone details are invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: Another member claimed the requested extension first. The invitation remains usable.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          $ref: "#/components/responses/InvitationUnavailable"
+        "413":
+          description: The request exceeds the small bounded invitation payload size.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request is not application/json.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/phone-provisioning/{token}:
     get:
       operationId: consumePhoneProvisioning
@@ -93,6 +177,16 @@ paths:
                 type: string
 components:
   parameters:
+    InvitationToken:
+      name: token
+      in: path
+      required: true
+      description: A 43-character, high-entropy, single-use bearer token from a general RingRing invitation link.
+      schema:
+        type: string
+        minLength: 43
+        maxLength: 43
+        pattern: "^[A-Za-z0-9_-]{43}$"
     ProvisioningToken:
       name: token
       in: path
@@ -142,6 +236,12 @@ components:
         application/problem+json:
           schema:
             $ref: "#/components/schemas/Problem"
+    InvitationUnavailable:
+      description: The invitation token cannot be used. No reason is disclosed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
     TooManyRequests:
       description: Too many provisioning requests from this source.
       headers:
@@ -160,6 +260,45 @@ components:
           schema:
             $ref: "#/components/schemas/Problem"
   schemas:
+    PhoneInvitationPreview:
+      type: object
+      additionalProperties: false
+      required: [version, party_name, suggested_extension]
+      properties:
+        version:
+          type: integer
+          const: 1
+        party_name:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: The host-chosen party name already shown by the web invitation.
+        suggested_extension:
+          type: string
+          pattern: "^[0-9]{2,5}$"
+          description: An advisory, currently unoccupied party extension.
+    PhoneInvitationClaim:
+      type: object
+      additionalProperties: false
+      required: [display_name, extension, adult_extension]
+      properties:
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 40
+          description: Friendly name shown only inside this private party.
+        extension:
+          type: string
+          pattern: "^[0-9]{2,5}$"
+          description: Requested party extension. Reserved public emergency and crisis numbers are rejected.
+        adult_extension:
+          type: boolean
+          description: Whether the host's optional adult-only voice services may be used from this extension.
+        device_label:
+          type: string
+          minLength: 1
+          maxLength: 40
+          description: Optional host-facing device label. Defaults to Phone app.
     PhoneProvisioningDocument:
       type: object
       required: [version, sip, destinations]

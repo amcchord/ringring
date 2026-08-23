@@ -1,6 +1,6 @@
-# Phone provisioning API
+# Phone API
 
-RingRing exposes a small, versioned HTTP API so a trusted native application can become a private party phone without scraping the setup page or depending on the RingRing iOS implementation.
+RingRing exposes a small, versioned HTTP API so a trusted native application can join a private party and become a phone without scraping web pages or depending on the RingRing iOS implementation.
 
 The contract is intentionally narrow: one successful request returns one SIP-over-TLS account and a setup-time snapshot of the friendly buttons that account may call. It does not expose a public directory, presence, host controls, call history, OpenAI credentials, or any route to the regular telephone network.
 
@@ -14,7 +14,33 @@ GET /openapi.yaml
 
 The source-of-truth file is [`internal/provisioning/phone-provisioning.openapi.yaml`](../internal/provisioning/phone-provisioning.openapi.yaml). The running app and the repository therefore ship the same contract. The public OpenAPI document permits cross-origin reads so documentation and client-generation tools can load it; credential responses deliberately do not enable browser CORS.
 
-## Provisioning flow
+## General invitation flow
+
+A general invitation is the 48-hour `/join/{token}` link and QR a host makes before choosing a member name or extension. A native app may finish those choices itself:
+
+1. Accept only an HTTPS URL whose exact path is `/join/{token}` with a 43-character URL-safe token. Do not send the URL to a browser, link preview, analytics service, or QR service.
+2. Derive the API URL on the same origin: `/api/v1/phone-invitations/{token}`.
+3. `GET` that API URL with redirects, cookies, and caching disabled. This preview does **not** consume the invitation and returns only `version`, `party_name`, and `suggested_extension`.
+4. Show the party name, collect a 1–40 character phone/member label, offer the suggested 2–5 digit extension, and explicitly ask whether this is an adult extension. Public emergency and crisis numbers are reserved and must not be offered.
+5. `POST` one `application/json` claim to the same URL:
+
+   ```json
+   {
+     "display_name": "Studio phone",
+     "extension": "103",
+     "adult_extension": false,
+     "device_label": "Phone app"
+   }
+   ```
+
+6. A `200` atomically creates the member and device, consumes the invitation, and returns the same validated SIP account and call-menu document described below. Store both together in device-protected secret storage.
+7. A `409` means another claim won the requested extension. The invitation remains usable; preview it again and offer the new suggestion. A `410` means the invitation can no longer be used, without disclosing why.
+
+Invalid JSON, unknown fields, reserved extensions, and invalid labels do not consume an otherwise valid invitation. Credential-bearing responses do not permit browser CORS. The bearer token plus the non-simple JSON content type prevent an unrelated browser origin from claiming an invitation without a successful preflight; RingRing does not authorize that preflight and native clients must not attach cookies.
+
+On `ringring.live`, the iOS app also declares `applinks:ringring.live`, while the server publishes `/.well-known/apple-app-site-association` for `/join/*`. This makes a private invitation tap open directly in an installed app. Self-hosted URLs remain supported through the app scanner and paste flow; adding universal-link taps for another hostname requires that app build to include that exact associated domain and the deployment to serve its matching association document.
+
+## Preconfigured phone provisioning flow
 
 1. A party host creates or rotates settings for one phone.
 2. The private, no-store setup card shows a canonical phone API URL and the RingRing-app compatibility QR.
@@ -39,7 +65,7 @@ Both paths consume the same token. They are alternatives, not two requests a cli
 
 ## Authentication and lifecycle
 
-`token` is a 43-character URL-safe bearer value backed by 32 random bytes. RingRing stores only its hash, expires it after 30 minutes, and atomically permits only the first successful fetch. Rotation replaces it; phone revocation or deletion removes it.
+Both token types are 43-character URL-safe bearer values backed by 32 random bytes, and RingRing stores only their hashes. A general invitation expires after 48 hours and is consumed only by one successful web or native claim. A preconfigured phone token expires after 30 minutes and is consumed by its first successful XML or JSON fetch. Rotation replaces a phone token; phone revocation or deletion removes it.
 
 Because the token sits in the URL:
 
@@ -108,7 +134,7 @@ The list is a setup-time snapshot, not live presence. A removed or renamed desti
 
 ## Client security checklist
 
-- Accept only the exact canonical or documented compatibility path with a 43-character token.
+- Accept only the exact `/join/`, canonical invitation API, canonical provisioning API, or documented compatibility path with a 43-character token.
 - Require HTTPS outside a loopback-only development build.
 - Disable redirects, HTTP credential fields, cookies, caches, and automatic request logging.
 - Require a `200` and JSON content type; cap the body at 256 KiB before decoding.
@@ -119,6 +145,7 @@ The list is a setup-time snapshot, not live presence. A removed or renamed desti
 - Show friendly labels for known calls. Keep the technical target internal to the SIP engine.
 - Do not infer that a listed person is online, and do not add PSTN, emergency, trunk, arbitrary URI, transfer, or cross-party routing.
 - Provide an explicit disconnect/reset action that removes the local credential and menu.
+- For general invitations, treat extension suggestions as advisory, handle `409` without discarding the token, and never claim until the person confirms the displayed party and choices.
 
 ## Compatibility and evolution
 

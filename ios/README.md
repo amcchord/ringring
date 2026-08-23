@@ -1,6 +1,6 @@
 # RingRing for iOS
 
-RingRing is a native SwiftUI SIP endpoint for the private RingRing family phone network. It scans the one-time setup QR made by the web app, stores the resulting SIP credential and party call-menu snapshot in the iOS Keychain, registers over SIP TLS, places and receives party calls, and presents calls through CallKit.
+RingRing is a native SwiftUI SIP endpoint for the private RingRing family phone network. It scans either a general party invitation or a preconfigured phone QR, completes extension setup in the app when needed, stores the resulting SIP credential and party call-menu snapshot in the iOS Keychain, registers over SIP TLS, places and receives party calls, and presents calls through CallKit.
 
 ## Requirements
 
@@ -34,7 +34,11 @@ The simulator can exercise onboarding and UI tests, but a physical iPhone is req
 
 ## Provisioning contract
 
-The app accepts `ringring://join?provision=https://…/<setup-path>/<token>` deep links or the nested HTTPS provisioning URL itself. The preferred path is `/api/v1/phone-provisioning/<token>`; `/provision/ios/<token>` remains accepted for setup cards issued to released builds. Tokens are 43 URL-safe characters, expire after 30 minutes, and are consumed by the first successful GET through either route. The JSON response contains the protocol version, one SIP account, and a bounded snapshot of currently dialable names and enabled party services. It omits the phone's own member, members without an active phone, party/host/device labels, email, provider identifiers, and every non-calling field. The app validates every label and hidden dial target, rejects duplicate or oversized menus, and keeps the payload in the device-only Keychain rather than `UserDefaults`, logs, or source control.
+The app accepts the general HTTPS `/join/<token>` link shown in a host's 48-hour invitation. It previews only the party name and a safe available extension, then asks for the phone name, extension, and adult-service permission in a native Memphis-style form. The final JSON claim consumes the invitation and returns the new SIP account plus call menu atomically. If another invitee takes the suggested extension first, the app refreshes the suggestion without losing the invitation.
+
+Preconfigured phones still accept `ringring://join?provision=https://…/<setup-path>/<token>` deep links or the nested HTTPS provisioning URL itself. The preferred path is `/api/v1/phone-provisioning/<token>`; `/provision/ios/<token>` remains accepted for setup cards issued to released builds. Those tokens expire after 30 minutes and are consumed by the first successful GET through either route. Both flows return a versioned JSON response containing one SIP account and a bounded snapshot of currently dialable names and enabled party services. It omits the phone's own member, members without an active phone, party/host/device labels, email, provider identifiers, and every non-calling field. The app validates every label and hidden dial target, rejects duplicate or oversized menus, and keeps the payload in the device-only Keychain rather than `UserDefaults`, logs, or source control.
+
+The reference build supports `applinks:ringring.live`, so tapping a `https://ringring.live/join/…` invitation opens the installed app directly. The scanner and paste controls support any correctly configured HTTPS RingRing deployment; a self-hosted operator who also wants universal-link taps must add that hostname to their own signed app build and publish the matching Apple association file.
 
 The vendor-neutral client contract, error semantics, examples, and implementation checklist live in [the phone API guide](../docs/PHONE_API.md). Every running server also exposes its embedded OpenAPI description at `/openapi.yaml`.
 

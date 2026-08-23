@@ -1152,8 +1152,13 @@ func (s *Store) ClaimInvitation(ctx context.Context, input NewClaim) (model.Part
 		}
 		return model.Party{}, model.Member{}, model.Device{}, fmt.Errorf("create device: %w", err)
 	}
-	if err := replaceProvisioningTokenTx(ctx, tx, input.DeviceID, input.Provisioning); err != nil {
-		return model.Party{}, model.Member{}, model.Device{}, err
+	// Native phone apps receive their SIP credentials in the successful claim
+	// response, so they do not need a second, undisclosed provisioning token.
+	// Web claims still pass a token and retain the existing setup-card flow.
+	if len(input.Provisioning.TokenHash) != 0 {
+		if err := replaceProvisioningTokenTx(ctx, tx, input.DeviceID, input.Provisioning); err != nil {
+			return model.Party{}, model.Member{}, model.Device{}, err
+		}
 	}
 
 	result, err := tx.ExecContext(ctx, `UPDATE invitations SET used_at = ? WHERE id = ? AND used_at IS NULL`, unix(input.Now), invitationID)

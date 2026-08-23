@@ -2,6 +2,30 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-23 — Finish general phone invitations in the iPhone app
+
+### Shipped
+
+- Added a vendor-neutral two-stage phone-invitation API. A non-consuming preview returns only the party name and one advisory safe extension; a bounded JSON claim chooses the phone name, extension, and adult classification, then creates the member/device and consumes the existing 48-hour invitation atomically.
+- Returned the new device's validated SIP-over-TLS account and same-party call-menu snapshot directly from the successful claim. Native claims create no undisclosed follow-on provisioning token, while existing web claims and preconfigured-phone setup links remain compatible.
+- Added a bright Memphis-style native invitation sheet to the iPhone app. Scan, paste, and universal-link entry points now accept general `/join/…` links, handle an extension race with a fresh suggestion, save the completed account/menu in the Keychain, and preserve the existing one-step phone-provisioning flow.
+- Added the reciprocal `applinks:ringring.live` app entitlement and no-redirect Apple association endpoint restricted to `/join/*`. Expanded the embedded OpenAPI 3.1 contract and phone API documentation so third-party apps can implement the same flow without scraping the web UI.
+
+### Decisions
+
+- Reuse the existing invitation bearer and claim transaction rather than minting an app-only invitation type. Preview is intentionally minimal and non-consuming; the database uniqueness constraint remains authoritative when two invitees choose the same suggestion.
+- Treat the native JSON request as bearer-authenticated rather than session-authenticated. It accepts only bounded `application/json`, attaches no cookie, permits no CORS preflight, uses generic unavailable-token errors, and retains the invitation after validation or extension-conflict failures.
+- Limit universal-link ownership to the reference `ringring.live` build. Any self-hosted operator can scan or paste their HTTPS invite immediately; claiming another website's links requires that operator's own signed associated-domain entitlement and matching server association file.
+
+### Verification
+
+- Focused Go tests cover preview minimization/no-store headers, invalid JSON non-consumption, extension conflict, atomic successful claim, same-party call buttons, generic used/unknown errors, omission of a second provisioning token, safe metrics routing/rate limits, and the exact Apple association document.
+- The iOS simulator suite passes all 15 Swift tests, including strict invitation URL derivation, URL credential/query rejection, ASCII/reserved extension rules, preview validation, and documented claim JSON. An iPhone 17 Pro simulator rendered the complete setup sheet without clipping or horizontal overflow; controls retain touch-sized targets and the existing Memphis palette.
+
+### Remaining
+
+- Deploy the matching server commit, verify the public invitation/OpenAPI/association endpoints, upload signed iOS build 4 to TestFlight, and complete a physical scan/tap/claim/call check.
+
 ## 2026-08-23 — Give the iPhone app a complete App Store presentation
 
 ### Shipped

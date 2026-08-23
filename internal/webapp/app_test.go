@@ -385,7 +385,7 @@ func TestPhoneOpenAPIIsPublicEmbeddedDocumentation(t *testing.T) {
 	if response.StatusCode != http.StatusOK || !strings.HasPrefix(response.Header.Get("Content-Type"), "application/yaml") || response.Header.Get("Access-Control-Allow-Origin") != "*" || response.Header.Get("Cross-Origin-Resource-Policy") != "cross-origin" || !strings.Contains(response.Header.Get("Cache-Control"), "public") {
 		t.Fatalf("OpenAPI response was not safely public: status=%d headers=%v", response.StatusCode, response.Header)
 	}
-	if !strings.Contains(body, "openapi: 3.1.2") || !strings.Contains(body, "/api/v1/phone-provisioning/{token}:") || strings.Contains(body, "ringring_session") {
+	if !strings.Contains(body, "openapi: 3.1.2") || !strings.Contains(body, "/api/v1/phone-invitations/{token}:") || !strings.Contains(body, "/api/v1/phone-provisioning/{token}:") || strings.Contains(body, "ringring_session") {
 		t.Fatal("served OpenAPI contract was missing, stale, or contained an application session field")
 	}
 }
@@ -1360,6 +1360,11 @@ func TestSecretPathsAreMaskedAndProvisioningIsRateLimited(t *testing.T) {
 	if got := safeRoute(phoneProvisioning); got != "/api/v1/phone-provisioning/{token}" || requestSurface(phoneProvisioning) != "provisioning" {
 		t.Fatalf("safe phone API route = %q surface=%q", got, requestSurface(phoneProvisioning))
 	}
+	phoneInvitation := httptest.NewRequest(http.MethodGet, "/api/v1/phone-invitations/invitation-secret", nil)
+	phoneInvitation.Pattern = "GET /api/v1/phone-invitations/{token}"
+	if got := safeRoute(phoneInvitation); got != "/api/v1/phone-invitations/{token}" || requestSurface(phoneInvitation) != "invitation" {
+		t.Fatalf("safe phone invitation API route = %q surface=%q", got, requestSurface(phoneInvitation))
+	}
 	openAPI := httptest.NewRequest(http.MethodGet, "/openapi.yaml", nil)
 	openAPI.Pattern = "GET /openapi.yaml"
 	if got := safeRoute(openAPI); got != "/openapi.yaml" || requestSurface(openAPI) != "documentation" {
@@ -1378,6 +1383,11 @@ func TestSecretPathsAreMaskedAndProvisioningIsRateLimited(t *testing.T) {
 	category, limit, window = rateCategory(phoneRequest)
 	if category != "provision" || limit != 20 || window != 5*time.Minute {
 		t.Fatalf("phone API rate category = %q %d %s", category, limit, window)
+	}
+	invitationRequest := httptest.NewRequest(http.MethodPost, "/api/v1/phone-invitations/invitation-secret", nil)
+	category, limit, window = rateCategory(invitationRequest)
+	if category != "join" || limit != 60 || window != 5*time.Minute {
+		t.Fatalf("phone invitation API rate category = %q %d %s", category, limit, window)
 	}
 }
 

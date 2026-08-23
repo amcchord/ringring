@@ -21,6 +21,52 @@ struct ProvisioningTests {
         #expect(try ProvisioningLink.provisioningURL(from: openAPIPath) == openAPIPath)
     }
 
+    @Test func turnsGeneralInvitationIntoNativeInvitationEndpoint() throws {
+        let invite = try #require(URL(string: "https://family.example/join/\(token)"))
+        let parsed = try SetupLink.parse(invite)
+        guard case .invitation(let link) = parsed else {
+            Issue.record("general invitation was parsed as a provisioning link")
+            return
+        }
+        #expect(link.sourceURL == invite)
+        #expect(link.apiURL.absoluteString == "https://family.example/api/v1/phone-invitations/\(token)")
+    }
+
+    @Test func rejectsUnsafeGeneralInvitationLinks() throws {
+        let queried = try #require(URL(string: "https://family.example/join/\(token)?preview=true"))
+        let credentialed = try #require(URL(string: "https://name:secret@family.example/join/\(token)"))
+        let short = try #require(URL(string: "https://family.example/join/short"))
+
+        #expect(throws: ProvisioningError.invalidLink) { try SetupLink.parse(queried) }
+        #expect(throws: ProvisioningError.invalidLink) { try SetupLink.parse(credentialed) }
+        #expect(throws: ProvisioningError.invalidLink) { try SetupLink.parse(short) }
+    }
+
+    @Test func validatesInvitationPreviewAndExtensionSafetyRules() throws {
+        let preview = PhoneInvitationPreview(version: 1, partyName: "Color Club", suggestedExtension: "103")
+        #expect(try preview.validated() == preview)
+        #expect(PhoneInvitationDetails.isExtension("10"))
+        #expect(PhoneInvitationDetails.isExtension("203"))
+        #expect(!PhoneInvitationDetails.isExtension("911"))
+        #expect(!PhoneInvitationDetails.isExtension("988"))
+        #expect(!PhoneInvitationDetails.isExtension("123456"))
+        #expect(!PhoneInvitationDetails.isExtension("２０３"))
+
+        let unsafe = PhoneInvitationPreview(version: 1, partyName: "Color\nClub", suggestedExtension: "103")
+        #expect(throws: InvitationError.invalidResponse) { try unsafe.validated() }
+    }
+
+    @Test func invitationClaimUsesDocumentedJSONFields() throws {
+        let claim = PhoneInvitationClaim(displayName: "Studio phone", extension: "103", adultExtension: false, deviceLabel: "iPhone app")
+        let encoded = try JSONEncoder().encode(claim)
+        let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        #expect(object["display_name"] as? String == "Studio phone")
+        #expect(object["extension"] as? String == "103")
+        #expect(object["adult_extension"] as? Bool == false)
+        #expect(object["device_label"] as? String == "iPhone app")
+        #expect(object.count == 4)
+    }
+
     @Test func rejectsCredentialsQueriesAndUnrelatedPaths() throws {
         let credentialed = try #require(URL(string: "https://name:secret@family.example/provision/ios/\(token)"))
         let queried = try #require(URL(string: "https://family.example/provision/ios/\(token)?copy=true"))

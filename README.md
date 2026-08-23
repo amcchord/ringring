@@ -12,7 +12,7 @@ The hosted reference instance is live at [ringring.live](https://ringring.live).
 ## What we are building
 
 - Isolated parties with a host and a private extension directory.
-- One-time invite links with a private scan-to-join QR, plus independently revocable setup cards for every ATA, desk phone, or app, a native RingRing-app QR, and a documented vendor-neutral phone provisioning API.
+- One-time invite links with a private scan-to-join QR that native apps can finish with an extension choice, plus independently revocable setup cards for every ATA, desk phone, or app, universal links on the reference iPhone app, and a documented vendor-neutral phone API.
 - Copy-ready manual setup guidance that translates common ATA, VoIP-phone, and softphone field labels.
 - A bright, mobile-first host dashboard for invitations, members, live phone status, one-tap incoming ring checks, device controls, and optional lines.
 - An always-available RingRing operator on `0`/`*0`, `*10` two-way phone testing, and `*15` voice-guided extension selection, plus optional time, weather, internet radio, and an operator-approved OpenAI conversation line.

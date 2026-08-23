@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"mime"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -221,6 +222,19 @@ type apiProblem struct {
 	Detail string `json:"detail"`
 }
 
+type phoneInvitationPreview struct {
+	Version            int    `json:"version"`
+	PartyName          string `json:"party_name"`
+	SuggestedExtension string `json:"suggested_extension"`
+}
+
+type phoneInvitationClaim struct {
+	DisplayName    string `json:"display_name"`
+	Extension      string `json:"extension"`
+	AdultExtension bool   `json:"adult_extension"`
+	DeviceLabel    string `json:"device_label,omitempty"`
+}
+
 type statusWriter struct {
 	http.ResponseWriter
 	status int
@@ -284,6 +298,7 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 	mux.HandleFunc("GET /healthz", app.health)
 	mux.HandleFunc("GET /readyz", app.ready)
 	mux.HandleFunc("GET /openapi.yaml", app.phoneOpenAPI)
+	mux.HandleFunc("GET /.well-known/apple-app-site-association", app.appleAppSiteAssociation)
 	mux.Handle("GET /static/", app.static)
 	mux.HandleFunc("GET /signup", app.signupForm)
 	mux.HandleFunc("POST /signup", app.signup)
@@ -321,6 +336,8 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 	mux.HandleFunc("GET /provision/linphone/{token}", app.linphoneProvision)
 	mux.HandleFunc("GET /provision/ios/{token}", app.iosProvisionCompatibility)
 	mux.HandleFunc("GET /api/v1/phone-provisioning/{token}", app.phoneProvisionAPI)
+	mux.HandleFunc("GET /api/v1/phone-invitations/{token}", app.phoneInvitationAPI)
+	mux.HandleFunc("POST /api/v1/phone-invitations/{token}", app.phoneInvitationAPI)
 	mux.HandleFunc("GET /", app.home)
 
 	app.handler = app.securityHeaders(app.requestLog(app.recoverPanic(app.rateLimit(mux))))
@@ -2099,6 +2116,173 @@ func (a *App) phoneOpenAPI(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write(provisioning.PhoneOpenAPI())
 }
 
+func (a *App) appleAppSiteAssociation(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cross-Origin-Resource-Policy", "cross-origin")
+	_, _ = io.WriteString(w, `{"applinks":{"apps":[],"details":[{"appID":"7PTN7E8EDS.com.mcchord.ringring","paths":["/join/*"]}]}}`)
+}
+
+func (a *App) phoneInvitationAPI(w http.ResponseWriter, r *http.Request) {
+	phoneProvisioningHeaders(w)
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodGet+", "+http.MethodPost)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	token := r.PathValue("token")
+	if !provisionTokenPattern.MatchString(token) {
+		writePhoneInvitationGone(w)
+		return
+	}
+	invitedParty, err := a.store.PartyByInvitation(r.Context(), secure.Hash(token), a.now())
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrInviteUsed) || errors.Is(err, store.ErrInviteExpired) {
+		writePhoneInvitationGone(w)
+		return
+	}
+	if err != nil {
+		a.logger.Error("load phone API invitation", "error_class", observability.ErrorClass(err))
+		writeAPIProblem(w, http.StatusInternalServerError, "Phone invitation unavailable", "RingRing could not safely open this invitation. Please try again.")
+		return
+	}
+
+	if r.Method == http.MethodGet {
+		suggestion, err := a.store.SuggestedExtension(r.Context(), invitedParty.ID)
+		if err != nil || suggestion == "" {
+			a.logger.Error("suggest phone API extension", "error_class", observability.ErrorClass(err))
+			writeAPIProblem(w, http.StatusInternalServerError, "Phone invitation unavailable", "RingRing could not safely suggest an extension. Please try again.")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(phoneInvitationPreview{
+			Version: 1, PartyName: invitedParty.Name, SuggestedExtension: suggestion,
+		})
+		return
+	}
+
+	claim, ok := decodePhoneInvitationClaim(w, r)
+	if !ok {
+		return
+	}
+	displayName := strings.Join(strings.Fields(claim.DisplayName), " ")
+	extensionValue := strings.TrimSpace(claim.Extension)
+	deviceLabel := strings.Join(strings.Fields(claim.DeviceLabel), " ")
+	if deviceLabel == "" {
+		deviceLabel = "Phone app"
+	}
+	if !validInvitationText(displayName, 40) || !validInvitationText(deviceLabel, 40) || !extensionrules.Valid(extensionValue) {
+		writeAPIProblem(w, http.StatusBadRequest, "Invalid phone details", "Choose a name of 1–40 characters and an available 2–5 digit extension that is not reserved for public emergency or crisis services.")
+		return
+	}
+
+	directoryMembers, err := a.store.ListMembers(r.Context(), invitedParty.ID)
+	if err != nil {
+		a.logger.Error("load phone API invitation directory", "error_class", observability.ErrorClass(err))
+		writeAPIProblem(w, http.StatusInternalServerError, "Phone invitation unavailable", "RingRing could not safely prepare this phone. Please try again.")
+		return
+	}
+	services, err := a.store.PartyServices(r.Context(), invitedParty.ID)
+	if err != nil {
+		a.logger.Error("load phone API invitation services", "error_class", observability.ErrorClass(err))
+		writeAPIProblem(w, http.StatusInternalServerError, "Phone invitation unavailable", "RingRing could not safely prepare this phone. Please try again.")
+		return
+	}
+	memberID, err := secure.ID("mem")
+	if err != nil {
+		a.logger.Error("allocate phone API member", "error_class", observability.ErrorClass(err))
+		writeAPIProblem(w, http.StatusInternalServerError, "Phone invitation unavailable", "RingRing could not safely prepare this phone. Please try again.")
+		return
+	}
+	deviceID, err := secure.ID("dev")
+	if err != nil {
+		a.logger.Error("allocate phone API device", "error_class", observability.ErrorClass(err))
+		writeAPIProblem(w, http.StatusInternalServerError, "Phone invitation unavailable", "RingRing could not safely prepare this phone. Please try again.")
+		return
+	}
+
+	var party model.Party
+	var member model.Member
+	username, sipSecret, err := a.saveWithNewSIPCredentials(deviceID, func(username, ciphertext string) error {
+		party, member, _, err = a.store.ClaimInvitation(r.Context(), store.NewClaim{
+			TokenHash: secure.Hash(token), MemberID: memberID, DisplayName: displayName, Extension: extensionValue,
+			AdultExtension: claim.AdultExtension, DeviceID: deviceID, DeviceLabel: deviceLabel, SIPUsername: username,
+			SIPSecretCiphertext: ciphertext, Now: a.now(),
+		})
+		return err
+	})
+	if errors.Is(err, store.ErrExtensionTaken) {
+		writeAPIProblem(w, http.StatusConflict, "Extension unavailable", "That extension was just claimed. Refresh the invitation for another suggestion or choose a different extension.")
+		return
+	}
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrInviteUsed) || errors.Is(err, store.ErrInviteExpired) {
+		writePhoneInvitationGone(w)
+		return
+	}
+	if err != nil {
+		a.logger.Error("claim phone API invitation", "error_class", observability.ErrorClass(err))
+		writeAPIProblem(w, http.StatusInternalServerError, "Phone invitation unavailable", "RingRing could not safely prepare this phone. Please try again.")
+		return
+	}
+
+	document, err := provisioning.PhoneJSON(provisioning.LinphoneConfig{
+		Server: a.cfg.SIPPublicHost, Username: username, Password: sipSecret, Extension: member.Extension,
+	}, phoneCallDestinations(member.Extension, directoryMembers, availableFirstCallLines(party, services, a.cfg.AIAdultOnlyEnabled, member.AdultExtension)))
+	if err != nil {
+		a.logger.Error("encode phone API invitation claim", "error_class", observability.ErrorClass(err))
+		writeAPIProblem(w, http.StatusInternalServerError, "Phone setup unavailable", "RingRing could not safely prepare these phone settings. Ask the party host for a fresh invitation.")
+		return
+	}
+	if err := a.ReconcileTelephony(r.Context()); err != nil {
+		a.logger.Error("telephony reconcile after phone API invitation", "error_class", observability.ErrorClass(err))
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if _, err := w.Write(document); err != nil {
+		a.logger.Error("write phone API invitation claim", "error_class", observability.ErrorClass(err))
+	}
+}
+
+func decodePhoneInvitationClaim(w http.ResponseWriter, r *http.Request) (phoneInvitationClaim, bool) {
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		writeAPIProblem(w, http.StatusUnsupportedMediaType, "JSON required", "Send phone details as an application/json request.")
+		return phoneInvitationClaim{}, false
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	var claim phoneInvitationClaim
+	if err := decoder.Decode(&claim); err != nil {
+		var maximumError *http.MaxBytesError
+		if errors.As(err, &maximumError) {
+			writeAPIProblem(w, http.StatusRequestEntityTooLarge, "Phone details too large", "Send only the small set of documented phone invitation fields.")
+			return phoneInvitationClaim{}, false
+		}
+		writeAPIProblem(w, http.StatusBadRequest, "Invalid JSON", "Send one complete JSON object with the documented phone invitation fields.")
+		return phoneInvitationClaim{}, false
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeAPIProblem(w, http.StatusBadRequest, "Invalid JSON", "Send exactly one JSON object.")
+		return phoneInvitationClaim{}, false
+	}
+	return claim, true
+}
+
+func validInvitationText(value string, maximum int) bool {
+	if value == "" || !utf8.ValidString(value) || utf8.RuneCountInString(value) > maximum {
+		return false
+	}
+	for _, character := range value {
+		if unicode.IsControl(character) {
+			return false
+		}
+	}
+	return true
+}
+
+func writePhoneInvitationGone(w http.ResponseWriter) {
+	writeAPIProblem(w, http.StatusGone, "Phone invitation unavailable", "This one-time invitation was used, expired, canceled, or is invalid. Ask the party host for a fresh invitation.")
+}
+
 func (a *App) phoneProvisionAPI(w http.ResponseWriter, r *http.Request) {
 	phoneProvisioningHeaders(w)
 	if r.Method != http.MethodGet {
@@ -2614,7 +2798,7 @@ func requestSurface(request *http.Request) string {
 	switch {
 	case route == "/healthz" || route == "/readyz":
 		return "health"
-	case route == "/openapi.yaml":
+	case route == "/openapi.yaml" || route == "/.well-known/apple-app-site-association":
 		return "documentation"
 	case strings.HasPrefix(route, "/static/"):
 		return "static"
@@ -2623,7 +2807,7 @@ func requestSurface(request *http.Request) string {
 		return "authentication"
 	case route == "/app" || strings.HasPrefix(route, "/parties") || strings.HasPrefix(route, "/account/delete"):
 		return "host"
-	case strings.HasPrefix(route, "/join/"):
+	case strings.HasPrefix(route, "/join/") || route == "/api/v1/phone-invitations/{token}":
 		return "invitation"
 	case strings.HasPrefix(route, "/provision/") || route == "/api/v1/phone-provisioning/{token}":
 		return "provisioning"

@@ -75,6 +75,10 @@ func TestPhoneOpenAPITracksTheRuntimeContract(t *testing.T) {
 	document := string(PhoneOpenAPI())
 	for _, required := range []string{
 		"openapi: 3.1.2",
+		"/api/v1/phone-invitations/{token}:",
+		"previewPhoneInvitation",
+		"claimPhoneInvitation",
+		"PhoneInvitationClaim:",
 		"/api/v1/phone-provisioning/{token}:",
 		"/provision/ios/{token}:",
 		"deprecated: true",
@@ -88,7 +92,7 @@ func TestPhoneOpenAPITracksTheRuntimeContract(t *testing.T) {
 			t.Fatalf("OpenAPI document is missing %q", required)
 		}
 	}
-	for _, forbidden := range []string{"real password", "host@example", "Blue phone", "additionalProperties: false"} {
+	for _, forbidden := range []string{"real password", "host@example", "Blue phone"} {
 		if strings.Contains(document, forbidden) {
 			t.Fatalf("OpenAPI document contains private or child-specific example %q", forbidden)
 		}
