@@ -616,7 +616,7 @@ func TestPhoneBackgroundWakeKeepsSIPAndPartyAuthorizationAuthoritative(t *testin
 			"reportIncomingPush", "refreshRegisters", "pendingAnswer", "schedulePushTimeout",
 		},
 		"ringringctl": {
-			"configure-apns", "AuthKey_${key_id}.p8", "install -m 0400", "--force-recreate app",
+			"configure-apns", "AuthKey_${key_id}.p8", "install -m 0440", "chown root:10001", "--force-recreate app",
 		},
 		"docs/PHONE_API.md": {
 			"opaque call UUID", "the later authenticated SIP invitation remains authoritative",

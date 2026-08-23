@@ -26,7 +26,7 @@ This is the durable, chronological project record. Add new entries at the top. C
 - Integrated PushKit with CallKit so a background or locked iPhone reports the system call immediately, refreshes SIP registration, attaches the authenticated Linphone invitation to the existing call UUID, and safely handles an answer that arrives before SIP reconnects.
 - Added an authenticated, no-store configured-phone API that refreshes current same-party people and services and includes friendly `Happening now` buttons for active party conferences. The iOS app keeps the last validated menu through transient failures and never renders the hidden join number.
 - Bundled the four original RingRing ringtone WAVs, added a local preview/selector in Phone settings, and supplies the selected sound to CallKit. Updated the app/server privacy, security, architecture, recovery, OpenAPI, deployment, App Store, and TestFlight documentation.
-- Added `ringringctl configure-apns`, a read-only Compose key mount, and verified-backup support for the root-only provider key. The command validates the P-256 key and identifiers, atomically installs configuration, recreates only the app, and runs the complete deployment doctor.
+- Added `ringringctl configure-apns`, a read-only Compose key mount, and verified-backup support for the root-owned provider key. The command validates the P-256 key and identifiers, atomically installs configuration, recreates only the app, and runs the complete deployment doctor.
 
 ### Decisions
 

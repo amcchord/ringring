@@ -112,8 +112,8 @@ if test -n "$apns_key_id"; then
     echo "The configured APNs provider key is missing or is a symbolic link." >&2
     exit 1
   fi
-  case "$(stat -c %a "$apns_key")" in 400|600) ;; *)
-    echo "The APNs provider key must have mode 0400 or 0600." >&2
+  case "$(stat -c %a "$apns_key")" in 400|440|600) ;; *)
+    echo "The APNs provider key must have mode 0400, 0440, or 0600." >&2
     exit 1
   esac
   install -m 0400 "$apns_key" "$payload/secrets/apns/AuthKey_${apns_key_id}.p8"

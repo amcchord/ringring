@@ -173,6 +173,14 @@ file_owner() {
   fi
 }
 
+file_group() {
+  if stat -c %g "$1" >/dev/null 2>&1; then
+    stat -c %g "$1"
+  else
+    stat -f %g "$1"
+  fi
+}
+
 require_private_file() {
   path=$1
   label=$2
@@ -183,6 +191,27 @@ require_private_file() {
   esac
   if test "$test_mode" != 1 && test "$(file_owner "$path")" -ne 0; then
     die "$label must be owned by root: $path"
+  fi
+}
+
+require_app_secret_directory() {
+  path=$1
+  test -d "$path" && test ! -L "$path" || die "The managed app-secret directory must be a non-symlink directory: $path"
+  test "$(file_mode "$path")" = 750 || die "The managed app-secret directory must have mode 0750: $path"
+  if test "$test_mode" != 1; then
+    test "$(file_owner "$path")" -eq 0 || die "The managed app-secret directory must be owned by root: $path"
+    test "$(file_group "$path")" -eq 10001 || die "The managed app-secret directory must use the RingRing app group (GID 10001): $path"
+  fi
+}
+
+require_app_secret_file() {
+  path=$1
+  label=$2
+  test -f "$path" && test ! -L "$path" || die "$label must be a regular, non-symlink file: $path"
+  test "$(file_mode "$path")" = 440 || die "$label must have mode 0440: $path"
+  if test "$test_mode" != 1; then
+    test "$(file_owner "$path")" -eq 0 || die "$label must be owned by root: $path"
+    test "$(file_group "$path")" -eq 10001 || die "$label must use the RingRing app group (GID 10001): $path"
   fi
 }
 
@@ -473,7 +502,8 @@ validate_installed_configuration() {
     test "$apns_private_key" = "/run/secrets/ringring-apns/AuthKey_${apns_key_id}.p8" || die "APNS_PRIVATE_KEY_FILE must use the managed read-only key path."
     validate_bundle_identifier "$apns_bundle_id"
     case "$apns_environment" in production|development) ;; *) die "APNS_ENVIRONMENT must be production or development." ;; esac
-    require_private_file "$config_dir/apns/AuthKey_${apns_key_id}.p8" "The APNs provider key"
+    require_app_secret_directory "$config_dir/apns"
+    require_app_secret_file "$config_dir/apns/AuthKey_${apns_key_id}.p8" "The APNs provider key"
   fi
 }
 
@@ -937,7 +967,7 @@ configure_apns_command() {
   echo "  key ID: $key_id"
   echo "  bundle/topic: $bundle_id / $bundle_id.voip"
   echo "  environment: $environment"
-  echo "  provider key: copied to a root-only managed file"
+  echo "  provider key: root-owned and readable only by the RingRing app group"
   echo "  app: recreated and fully verified"
   if test "$dry_run" -eq 1; then
     echo "Dry run passed. No key, environment, container, or service state was changed."
@@ -947,15 +977,18 @@ configure_apns_command() {
 
   apns_directory="$config_dir/apns"
   test ! -L "$apns_directory" || die "The managed APNs directory must not be a symlink."
-  install -d -m 0700 "$apns_directory"
+  install -d -m 0750 "$apns_directory"
   if test "$test_mode" != 1; then
-    chown root:root "$apns_directory"
+    chown root:10001 "$apns_directory"
   fi
   destination="$apns_directory/AuthKey_${key_id}.p8"
   test ! -L "$destination" || die "The managed APNs provider key must not be a symlink."
   staged_key=$(mktemp "$apns_directory/.AuthKey_${key_id}.XXXXXX")
   remember_temporary "$staged_key"
-  install -m 0400 "$key_file" "$staged_key"
+  install -m 0440 "$key_file" "$staged_key"
+  if test "$test_mode" != 1; then
+    chown root:10001 "$staged_key"
+  fi
   mv -f -- "$staged_key" "$destination"
 
   staged_environment=$(mktemp "$config_dir/.app.env.XXXXXX")

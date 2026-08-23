@@ -114,6 +114,11 @@ if ! git merge-base --is-ancestor "$backup_commit" HEAD; then
 fi
 
 chown -R 10001:10001 "$payload/app"
+if test -n "$(find "$payload/secrets/apns" -maxdepth 1 -type f -print -quit)"; then
+  chown root:10001 "$payload/secrets/apns"
+  chmod 0750 "$payload/secrets/apns"
+  find "$payload/secrets/apns" -maxdepth 1 -type f -exec chown root:10001 {} + -exec chmod 0440 {} +
+fi
 install -d -o 10001 -g 10001 -m 0750 "$work_directory/asterisk"
 before=$(docker run --rm --network none --read-only --cap-drop ALL \
   --security-opt no-new-privileges --env-file "$payload/secrets/app.env" \

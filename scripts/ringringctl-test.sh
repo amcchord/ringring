@@ -177,6 +177,11 @@ assert_private() {
   case "$mode" in 600|400) ;; *) fail "$1 mode is $mode" ;; esac
 }
 
+assert_mode() {
+  mode=$(if stat -c %a "$1" >/dev/null 2>&1; then stat -c %a "$1"; else stat -f %Lp "$1"; fi)
+  test "$mode" = "$2" || fail "$1 mode is $mode, expected $2"
+}
+
 assert_successful_install() {
   new_fixture install-success
   output=$(run_ctl install --answers "$answers" --yes 2>&1)
@@ -241,7 +246,8 @@ assert_successful_install() {
   grep -qx 'APNS_PRIVATE_KEY_FILE=/run/secrets/ringring-apns/AuthKey_ABCDEFGHIJ.p8' "$config/app.env" || fail 'APNs key path was not rendered'
   grep -qx 'APNS_BUNDLE_ID=com.mcchord.ringring' "$config/app.env" || fail 'APNs bundle ID was not rendered'
   grep -qx 'APNS_ENVIRONMENT=production' "$config/app.env" || fail 'APNs environment was not rendered'
-  assert_private "$config/apns/AuthKey_ABCDEFGHIJ.p8"
+  assert_mode "$config/apns" 750
+  assert_mode "$config/apns/AuthKey_ABCDEFGHIJ.p8" 440
   grep -q '^docker compose up -d --force-recreate app$' "$log" || fail 'APNs configuration did not recreate the app'
   sed 's/^AI_ADULT_ONLY_ENABLED=false$/AI_ADULT_ONLY_ENABLED=true/' "$config/app.env" >"$fixture/app.approved.env"
   chmod 0600 "$fixture/app.approved.env"
