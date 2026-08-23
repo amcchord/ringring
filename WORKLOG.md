@@ -23,9 +23,15 @@ This is the durable, chronological project record. Add new entries at the top. C
 - The local SIP smoke suite passes with TLS and UDP registration, party-scoped operator generation, an authenticated answered call to `0`, bundled no-provider fallback, friendly invalid/disabled destinations, same-extension calling, `*10`, RTP, and `*15`.
 - The changed host and setup pages were inspected at 1280×900 and 390×844. The operator and HT801 guidance remain readable, and the mobile document has no horizontal overflow.
 
+### Production
+
+- Published exact runtime commit `2226206194be5912fd32f18ee864711d954e0fa3` to the public repository after validating that isolated commit through `make check`, `make security`, `make admin-test`, and `make sip-smoke`. The guarded fast-forward production upgrade created, checksummed, and restore-drilled its pre/post archives before completing at that commit.
+- Public health and readiness return 200; `ringringctl doctor` passes with one live SIP contact; and the generated and loaded Asterisk dialplans contain the party-scoped operator routes. All four operator prompts were generated through the private listener with the party key, cached without caller data, and left behind their bundled no-provider fallbacks; the post-generation app log is clean.
+- Configured the authorized Grandstream HT801 V2 test adapter to auto-dial `0` after eight seconds off hook. The device applied the change and returned exact readback values `P71=0` and `P4045=8`; production still reports its live SIP contact after the apply.
+
 ### Remaining
 
-- Publish and deploy the exact locally validated commit, pre-generate the live party’s operator audio, and configure/read back the authorized test HT801 V2’s delayed off-hook destination. A person must lift the physical handset and listen to complete the final subjective voice/energy check.
+- Lift the physical handset, wait about eight seconds, and listen to complete the subjective voice/energy check. Also dial a bad extension once to confirm the same operator style feels clear in the misdial path.
 
 ## 2026-08-23 — Make the AI line an adult-extension choice
 
