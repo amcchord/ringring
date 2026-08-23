@@ -158,7 +158,8 @@
       {{end}}
     </div>
   </div>
-  <div class="directory phonebook" aria-labelledby="phonebook-title">
+  {{block "phonebook-live" .}}
+  <div class="directory phonebook" id="phonebook-live" data-party-live-url="{{.PartyLiveURL}}" aria-labelledby="phonebook-title">
     <div class="phonebook-heading">
       <div>
         <span class="kicker">Party directory</span>
@@ -172,6 +173,40 @@
       </div>
       {{end}}
     </div>
+    <section class="active-call-board" aria-labelledby="active-calls-title" aria-live="polite">
+      <div class="active-call-heading">
+        <span class="active-call-icon" aria-hidden="true">🎉</span>
+        <div>
+          <span class="kicker">Happening now</span>
+          <h3 id="active-calls-title">Party calls</h3>
+        </div>
+        {{if .ActiveCalls}}<span class="live-call-badge"><span aria-hidden="true"></span> Live</span>{{end}}
+      </div>
+      {{if .ActiveCallNotice}}
+        <p class="presence-notice" role="status">{{.ActiveCallNotice}}</p>
+      {{else if .ActiveCalls}}
+        <div class="active-call-list">
+        {{range .ActiveCalls}}
+          <article class="active-call-card">
+            <div class="active-call-people">
+              <span class="call-wave" aria-hidden="true">)))</span>
+              <div>
+                <strong>{{range $index, $name := .Participants}}{{if $index}}, {{end}}{{$name}}{{end}}</strong>
+                <span>{{.PhoneCount}} {{if eq .PhoneCount 1}}phone{{else}}phones{{end}} in this call</span>
+              </div>
+            </div>
+            <div class="join-call-code">
+              <span>Dial to join</span>
+              <strong>{{.JoinNumber}}</strong>
+            </div>
+          </article>
+        {{end}}
+        </div>
+        <p class="active-call-privacy"><strong>Everybody hears who is joining.</strong> RingRing sends the joining member’s display name—not the call—to this party’s OpenAI project to make the announcement. No call audio, transcript, or call history is saved.</p>
+      {{else}}
+        <div class="active-call-empty"><span aria-hidden="true">☁</span><p><strong>No party calls right now.</strong> When two party phones connect, the join code will pop up here.</p></div>
+      {{end}}
+    </section>
     {{if .PresenceNotice}}<p class="presence-notice" role="status">{{.PresenceNotice}}</p>{{end}}
     {{if .Members}}
       {{$root := .}}{{$party := .Party}}{{$csrf := .CSRF}}
@@ -293,6 +328,7 @@
       <div class="empty-state phonebook-empty"><span aria-hidden="true">📞</span><h3>Your phone book is ready</h3><p>Make the first invite link and someone will appear here.</p></div>
     {{end}}
   </div>
+  {{end}}
 </section>
 <section class="danger-zone wrap" aria-labelledby="party-danger-title">
   <div>

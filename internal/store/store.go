@@ -870,6 +870,31 @@ func (s *Store) AIAdultAccessForDevice(ctx context.Context, partyID, sipUsername
 	return allowed == 1, nil
 }
 
+// PartyMemberForDevice resolves the friendly name used for an active-call
+// join announcement from Asterisk's authenticated endpoint. Revoked,
+// cross-party, and unknown devices receive the same not-found result.
+func (s *Store) PartyMemberForDevice(ctx context.Context, partyID, sipUsername string) (model.Member, error) {
+	var member model.Member
+	var adultExtension int
+	var created int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT m.id, m.party_id, m.display_name, m.extension, m.adult_extension, m.created_at
+		FROM devices d
+		JOIN members m ON m.id = d.member_id
+		WHERE m.party_id = ? AND d.sip_username = ? AND d.revoked_at IS NULL`,
+		partyID, sipUsername,
+	).Scan(&member.ID, &member.PartyID, &member.DisplayName, &member.Extension, &adultExtension, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Member{}, ErrNotFound
+	}
+	if err != nil {
+		return model.Member{}, fmt.Errorf("load party member from phone: %w", err)
+	}
+	member.AdultExtension = adultExtension == 1
+	member.CreatedAt = fromUnix(created)
+	return member, nil
+}
+
 // OperatorDisclosureForDevice reports whether the member extension belonging
 // to an active authenticated device has already heard the RingRing operator's
 // AI-voice disclosure. Devices on the same extension deliberately share this

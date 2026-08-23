@@ -7,7 +7,7 @@ displayconnects=no
 
 [ringring]
 secret=__ASTERISK_AMI_SECRET__
-read=system,command
-write=system,command,originate
+read=system,command,call,reporting
+write=system,command,originate,reporting
 deny=0.0.0.0/0.0.0.0
 permit=172.31.88.10/255.255.255.255

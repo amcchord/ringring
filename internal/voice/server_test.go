@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -84,6 +85,37 @@ type fakeSpeech struct {
 	calls  int
 }
 
+type failingSpeech struct{}
+
+func (failingSpeech) SpeechPCM(context.Context, string, string) ([]byte, error) {
+	return nil, errors.New("speech unavailable")
+}
+
+type fakeJoinMembers struct {
+	member   model.Member
+	err      error
+	partyID  string
+	endpoint string
+}
+
+func (f *fakeJoinMembers) PartyMemberForDevice(_ context.Context, partyID, endpoint string) (model.Member, error) {
+	f.partyID = partyID
+	f.endpoint = endpoint
+	return f.member, f.err
+}
+
+type fakeConferenceAnnouncer struct {
+	conference string
+	playback   string
+	err        error
+}
+
+func (f *fakeConferenceAnnouncer) AnnounceJoin(_ context.Context, conference, playback string) error {
+	f.conference = conference
+	f.playback = playback
+	return f.err
+}
+
 type extensionChange struct {
 	partyID   string
 	endpoint  string
@@ -118,6 +150,105 @@ func (f *fakeSpeech) SpeechPCM(_ context.Context, key, input string) ([]byte, er
 		binary.LittleEndian.PutUint16(pcm[i:i+2], uint16(int16(500)))
 	}
 	return pcm, nil
+}
+
+func TestJoinPartyUsesAuthenticatedMemberNameAndEphemeralPartyVoice(t *testing.T) {
+	cipher, err := secure.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ciphertext, err := cipher.Encrypt("party-join-key", []byte("pty_join"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	audioDir := t.TempDir()
+	speech := &fakeSpeech{}
+	members := &fakeJoinMembers{member: model.Member{PartyID: "pty_join", DisplayName: "Austin"}}
+	announcer := &fakeConferenceAnnouncer{}
+	server := &Server{
+		Source: fakePartySource{party: model.Party{
+			ID: "pty_join", OpenAIStatus: "ready", OpenAIKeyCiphertext: ciphertext,
+		}},
+		Cipher: cipher, Speech: speech, AudioDir: audioDir, PlaybackDir: "/voice",
+		JoinMembers: members, ConferenceAnnounce: announcer, JoinAudioTTL: 15 * time.Millisecond,
+	}
+	commands := &bytes.Buffer{}
+	server.handleJoinParty(scriptedAGI("0", "0"), bufio.NewWriter(commands), map[string]string{
+		"agi_arg_1": "pty_join", "agi_arg_2": "123456", "agi_arg_3": "rrc-pty_join-102",
+	})
+	if commands.String() != "SET VARIABLE RINGRING_JOIN_READY 0\nSET VARIABLE RINGRING_JOIN_READY 1\n" {
+		t.Fatalf("unexpected conference join FastAGI exchange:\n%s", commands.String())
+	}
+	if members.partyID != "pty_join" || members.endpoint != "123456" {
+		t.Fatalf("join did not use the authenticated endpoint boundary: %#v", members)
+	}
+	if speech.key != "party-join-key" || speech.input != "Ring ring! Austin is joining the party." {
+		t.Fatalf("unexpected party join voice request: key=%q input=%q", speech.key, speech.input)
+	}
+	if announcer.conference != "rrc-pty_join-102" || !strings.HasPrefix(announcer.playback, "/voice/join-v1-") {
+		t.Fatalf("unexpected announcement target: %#v", announcer)
+	}
+	localPath := filepath.Join(audioDir, filepath.Base(announcer.playback)+".wav")
+	if info, err := os.Stat(localPath); err != nil || info.Size() <= 44 {
+		t.Fatalf("ephemeral announcement was not written: %v", err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(localPath); errors.Is(err, os.ErrNotExist) {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("ephemeral announcement was not removed after its TTL")
+}
+
+func TestRemoveJoinAnnouncementAudioClearsOnlyEphemeralNameAudio(t *testing.T) {
+	audioDir := t.TempDir()
+	stale := filepath.Join(audioDir, "join-v1-interrupted.wav")
+	shared := filepath.Join(audioDir, "voice-v2-operator.wav")
+	for _, path := range []string{stale, shared} {
+		if err := os.WriteFile(path, []byte("test audio"), 0o640); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := (&Server{AudioDir: audioDir}).removeJoinAnnouncementAudio(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale join announcement still exists: %v", err)
+	}
+	if _, err := os.Stat(shared); err != nil {
+		t.Fatalf("shared voice asset was removed: %v", err)
+	}
+}
+
+func TestJoinPartyFallsBackToBeepWithoutSendingCallAudio(t *testing.T) {
+	members := &fakeJoinMembers{member: model.Member{PartyID: "pty_join", DisplayName: "Austin"}}
+	announcer := &fakeConferenceAnnouncer{}
+	server := &Server{
+		JoinMembers: members, ConferenceAnnounce: announcer,
+		Source: fakePartySource{}, Speech: failingSpeech{}, AudioDir: t.TempDir(), PlaybackDir: "/voice",
+	}
+	commands := &bytes.Buffer{}
+	server.handleJoinParty(scriptedAGI("0", "0"), bufio.NewWriter(commands), map[string]string{
+		"agi_arg_1": "pty_join", "agi_arg_2": "123456", "agi_arg_3": "rrc-pty_join-102",
+	})
+	if announcer.playback != "beep" || !strings.Contains(commands.String(), "RINGRING_JOIN_READY 1") {
+		t.Fatalf("voice outage did not preserve conference joining with a safe fallback: %#v\n%s", announcer, commands.String())
+	}
+}
+
+func TestJoinPartyRejectsCrossPartyConferenceBeforeMemberLookup(t *testing.T) {
+	members := &fakeJoinMembers{member: model.Member{DisplayName: "Austin"}}
+	announcer := &fakeConferenceAnnouncer{}
+	server := &Server{JoinMembers: members, ConferenceAnnounce: announcer}
+	commands := &bytes.Buffer{}
+	server.handleJoinParty(scriptedAGI("0"), bufio.NewWriter(commands), map[string]string{
+		"agi_arg_1": "pty_join", "agi_arg_2": "123456", "agi_arg_3": "rrc-pty_other-102",
+	})
+	if members.partyID != "" || announcer.conference != "" || strings.Contains(commands.String(), "RINGRING_JOIN_READY 1") {
+		t.Fatalf("cross-party conference reached the join path: %#v %#v\n%s", members, announcer, commands.String())
+	}
 }
 
 type mutablePartySource struct {

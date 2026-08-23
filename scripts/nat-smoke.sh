@@ -16,9 +16,10 @@ for container in $containers; do
   fi
 done
 
-work_directory=$(mktemp -d /tmp/ringring-nat-smoke.XXXXXX)
+temporary_root=${RINGRING_NAT_SMOKE_TMP_ROOT:-/tmp}
+work_directory=$(mktemp -d "$temporary_root/ringring-nat-smoke.XXXXXX")
 case "$work_directory" in
-  /tmp/ringring-nat-smoke.*) ;;
+  "$temporary_root"/ringring-nat-smoke.*) ;;
   *) echo "Unexpected temporary directory: $work_directory" >&2; exit 1 ;;
 esac
 
@@ -27,6 +28,7 @@ cleanup() {
     docker rm -f "$container" >/dev/null 2>&1 || true
   done
   docker network rm "$network" >/dev/null 2>&1 || true
+  chmod -R u+w "$work_directory" >/dev/null 2>&1 || true
   find "$work_directory" -depth -delete >/dev/null 2>&1 || true
 }
 trap cleanup EXIT HUP INT TERM

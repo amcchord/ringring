@@ -71,8 +71,20 @@ func TestRenderIsolatesPartyDialplans(t *testing.T) {
 	if strings.Contains(blue, "pty_gold") || strings.Contains(gold, "pty_blue") {
 		t.Fatalf("service party ID leaked across contexts:\n%s", dialplan)
 	}
-	if !strings.Contains(blue, "exten => 101,1,NoOp(RingRing party call)\n same => n,Dial(PJSIP/rrd_blue_a&PJSIP/rrd_blue_a_tablet,30)") {
+	if !strings.Contains(blue, "exten => 101,1,NoOp(RingRing party call)\n same => n,Set(__RINGRING_CONFERENCE=rrc-pty_blue-101)\n same => n,Dial(PJSIP/rrd_blue_a&PJSIP/rrd_blue_a_tablet,30,G(rr-party-bridge^s^1))") {
 		t.Fatalf("same-extension phones must ring together with explicit party endpoints:\n%s", blue)
+	}
+	if !strings.Contains(blue, "exten => *16101,1,Answer()\n same => n,Set(CDR_PROP(disable)=1)\n same => n,Set(RINGRING_CONFERENCE=rrc-pty_blue-101)") ||
+		!strings.Contains(blue, "CONFBRIDGE_INFO(parties,${RINGRING_CONFERENCE})") ||
+		!strings.Contains(blue, "AGI(agi://app:4573/join-party,pty_blue,${CHANNEL(endpoint)},${RINGRING_CONFERENCE})") ||
+		!strings.Contains(blue, "ConfBridge(${RINGRING_CONFERENCE},ringring_bridge,ringring_joiner)") {
+		t.Fatalf("blue party is missing its authenticated, party-scoped conference join route:\n%s", blue)
+	}
+	if strings.Contains(blue, "join-party,pty_blue,${CALLERID") || strings.Contains(blue, "ConfBridge(${EXTEN}") {
+		t.Fatal("conference joining must not trust caller ID or a user-controlled conference name")
+	}
+	if strings.Contains(gold, "rrc-pty_blue") || strings.Contains(blue, "rrc-pty_gold") {
+		t.Fatalf("conference identity leaked across party contexts:\n%s", dialplan)
 	}
 }
 
@@ -158,7 +170,7 @@ func TestRenderHasNoPSTNOrCrossContextDialPrimitive(t *testing.T) {
 		t.Fatal(err)
 	}
 	dialplan := string(config.Dialplan)
-	allowedPartyDial := regexp.MustCompile(`Dial\(PJSIP/rrd_(one|two)(?:&PJSIP/rrd_(one|two))*,30\)`)
+	allowedPartyDial := regexp.MustCompile(`Dial\(PJSIP/rrd_(one|two)(?:&PJSIP/rrd_(one|two))*,30,G\(rr-party-bridge\^s\^1\)\)`)
 	for _, line := range strings.Split(dialplan, "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.Contains(line, "Dial(") {

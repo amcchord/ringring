@@ -62,6 +62,17 @@ type fakeContactPresence struct {
 	err      error
 }
 
+type fakeActiveConferences struct {
+	calls []telephony.ActiveConference
+	err   error
+	count int
+}
+
+func (f *fakeActiveConferences) ActiveConferenceCalls(context.Context) ([]telephony.ActiveConference, error) {
+	f.count++
+	return f.calls, f.err
+}
+
 func (f fakeContactPresence) ContactStatuses(context.Context) (map[string]telephony.ContactState, error) {
 	return f.statuses, f.err
 }
@@ -360,6 +371,28 @@ func TestPhoneCallDestinationsHideOwnNumberAndIncludeOnlyRoutableChoices(t *test
 	}
 	if got := destinations[1]; got.Kind != "service" || got.Label != "Echo test" || got.Dial != "*10" || got.Detail == "" {
 		t.Fatalf("service destination = %#v", got)
+	}
+}
+
+func TestActivePartyCallsExposeOnlyKnownSamePartyPhones(t *testing.T) {
+	calls := &fakeActiveConferences{calls: []telephony.ActiveConference{
+		{Name: "rrc-pty_family-102", PartyID: "pty_family", JoinExtension: "102", Endpoints: []string{"111111", "222222"}},
+		{Name: "rrc-pty_other-102", PartyID: "pty_other", JoinExtension: "102", Endpoints: []string{"111111", "222222"}},
+		{Name: "rrc-pty_family-103", PartyID: "pty_family", JoinExtension: "103", Endpoints: []string{"111111", "unknown"}},
+	}}
+	app := &App{calls: calls, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	members := []model.Member{
+		{ID: "mem_a", PartyID: "pty_family", DisplayName: "Austin", Extension: "101", Devices: []model.Device{{ID: "dev_a", SIPUsername: "111111"}}},
+		{ID: "mem_b", PartyID: "pty_family", DisplayName: "Bea", Extension: "102", Devices: []model.Device{{ID: "dev_b", SIPUsername: "222222"}}},
+		{ID: "mem_c", PartyID: "pty_family", DisplayName: "Casey", Extension: "103", Devices: []model.Device{{ID: "dev_c", SIPUsername: "333333"}}},
+	}
+
+	active, notice := app.activePartyCalls(t.Context(), "pty_family", members)
+	if notice != "" || len(active) != 1 {
+		t.Fatalf("same-party active calls = %#v notice=%q", active, notice)
+	}
+	if got := active[0]; got.JoinNumber != "*16102" || got.JoinExtension != "102" || got.PhoneCount != 2 || strings.Join(got.Participants, ",") != "Austin,Bea" {
+		t.Fatalf("active call view = %#v", got)
 	}
 }
 
@@ -952,6 +985,20 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 		t.Fatalf("another host reached party presence: status=%d calls=%d", outsiderParty.StatusCode, presenceCounter.calls)
 	}
 	_ = readBody(t, outsiderParty)
+	callCounter := &fakeActiveConferences{}
+	app.calls = callCounter
+	hostLive := get(t, client, server.URL+"/parties/"+partyID+"/live")
+	hostLiveBody := readBody(t, hostLive)
+	if hostLive.StatusCode != http.StatusOK || !strings.HasPrefix(hostLive.Header.Get("Content-Type"), "text/html") ||
+		!strings.Contains(hostLive.Header.Get("Cache-Control"), "no-store") || !strings.Contains(hostLiveBody, `id="phonebook-live"`) ||
+		!strings.Contains(hostLiveBody, "Blue phone") || !strings.Contains(hostLiveBody, "No party calls right now") || strings.Contains(hostLiveBody, "site-header") || callCounter.count != 1 {
+		t.Fatalf("authenticated live phonebook response was wrong: status=%d calls=%d\n%s", hostLive.StatusCode, callCounter.count, hostLiveBody)
+	}
+	outsiderLive := get(t, outsiderClient, server.URL+"/parties/"+partyID+"/live")
+	if outsiderLive.StatusCode != http.StatusNotFound || callCounter.count != 1 {
+		t.Fatalf("another host reached live call state: status=%d calls=%d", outsiderLive.StatusCode, callCounter.count)
+	}
+	_ = readBody(t, outsiderLive)
 	cancelInvitesPath := server.URL + "/parties/" + partyID + "/invites/cancel"
 	missingCancelCSRF := postForm(t, client, cancelInvitesPath, nil)
 	if missingCancelCSRF.StatusCode != http.StatusForbidden {
@@ -1065,6 +1112,17 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	}
 	if !foundForkedRing {
 		t.Fatalf("same-extension phones did not share one explicit Dial line:\n%s", configuration.Dialplan)
+	}
+	callCounter.calls = []telephony.ActiveConference{{
+		Name: "rrc-" + partyID + "-101", PartyID: partyID, JoinExtension: "101", Endpoints: []string{oldUsername, secondUsername},
+	}}
+	liveCallPhonebook := get(t, client, server.URL+"/parties/"+partyID+"/live")
+	liveCallBody := readBody(t, liveCallPhonebook)
+	if liveCallPhonebook.StatusCode != http.StatusOK || !strings.Contains(liveCallBody, "Party calls") ||
+		!strings.Contains(liveCallBody, "Blue phone") || !strings.Contains(liveCallBody, "2 phones in this call") ||
+		!strings.Contains(liveCallBody, "*16101") || !strings.Contains(liveCallBody, "joining member’s display name—not the call") ||
+		!strings.Contains(liveCallBody, "No call audio, transcript, or call history is saved") {
+		t.Fatalf("live conference was not rendered as a private joinable party call:\n%s", liveCallBody)
 	}
 	if again := get(t, client, addedPhone.Request.URL.String()); again.StatusCode != http.StatusGone {
 		t.Fatalf("new-phone setup reveal could be read twice: status=%d", again.StatusCode)

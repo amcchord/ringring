@@ -171,6 +171,10 @@ grep -Fq 'exten => 0,1,Answer()' "$work_directory/state/extensions.conf"
 grep -Fq 'exten => *0,1,Answer()' "$work_directory/state/extensions.conf"
 grep -Fq "AGI(agi://app:4573/operator,pty_smoke,help,\${CHANNEL(endpoint)})" "$work_directory/state/extensions.conf"
 grep -q '^exten => 102,1,NoOp(RingRing party call)$' "$work_directory/state/extensions.conf"
+grep -Fq 'Set(__RINGRING_CONFERENCE=rrc-pty_smoke-102)' "$work_directory/state/extensions.conf"
+grep -Fq 'Dial(PJSIP/rr_smoke_b,30,G(rr-party-bridge^s^1))' "$work_directory/state/extensions.conf"
+grep -Fq 'exten => *16102,1,Answer()' "$work_directory/state/extensions.conf"
+grep -Fq 'join-party,pty_smoke,${CHANNEL(endpoint)},${RINGRING_CONFERENCE}' "$work_directory/state/extensions.conf"
 grep -Fq 'GotoIf($["${DIALSTATUS}"="ANSWER"]?rr-phone-done:unavailable)' "$work_directory/state/extensions.conf"
 grep -Fq 'exten => _X!,1,Answer()' "$work_directory/state/extensions.conf"
 grep -Fq 'exten => _*X!,1,Answer()' "$work_directory/state/extensions.conf"
@@ -200,6 +204,8 @@ fi
 docker exec ringring-sip-smoke-asterisk sh -eu -c '
   test "$(stat -c %a /etc/asterisk/extensions.conf)" = 640
   test "$(stat -c %U:%G /etc/asterisk/extensions.conf)" = asterisk:ringring
+  test "$(stat -c %a /etc/asterisk/confbridge.conf)" = 640
+  test "$(stat -c %U:%G /etc/asterisk/confbridge.conf)" = asterisk:ringring
 '
 docker exec ringring-sip-smoke-asterisk \
   asterisk -rx 'pjsip show transport transport-tls' | grep -q 'transport-tls'
@@ -397,17 +403,92 @@ docker run -d --name ringring-sip-smoke-phone-b \
   -mi 172.31.89.30 -mp 6000 -m 1 -aa -rtp_echo -trace_msg -trace_err >/dev/null
 sleep 1
 
-echo "Calling extension 102 and checking the PCMU RTP round trip..."
-run_and_wait ringring-sip-smoke-phone-a 30 \
+echo "Calling extension 102, publishing it live, and joining from another party phone..."
+docker run -d --name ringring-sip-smoke-phone-a \
   --network "$network" --ip 172.31.89.40 --volume "$scenario_mount" \
   --volume "$work_directory/certs:/certs:ro" \
   --volume "$work_directory/logs/ringring-sip-smoke-phone-a:/logs" --workdir /logs \
   "$sipp_image" ringring-sip-smoke.test:5061 -t l1 -tls_version 1.2 \
   -tls_ca /certs/ca.crt -tls_cert /certs/client.crt -tls_key /certs/client.key \
-  -sf /scenarios/uac.xml \
+  -sf /scenarios/uac-hold.xml \
   -i 172.31.89.40 -p 5061 -mi 172.31.89.40 -mp 4000 \
   -s 102 -au rr_smoke_a -ap smoke-only-a-7Qm4s9Vx -m 1 -aa -rtpcheck_debug \
-  -key branch_tag calla -trace_msg -trace_err
+  -key branch_tag calla -key sip_user rr_smoke_a -trace_msg -trace_err >/dev/null
+
+conference_ready=0
+for elapsed in $(seq 1 12); do
+  conference_channels=$(docker exec ringring-sip-smoke-asterisk asterisk -rx 'core show channels concise')
+  conference_phone_count=$(printf '%s\n' "$conference_channels" | awk -F'!' '$1 ~ /^PJSIP\// && $6 == "ConfBridge" && $7 == "rrc-pty_smoke-102,ringring_bridge,ringring_initial" {count++} END {print count+0}')
+  if test "$conference_phone_count" -eq 2; then
+    conference_ready=1
+    break
+  fi
+  sleep 1
+done
+if test "$conference_ready" -ne 1; then
+  echo "The answered call did not become a two-phone RingRing conference." >&2
+  printf '%s\n' "$conference_channels" >&2
+  exit 1
+fi
+
+live_phonebook=$(docker exec ringring-sip-smoke-app curl --fail --silent --show-error \
+  --cookie /tmp/ringring-smoke-cookies http://127.0.0.1:8080/parties/pty_smoke/live)
+printf '%s\n' "$live_phonebook" | grep -q 'Party calls'
+printf '%s\n' "$live_phonebook" | grep -q '2 phones in this call'
+printf '%s\n' "$live_phonebook" | grep -q '\*16102'
+if printf '%s\n' "$live_phonebook" | grep -Eq 'rr_smoke|[0-9]{6}-[0-9A-Fa-f]+'; then
+  echo "The live phonebook exposed an internal SIP or channel identifier." >&2
+  exit 1
+fi
+
+docker rm -f ringring-sip-smoke-register-generated >/dev/null 2>&1 || true
+find "$work_directory/logs/ringring-sip-smoke-register-generated" -type f -delete
+docker run -d --name ringring-sip-smoke-register-generated \
+  --network "$network" --ip 172.31.89.60 --volume "$scenario_mount" \
+  --volume "$work_directory/logs/ringring-sip-smoke-register-generated:/logs" --workdir /logs \
+  "$sipp_image" 172.31.89.20:5060 -sf /scenarios/friendly-failure.xml \
+  -i 172.31.89.60 -p 5066 -mi 172.31.89.60 -mp 7000 \
+  -s '*16102' -au "$added_sip_username" -ap "$added_sip_password" -m 1 -aa \
+  -key branch_tag joincall -key sip_user "$added_sip_username" -trace_msg -trace_err >/dev/null
+
+join_ready=0
+for elapsed in $(seq 1 10); do
+  conference_channels=$(docker exec ringring-sip-smoke-asterisk asterisk -rx 'core show channels concise')
+  conference_phone_count=$(printf '%s\n' "$conference_channels" | awk -F'!' '$1 ~ /^PJSIP\// && $6 == "ConfBridge" && $7 ~ /^rrc-pty_smoke-102,/ {count++} END {print count+0}')
+  if test "$conference_phone_count" -eq 3; then
+    join_ready=1
+    break
+  fi
+  sleep 1
+done
+if test "$join_ready" -ne 1; then
+  echo "The authenticated third phone did not join the live party call." >&2
+  printf '%s\n' "$conference_channels" >&2
+  docker logs --tail 200 ringring-sip-smoke-app >&2 || true
+  docker logs --tail 200 ringring-sip-smoke-asterisk >&2 || true
+  for log_file in "$work_directory/logs/ringring-sip-smoke-register-generated"/*; do
+    if test -f "$log_file"; then
+      echo "--- $log_file ---" >&2
+      sed -n '1,300p' "$log_file" >&2
+    fi
+  done
+  exit 1
+fi
+joined_phonebook=$(docker exec ringring-sip-smoke-app curl --fail --silent --show-error \
+  --cookie /tmp/ringring-smoke-cookies http://127.0.0.1:8080/parties/pty_smoke/live)
+printf '%s\n' "$joined_phonebook" | grep -q '3 phones in this call'
+docker exec ringring-sip-smoke-app curl --fail --silent http://127.0.0.1:9090/metrics | \
+  grep -q 'ringring_voice_service_requests_total{service="conference_join",result="ready"} 1'
+
+set +e
+wait_for_container ringring-sip-smoke-register-generated 15
+join_result=$?
+wait_for_container ringring-sip-smoke-phone-a 20
+phone_a_result=$?
+set -e
+if test "$join_result" -ne 0 || test "$phone_a_result" -ne 0; then
+  exit 1
+fi
 
 set +e
 wait_for_container ringring-sip-smoke-phone-b 10
@@ -419,8 +500,13 @@ fi
 
 channels=$(docker exec ringring-sip-smoke-asterisk asterisk -rx 'core show channels count')
 printf '%s\n' "$channels" | grep -q '^0 active channels'
+if ! docker exec ringring-sip-smoke-asterisk test ! -e /var/log/asterisk/cdr-csv/Master.csv; then
+  echo "The private party conference unexpectedly created a CSV call record." >&2
+  exit 1
+fi
 
 docker rm ringring-sip-smoke-phone-a >/dev/null
+docker rm ringring-sip-smoke-register-generated >/dev/null
 find "$work_directory/logs/ringring-sip-smoke-phone-a" -type f -delete
 for destination in 222 '*12' 0; do
   echo "Calling unavailable destination $destination and checking for an answered spoken response..."
@@ -434,7 +520,7 @@ for destination in 222 '*12' 0; do
     -sf /scenarios/friendly-failure.xml \
     -i 172.31.89.40 -p 5061 -mi 172.31.89.40 -mp 4000 \
     -s "$destination" -au rr_smoke_a -ap smoke-only-a-7Qm4s9Vx -m 1 -aa \
-    -key branch_tag failure -trace_msg -trace_err
+    -key branch_tag failure -key sip_user rr_smoke_a -trace_msg -trace_err
   failure_elapsed=$(($(date +%s) - failure_started))
   if test "$failure_elapsed" -lt 2 || test "$failure_elapsed" -gt 15; then
     echo "The friendly failure prompt had an unexpected duration." >&2
@@ -456,7 +542,7 @@ run_and_wait ringring-sip-smoke-phone-a 30 \
   -sf /scenarios/uac.xml \
   -i 172.31.89.40 -p 5061 -mi 172.31.89.40 -mp 4000 \
   -s '*10' -au rr_smoke_a -ap smoke-only-a-7Qm4s9Vx -m 1 -aa -rtpcheck_debug \
-  -key branch_tag echoa -trace_msg -trace_err
+  -key branch_tag echoa -key sip_user rr_smoke_a -trace_msg -trace_err
 
 channels=$(docker exec ringring-sip-smoke-asterisk asterisk -rx 'core show channels count')
 printf '%s\n' "$channels" | grep -q '^0 active channels'
@@ -496,9 +582,9 @@ grep -q '^exten => 102,1,NoOp(RingRing party call)$' "$work_directory/state/exte
 grep -Fq 'callerid=RingRing 103 <103>' "$work_directory/state/pjsip.conf"
 grep -Fq 'password=smoke-only-a-7Qm4s9Vx' "$work_directory/state/pjsip.conf"
 docker exec ringring-sip-smoke-asterisk \
-  asterisk -rx 'dialplan show 103@rr-party-pty_smoke' | grep -Fq 'Dial(PJSIP/rr_smoke_a,30)'
+  asterisk -rx 'dialplan show 103@rr-party-pty_smoke' | grep -Fq 'Dial(PJSIP/rr_smoke_a,30,G(rr-party-bridge^s^1))'
 if docker exec ringring-sip-smoke-asterisk \
-  asterisk -rx 'dialplan show 101@rr-party-pty_smoke' | grep -Fq 'Dial(PJSIP/rr_smoke_a,30)'; then
+  asterisk -rx 'dialplan show 101@rr-party-pty_smoke' | grep -Fq 'Dial(PJSIP/rr_smoke_a,30,G(rr-party-bridge^s^1))'; then
   echo "Asterisk still routed the previous extension after reload." >&2
   exit 1
 fi
@@ -509,4 +595,4 @@ if docker logs ringring-sip-smoke-app 2>&1 | grep -Eq 'change extension from pho
 fi
 channels=$(docker exec ringring-sip-smoke-asterisk asterisk -rx 'core show channels count')
 printf '%s\n' "$channels" | grep -q '^0 active channels'
-echo "SIP smoke test passed: verified TLS 1.2 plus UDP registration, host-added same-extension routing, mixed-transport extension calling, party-scoped RingRing operator routing with bundled fallback, answered spoken responses for unavailable numbers and star lines, *10 echo, bidirectional RTP, and authenticated *15 DTMF extension selection."
+echo "SIP smoke test passed: verified TLS 1.2 plus UDP registration, host-added same-extension routing, live three-phone party-call joining with original-caller teardown, mixed-transport extension calling, party-scoped RingRing operator routing with bundled fallback, answered spoken responses for unavailable numbers and star lines, *10 echo, bidirectional RTP, and authenticated *15 DTMF extension selection."

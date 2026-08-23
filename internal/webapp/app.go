@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -48,6 +49,7 @@ const (
 	provisioningTTL       = 30 * time.Minute
 	sipCredentialAttempts = 16
 	setupScriptSHA256     = "sha256-8gLmI9PKLpVAM0X5XeS4PN75VxjzYo+DvRFDZmr9IhE="
+	partyLiveScriptSHA256 = "sha256-s25OXyGOHUhirLwjoQpCh6jlM6+S0ttd68/ZpqW1p2o="
 )
 
 var (
@@ -63,6 +65,7 @@ type App struct {
 	openAI     openAIProjectManager
 	telephony  *telephony.Reconciler
 	presence   contactPresenceSource
+	calls      activeConferenceSource
 	ringer     deviceRingSource
 	weather    weatherGeocoder
 	oauth      *oauth2.Config
@@ -99,9 +102,20 @@ type deviceRingSource interface {
 	RingDevice(context.Context, string, string) error
 }
 
+type activeConferenceSource interface {
+	ActiveConferenceCalls(context.Context) ([]telephony.ActiveConference, error)
+}
+
 type PresenceView struct {
 	Label    string
 	CSSClass string
+}
+
+type ActiveCallView struct {
+	JoinExtension string
+	JoinNumber    string
+	Participants  []string
+	PhoneCount    int
 }
 
 // callDirectoryEntry deliberately carries only the two values a newly joined
@@ -131,6 +145,9 @@ type PageData struct {
 	DevicePresence           map[string]PresenceView
 	MemberPresence           map[string]PresenceView
 	PresenceNotice           string
+	ActiveCalls              []ActiveCallView
+	ActiveCallNotice         string
+	PartyLiveURL             string
 	Services                 model.PartyServices
 	RadioStations            []radio.Station
 	InviteURL                string
@@ -286,6 +303,7 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 	if cfg.AsteriskAMIAddr != "" && cfg.AsteriskAMISecret != "" {
 		app.presence = ami
 		app.ringer = ami
+		app.calls = ami
 	}
 	if cfg.AsteriskConfigDir != "" {
 		app.telephony = &telephony.Reconciler{
@@ -314,6 +332,7 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 	mux.HandleFunc("GET /app", app.requireUser(app.dashboard))
 	mux.HandleFunc("POST /parties", app.requireUser(app.createParty))
 	mux.HandleFunc("GET /parties/{partyID}", app.requireUser(app.party))
+	mux.HandleFunc("GET /parties/{partyID}/live", app.requireUser(app.partyLive))
 	mux.HandleFunc("POST /parties/{partyID}/invites", app.requireUser(app.createInvitation))
 	mux.HandleFunc("POST /parties/{partyID}/invites/cancel", app.requireUser(app.cancelInvitations))
 	mux.HandleFunc("POST /parties/{partyID}/services", app.requireUser(app.updateServices))
@@ -959,6 +978,8 @@ func (a *App) party(w http.ResponseWriter, r *http.Request, session authSession)
 	data.Party = party
 	data.Members = members
 	data.DevicePresence, data.MemberPresence, data.PresenceNotice = a.phonePresence(r.Context(), members)
+	data.ActiveCalls, data.ActiveCallNotice = a.activePartyCalls(r.Context(), party.ID, members)
+	data.PartyLiveURL = "/parties/" + url.PathEscape(party.ID) + "/live"
 	data.Services = services
 	data.RadioStations = radio.All()
 	data.OpenAIAdminConfigured = a.openAI != nil
@@ -1008,6 +1029,32 @@ func (a *App) party(w http.ResponseWriter, r *http.Request, session authSession)
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	a.render(w, "party", data)
+}
+
+func (a *App) partyLive(w http.ResponseWriter, r *http.Request, session authSession) {
+	partyID := r.PathValue("partyID")
+	party, err := a.store.PartyForHost(r.Context(), partyID, session.User.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	members, err := a.store.ListMembers(r.Context(), party.ID)
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	data := a.pageData(&session)
+	data.Party = party
+	data.Members = members
+	data.DevicePresence, data.MemberPresence, data.PresenceNotice = a.phonePresence(r.Context(), members)
+	data.ActiveCalls, data.ActiveCallNotice = a.activePartyCalls(r.Context(), party.ID, members)
+	data.PartyLiveURL = "/parties/" + url.PathEscape(party.ID) + "/live"
+	w.Header().Set("Cache-Control", "no-store")
+	a.renderFragment(w, "party", "phonebook-live", data)
 }
 
 func (a *App) updatePartyOpenAISpendLimit(w http.ResponseWriter, r *http.Request, session authSession) {
@@ -1280,6 +1327,66 @@ func (a *App) phonePresence(ctx context.Context, members []model.Member) (map[st
 		memberViews[member.ID] = memberView
 	}
 	return deviceViews, memberViews, notice
+}
+
+func (a *App) activePartyCalls(ctx context.Context, partyID string, members []model.Member) ([]ActiveCallView, string) {
+	if a.calls == nil {
+		return nil, "Live call activity is temporarily unavailable. Calls still work normally."
+	}
+	queryContext, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	conferences, err := a.calls.ActiveConferenceCalls(queryContext)
+	if err != nil {
+		a.logger.Warn("load live party calls", "error_class", observability.ErrorClass(err))
+		return nil, "Live call activity is temporarily unavailable. Calls still work normally."
+	}
+
+	membersByEndpoint := make(map[string]model.Member)
+	extensions := make(map[string]struct{})
+	for _, member := range members {
+		extensions[member.Extension] = struct{}{}
+		for _, device := range member.Devices {
+			if device.RevokedAt == nil {
+				membersByEndpoint[device.SIPUsername] = member
+			}
+		}
+	}
+	active := make([]ActiveCallView, 0, len(conferences))
+	for _, conference := range conferences {
+		if conference.PartyID != partyID || len(conference.Endpoints) < 2 {
+			continue
+		}
+		if _, exists := extensions[conference.JoinExtension]; !exists {
+			continue
+		}
+		seenMembers := make(map[string]struct{})
+		participants := make([]string, 0, len(conference.Endpoints))
+		knownPhones := 0
+		for _, endpoint := range conference.Endpoints {
+			member, exists := membersByEndpoint[endpoint]
+			if !exists {
+				continue
+			}
+			knownPhones++
+			if _, exists := seenMembers[member.ID]; exists {
+				continue
+			}
+			seenMembers[member.ID] = struct{}{}
+			participants = append(participants, member.DisplayName)
+		}
+		if knownPhones < 2 {
+			continue
+		}
+		sort.Strings(participants)
+		active = append(active, ActiveCallView{
+			JoinExtension: conference.JoinExtension,
+			JoinNumber:    telephony.JoinNumber(conference.JoinExtension),
+			Participants:  participants,
+			PhoneCount:    knownPhones,
+		})
+	}
+	sort.Slice(active, func(i, j int) bool { return active[i].JoinExtension < active[j].JoinExtension })
+	return active, ""
 }
 
 func devicePresenceView(device model.Device, statuses map[string]telephony.ContactState, available bool) (PresenceView, int) {
@@ -2580,6 +2687,19 @@ func (a *App) render(w http.ResponseWriter, page string, data PageData) {
 	}
 }
 
+func (a *App) renderFragment(w http.ResponseWriter, page, fragment string, data PageData) {
+	parsed, err := template.ParseFS(webassets.Files, "templates/"+page+".html")
+	if err != nil {
+		a.logger.Error("parse fragment template", "page", page, "error_class", observability.ErrorClass(err))
+		http.Error(w, "template error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := parsed.ExecuteTemplate(w, fragment, data); err != nil {
+		a.logger.Error("render fragment", "page", page, "error_class", observability.ErrorClass(err))
+	}
+}
+
 func (a *App) errorPage(w http.ResponseWriter, status int, title, message, backURL, backLabel string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
@@ -2737,7 +2857,7 @@ func (a *App) secureCookies() bool {
 
 func (a *App) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src '"+setupScriptSHA256+"'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src '"+setupScriptSHA256+"' '"+partyLiveScriptSHA256+"'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
 		w.Header().Set("Referrer-Policy", "same-origin")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")

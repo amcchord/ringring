@@ -197,6 +197,9 @@ func main() {
 	voiceServer := &voice.Server{
 		Source: database, AIAdultAccess: database, OperatorDisclosure: database,
 		Extensions: database, WeatherLocations: database, Reconcile: app.ReconcileTelephony,
+		JoinMembers: database, ConferenceAnnounce: telephony.AMI{
+			Address: cfg.AsteriskAMIAddr, Username: cfg.AsteriskAMIUser, Secret: cfg.AsteriskAMISecret,
+		},
 		Cipher: cipher, Weather: weather.New(nil), Speech: openairuntime.New(nil),
 		AudioDir: cfg.VoiceAudioDir, PlaybackDir: cfg.VoicePlaybackDir, Logger: logger,
 		AIModel: cfg.AIRealtimeModel, AICallMaxDuration: cfg.AICallMaxDuration, AIMaxConcurrent: cfg.AIMaxConcurrent,

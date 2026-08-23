@@ -5,11 +5,11 @@
     <![CDATA[
       INVITE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
       Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]-[branch_tag]
-      From: <sip:rr_smoke_a@[remote_ip]>;tag=[call_number]
+      From: <sip:[sip_user]@[remote_ip]>;tag=[call_number]
       To: <sip:[service]@[remote_ip]>
       Call-ID: [call_id]
       CSeq: 1 INVITE
-      Contact: <sip:rr_smoke_a@[local_ip]:[local_port];transport=[transport]>
+      Contact: <sip:[sip_user]@[local_ip]:[local_port];transport=[transport]>
       Max-Forwards: 70
       Content-Type: application/sdp
       Content-Length: [len]
@@ -33,7 +33,7 @@
     <![CDATA[
       ACK sip:[service]@[remote_ip]:[remote_port] SIP/2.0
       Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch-2]-[branch_tag]
-      From: <sip:rr_smoke_a@[remote_ip]>;tag=[call_number]
+      From: <sip:[sip_user]@[remote_ip]>;tag=[call_number]
       To: <sip:[service]@[remote_ip]>[peer_tag_param]
       Call-ID: [call_id]
       CSeq: 1 ACK
@@ -47,11 +47,11 @@
     <![CDATA[
       INVITE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
       Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]-[branch_tag]
-      From: <sip:rr_smoke_a@[remote_ip]>;tag=[call_number]
+      From: <sip:[sip_user]@[remote_ip]>;tag=[call_number]
       To: <sip:[service]@[remote_ip]>
       Call-ID: [call_id]
       CSeq: 2 INVITE
-      Contact: <sip:rr_smoke_a@[local_ip]:[local_port];transport=[transport]>
+      Contact: <sip:[sip_user]@[local_ip]:[local_port];transport=[transport]>
       [authentication]
       Max-Forwards: 70
       Content-Type: application/sdp
@@ -77,11 +77,11 @@
     <![CDATA[
       ACK sip:[service]@[remote_ip]:[remote_port] SIP/2.0
       Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]-[branch_tag]
-      From: <sip:rr_smoke_a@[remote_ip]>;tag=[call_number]
+      From: <sip:[sip_user]@[remote_ip]>;tag=[call_number]
       To: <sip:[service]@[remote_ip]>[peer_tag_param]
       Call-ID: [call_id]
       CSeq: 2 ACK
-      Contact: <sip:rr_smoke_a@[local_ip]:[local_port];transport=[transport]>
+      Contact: <sip:[sip_user]@[local_ip]:[local_port];transport=[transport]>
       Max-Forwards: 70
       Content-Length: 0
 
@@ -101,11 +101,11 @@
     <![CDATA[
       BYE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
       Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]-[branch_tag]
-      From: <sip:rr_smoke_a@[remote_ip]>;tag=[call_number]
+      From: <sip:[sip_user]@[remote_ip]>;tag=[call_number]
       To: <sip:[service]@[remote_ip]>[peer_tag_param]
       Call-ID: [call_id]
       CSeq: 3 BYE
-      Contact: <sip:rr_smoke_a@[local_ip]:[local_port];transport=[transport]>
+      Contact: <sip:[sip_user]@[local_ip]:[local_port];transport=[transport]>
       Max-Forwards: 70
       Content-Length: 0
 

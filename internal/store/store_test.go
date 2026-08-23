@@ -1055,6 +1055,54 @@ func TestFirstActivePartyPhoneCanSetOnlyAnUnknownWeatherLocation(t *testing.T) {
 	}
 }
 
+func TestPartyMemberForDeviceUsesActiveAuthenticatedPartyBoundary(t *testing.T) {
+	ctx := t.Context()
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Date(2026, 8, 23, 21, 0, 0, 0, time.UTC)
+	host, err := s.UpsertGoogleUser(ctx, GoogleProfile{Subject: "join-host", Email: "host@example.test", Name: "Host"}, now, "usr_join_host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	party, err := s.CreateParty(ctx, NewParty{ID: "pty_join", Name: "Join", Slug: "join", HostUserID: host.ID, CreatedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateInvitation(ctx, NewInvitation{
+		ID: "inv_join", PartyID: party.ID, CreatedByUserID: host.ID,
+		TokenHash: secure.Hash("join-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := s.ClaimInvitation(ctx, NewClaim{
+		TokenHash: secure.Hash("join-token"), MemberID: "mem_join", DisplayName: "Austin", Extension: "101",
+		DeviceID: "dev_join", DeviceLabel: "ATA", SIPUsername: "456789", SIPSecretCiphertext: "ciphertext",
+		Provisioning: testProvisioning("join-provision", now), Now: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	member, err := s.PartyMemberForDevice(ctx, party.ID, "456789")
+	if err != nil || member.ID != "mem_join" || member.DisplayName != "Austin" || member.Extension != "101" {
+		t.Fatalf("party member from phone = %#v, %v", member, err)
+	}
+	for _, test := range []struct{ partyID, username string }{
+		{"pty_other", "456789"}, {party.ID, "000000"},
+	} {
+		if _, err := s.PartyMemberForDevice(ctx, test.partyID, test.username); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("PartyMemberForDevice(%q, %q) error = %v", test.partyID, test.username, err)
+		}
+	}
+	if err := s.RevokeDevice(ctx, party.ID, host.ID, "dev_join", now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PartyMemberForDevice(ctx, party.ID, "456789"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoked PartyMemberForDevice error = %v", err)
+	}
+}
+
 func TestPartyOpenAIKeyRotationIsHostScopedAndCompareAndSwap(t *testing.T) {
 	ctx := t.Context()
 	s, err := Open(":memory:")

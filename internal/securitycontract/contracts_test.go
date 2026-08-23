@@ -142,13 +142,19 @@ func TestCredentialCopyHelperIsIntegrityPinnedAndLocalOnly(t *testing.T) {
 	javascript := readRepositoryFile(t, "web/static/site.js")
 	digest := sha256.Sum256([]byte(javascript))
 	integrity := "sha256-" + base64.StdEncoding.EncodeToString(digest[:])
+	liveJavascript := readRepositoryFile(t, "web/static/party-live.js")
+	liveDigest := sha256.Sum256([]byte(liveJavascript))
+	liveIntegrity := "sha256-" + base64.StdEncoding.EncodeToString(liveDigest[:])
 	base := readRepositoryFile(t, "web/templates/base.html")
-	if strings.Count(base, "<script") != 1 || !strings.Contains(base, `src="/static/site.js" integrity="`+integrity+`"`) {
-		t.Fatalf("the only browser helper must be the integrity-pinned local setup script: %s", integrity)
+	if strings.Count(base, "<script") != 2 || !strings.Contains(base, `src="/static/site.js" integrity="`+integrity+`"`) ||
+		!strings.Contains(base, `{{if .PartyLiveURL}}<script defer src="/static/party-live.js" integrity="`+liveIntegrity+`"`) {
+		t.Fatalf("browser helpers must be local, conditional, and integrity pinned: setup=%s live=%s", integrity, liveIntegrity)
 	}
 	app := readRepositoryFile(t, "internal/webapp/app.go")
-	if !strings.Contains(app, `setupScriptSHA256`) || !strings.Contains(app, `"`+integrity+`"`) || !strings.Contains(app, `script-src '"+setupScriptSHA256+"'`) {
-		t.Fatal("the CSP must permit only the exact setup-script digest")
+	if !strings.Contains(app, `setupScriptSHA256`) || !strings.Contains(app, `"`+integrity+`"`) ||
+		!strings.Contains(app, `partyLiveScriptSHA256`) || !strings.Contains(app, `"`+liveIntegrity+`"`) ||
+		!strings.Contains(app, `script-src '"+setupScriptSHA256+"' '"+partyLiveScriptSHA256+"'`) {
+		t.Fatal("the CSP must permit only the exact browser-helper digests")
 	}
 	for _, forbidden := range []string{
 		"fetch(", "XMLHttpRequest", "sendBeacon", "WebSocket", "EventSource",
@@ -162,6 +168,24 @@ func TestCredentialCopyHelperIsIntegrityPinnedAndLocalOnly(t *testing.T) {
 	for _, required := range []string{"navigator.clipboard.writeText", `document.execCommand("copy")`, `helper.remove()`, `data-copy-setup`, `data-setup-field`, `getAttribute("data-setup-value")`, "exactValue(value)"} {
 		if !strings.Contains(javascript, required) {
 			t.Fatalf("the credential copy helper is missing bounded behavior %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"XMLHttpRequest", "sendBeacon", "WebSocket", "EventSource", "localStorage", "sessionStorage",
+		"indexedDB", "document.cookie", "Authorization", "body:", `method: "POST"`, "console.",
+	} {
+		if strings.Contains(liveJavascript, forbidden) {
+			t.Fatalf("the live phonebook helper contains an unnecessary data primitive %q", forbidden)
+		}
+	}
+	for _, required := range []string{
+		`document.getElementById("phonebook-live")`, `liveURL.startsWith("/parties/")`, `liveURL.endsWith("/live")`,
+		"fetch(liveURL", `method: "GET"`, `credentials: "same-origin"`, `cache: "no-store"`, `redirect: "error"`,
+		`headers: { Accept: "text/html" }`, `phonebook.contains(document.activeElement)`, `phonebook.querySelector("details[open]")`,
+		"nextPhonebook.dataset.partyLiveUrl !== liveURL", "phonebook.replaceWith(nextPhonebook)", "window.setInterval(refresh, 3000)",
+	} {
+		if !strings.Contains(liveJavascript, required) {
+			t.Fatalf("the live phonebook helper is missing bounded behavior %q", required)
 		}
 	}
 }
@@ -255,6 +279,57 @@ func TestAsteriskHasNoPSTNOrGlobalOutboundRoute(t *testing.T) {
 	}
 }
 
+func TestPartyCallConferencesAreScopedEphemeralAndNeverRecorded(t *testing.T) {
+	confbridge := readRepositoryFile(t, "deploy/asterisk/config/confbridge.conf")
+	for _, required := range []string{
+		"[ringring_bridge]", "max_members=20", "record_conference=no", "[ringring_initial]", "marked=yes",
+		"end_marked_any=yes", "[ringring_joiner]", "marked=no", "[ringring_announcer]", "quiet=yes", "jitterbuffer=yes",
+	} {
+		if !strings.Contains(confbridge, required) {
+			t.Errorf("ConfBridge policy is missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"record_file", "record_command", "menu=", "dsp_drop_silence=yes"} {
+		if strings.Contains(confbridge, forbidden) {
+			t.Errorf("ConfBridge policy contains retention or unexpected behavior %q", forbidden)
+		}
+	}
+
+	dialplan := readRepositoryFile(t, "deploy/asterisk/config/extensions.conf")
+	for _, required := range []string{
+		"[rr-party-bridge]", "ConfBridge(${RINGRING_CONFERENCE},ringring_bridge,ringring_initial)",
+		"[rr-party-announcement]", "Set(TIMEOUT(absolute)=15)", "ConfBridge(${RINGRING_CONFERENCE},ringring_bridge,ringring_announcer)",
+	} {
+		if !strings.Contains(dialplan, required) {
+			t.Errorf("fixed conference contexts are missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"Dial(", "AGI(", "AudioSocket", "System("} {
+		if strings.Contains(dialplan, forbidden) {
+			t.Errorf("fixed base conference dialplan contains unsafe primitive %q", forbidden)
+		}
+	}
+
+	ami := readRepositoryFile(t, "internal/telephony/ami.go")
+	for _, required := range []string{
+		"ParseConferenceName(conference)", `"Channel", "Local/s@rr-party-announcement/n"`, `"Application", "Playback"`,
+		`"Variable", "RINGRING_CONFERENCE="+conference`, "ConfbridgeListRooms", "pjsipEndpoint", "len(room.Endpoints) >= 2",
+	} {
+		if !strings.Contains(ami, required) {
+			t.Errorf("AMI conference boundary is missing %q", required)
+		}
+	}
+	voice := readRepositoryFile(t, "internal/voice/join.go")
+	for _, required := range []string{
+		"PartyMemberForDevice", "conferenceParty != partyID", "Ring ring! %s is joining the party.",
+		"secure.Token(18)", "defaultJoinAudioTTL", "os.Remove(audioPath)", `playback = "beep"`,
+	} {
+		if !strings.Contains(voice, required) {
+			t.Errorf("party join announcement boundary is missing %q", required)
+		}
+	}
+}
+
 func TestAIConversationRequiresAdultExtensionAtEveryBoundary(t *testing.T) {
 	required := map[string][]string{
 		".env.example":                     {"AI_ADULT_ONLY_ENABLED=false"},
@@ -306,8 +381,8 @@ func TestHostPhoneRingHasFixedScopedBoundaries(t *testing.T) {
 			"find /etc/asterisk -maxdepth 1 -type f -exec chmod 0640",
 		},
 		"deploy/asterisk/entrypoint.sh": {
-			"chmod 0640 /etc/asterisk/manager.conf /etc/asterisk/pjsip.conf /etc/asterisk/extensions.conf",
-			"chown asterisk:ringring /etc/asterisk/manager.conf /etc/asterisk/pjsip.conf /etc/asterisk/extensions.conf",
+			"chmod 0640 /etc/asterisk/manager.conf /etc/asterisk/pjsip.conf /etc/asterisk/extensions.conf /etc/asterisk/confbridge.conf",
+			"chown asterisk:ringring /etc/asterisk/manager.conf /etc/asterisk/pjsip.conf /etc/asterisk/extensions.conf /etc/asterisk/confbridge.conf",
 		},
 		"internal/telephony/ami.go": {
 			`amiObjectPattern.MatchString(sipUsername)`, `extensionrules.Valid(extension)`,
@@ -411,7 +486,7 @@ func TestPhoneProvisioningAPIKeepsTheOneTimePartyBoundary(t *testing.T) {
 		},
 		"internal/provisioning/phone-provisioning.openapi.yaml": {
 			"openapi: 3.1.2", "/api/v1/phone-provisioning/{token}:", "application/problem+json:",
-			"no-store, max-age=0", "maxItems: 128", "It never provides a PSTN route",
+			"no-store, max-age=0", "maxItems: 128", "never provides a PSTN route",
 		},
 		"web/templates/setup.html": {
 			`id="phone-provision-url"`, "Use only one setup URL", `href="/openapi.yaml"`,

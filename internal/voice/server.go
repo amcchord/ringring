@@ -72,6 +72,14 @@ type SpeechSource interface {
 	SpeechPCM(context.Context, string, string) ([]byte, error)
 }
 
+type JoinMemberSource interface {
+	PartyMemberForDevice(context.Context, string, string) (model.Member, error)
+}
+
+type ConferenceAnnouncer interface {
+	AnnounceJoin(context.Context, string, string) error
+}
+
 type Server struct {
 	Source             PartySource
 	AIAdultAccess      AIAdultAccessSource
@@ -82,12 +90,15 @@ type Server struct {
 	Cipher             SecretDecryptor
 	Weather            WeatherSource
 	Speech             SpeechSource
+	JoinMembers        JoinMemberSource
+	ConferenceAnnounce ConferenceAnnouncer
 	AudioDir           string
 	PlaybackDir        string
 	Logger             *slog.Logger
 	Metrics            *observability.Registry
 	Now                func() time.Time
 	CacheDuration      time.Duration
+	JoinAudioTTL       time.Duration
 	AIModel            string
 	AIRealtimeURL      string
 	AICallMaxDuration  time.Duration
@@ -101,6 +112,9 @@ type Server struct {
 func (s *Server) Serve(listener net.Listener) error {
 	if listener == nil {
 		return errors.New("FastAGI listener is required")
+	}
+	if err := s.removeJoinAnnouncementAudio(); err != nil {
+		s.logger().Warn("clean stale party call join announcements", "error_class", observability.ErrorClass(err))
 	}
 	for {
 		connection, err := listener.Accept()
@@ -133,6 +147,8 @@ func (s *Server) handle(connection net.Conn) {
 		s.handleAIAuthorize(reader, writer, environment)
 	case "choose-extension":
 		s.handleChooseExtension(reader, writer, environment)
+	case "join-party":
+		s.handleJoinParty(reader, writer, environment)
 	default:
 		_ = agiCommand(reader, writer, "EXEC Playback ss-noservice")
 	}
@@ -479,7 +495,7 @@ func operatorPrompt(reason string, services model.PartyServices, discloseAI, wea
 			features = append(features, "For radio, dial star one three")
 		}
 		return reason, "Ring ring! Hi! I'm the RingRing operator." + disclosure + " Dial a family extension to ring someone. " +
-			strings.Join(features, ". ") + ". Dial zero whenever you need this tour. RingRing cannot call regular or emergency numbers, so keep another way to get help.", nil
+			strings.Join(features, ". ") + ". To join a live party call, dial the star one six code shown in the RingRing phonebook. Dial zero whenever you need this tour. RingRing cannot call regular or emergency numbers, so keep another way to get help.", nil
 	case operatorReasonMisdial:
 		return reason, "Oops-a-daisy! RingRing operator here." + disclosure + " That number doesn't live in this party. Check the RingRing phonebook and try again, or dial zero for a quick tour. RingRing cannot call regular or emergency numbers.", nil
 	case operatorReasonPhoneUnavailable:

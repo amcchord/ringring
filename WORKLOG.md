@@ -2,6 +2,33 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-23 — Make live party calls visible and joinable
+
+### Shipped
+
+- Turned answered same-party extension calls into private, party/extension-derived ConfBridge rooms. The two original phones own the call; either original hangup removes every later joiner, while a later joiner can leave independently.
+- Added exact `*16{extension}` join routes for authenticated party phones. The route verifies an active room, resolves the authenticated endpoint to its same-party member, and plays `Ring ring! {name} is joining the party.` before admitting the phone.
+- Added a bright live-call board to the host phone book. A small integrity-pinned helper replaces a no-store, host-authenticated server-rendered fragment every three seconds, so new extensions, presence, and active calls appear without a page reload.
+- Kept the new activity ephemeral and minimized: the UI receives display names, phone count, and join code only; ConfBridge recording and CDR are disabled; caller/channel/network/time data are discarded; and random-filename name announcements are deleted after one minute with an additional interrupted-process cleanup at startup. TTS failure falls back to a bundled beep without blocking the join.
+
+### Decisions
+
+- Use progressive polling rather than a WebSocket or a client framework. Polling pauses while the page is hidden or a phone-book form/detail control is in use, and the complete host flow still works without JavaScript.
+- Key a live call by the originally dialed extension and show the corresponding `*16…` code. Conference names are generated from validated identifiers and are never selected by a caller.
+- Use the authenticated device-to-member mapping for announcements rather than caller ID. Send OpenAI only the fixed sentence containing the display name—never the call audio—and use the party-scoped runtime key.
+
+### Verification
+
+- Focused store, telephony, voice, web, observability, and executable security-contract tests cover same-party authorization, cross-party rejection, AMI reduction, fixed Originate fields, ephemeral voice cleanup, beep fallback, host-only fragments, identifier omission, and live UI rendering.
+- `make sip-smoke` passes locally with pinned Asterisk 22.10.1: a TLS caller and UDP receiver form the private room, the authenticated fragment reports two phones, a separately credentialed UDP phone joins through `*16102`, the fragment reports three phones, the join metric reports ready, an original hangup removes the joiner, and Asterisk finishes with zero channels and no CSV call record.
+- `node --check web/static/party-live.js` and its exact CSP/SRI contract pass. The existing mixed-transport RTP, operator/fallback, `*10`, and authenticated `*15` scenarios remain green in the same SIP gate.
+- Browser QA at 1440×1000 and 390×844 confirms that the active-call board, join code, privacy note, and member cards stay legible without horizontal overflow. Claiming extension 103 in a separate tab updated the already-open host phone book to three members within one polling cycle while preserving the active call.
+- `make check`, `make security`, and `make admin-test` pass locally; the race-enabled full suite is clean and `govulncheck` reports no reachable vulnerability. The NAT gate also passes two authenticated registrations and bidirectional RTP across separate household translations. Its temporary-root override keeps Docker Desktop bind mounts and cleanup reproducible on macOS.
+
+### Remaining
+
+- Deploy the resulting commit and repeat one three-phone join on family hardware before treating the feature as production-ready.
+
 ## 2026-08-23 — Finish general phone invitations in the iPhone app
 
 ### Shipped

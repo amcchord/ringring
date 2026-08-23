@@ -162,17 +162,36 @@ func Render(devices []DialDevice, services []model.RoutingServices) (Configurati
 		}
 		sort.Strings(extensions)
 		for _, extension := range extensions {
+			conference, err := ConferenceName(partyIDs[contextName], extension)
+			if err != nil {
+				return Configuration{}, fmt.Errorf("build conference route: %w", err)
+			}
 			endpoints := parties[contextName][extension]
 			for i := range endpoints {
 				endpoints[i] = "PJSIP/" + endpoints[i]
 			}
 			fmt.Fprintf(&dialplan, "exten => %s,1,NoOp(RingRing party call)\n", extension)
-			fmt.Fprintf(&dialplan, " same => n,Dial(%s,30)\n", strings.Join(endpoints, "&"))
+			fmt.Fprintf(&dialplan, " same => n,Set(__RINGRING_CONFERENCE=%s)\n", conference)
+			fmt.Fprintf(&dialplan, " same => n,Dial(%s,30,G(rr-party-bridge^s^1))\n", strings.Join(endpoints, "&"))
 			dialplan.WriteString(" same => n,GotoIf($[\"${DIALSTATUS}\"=\"ANSWER\"]?rr-phone-done:unavailable)\n")
 			dialplan.WriteString(" same => n(unavailable),Answer()\n")
 			dialplan.WriteString(" same => n,Wait(1)\n")
 			writeRingRingOperator(&dialplan, partyIDs[contextName], "phone-unavailable", writeLocalPhoneUnavailable)
 			dialplan.WriteString(" same => n(rr-phone-done),Hangup()\n")
+
+			fmt.Fprintf(&dialplan, "exten => %s,1,Answer()\n", JoinNumber(extension))
+			dialplan.WriteString(" same => n,Set(CDR_PROP(disable)=1)\n")
+			fmt.Fprintf(&dialplan, " same => n,Set(RINGRING_CONFERENCE=%s)\n", conference)
+			dialplan.WriteString(" same => n,GotoIf($[${CONFBRIDGE_INFO(parties,${RINGRING_CONFERENCE})} >= 2]?rr-join-announce:rr-join-unavailable)\n")
+			dialplan.WriteString(" same => n(rr-join-announce),Set(RINGRING_JOIN_READY=0)\n")
+			dialplan.WriteString(" same => n,Set(AGIEXITONHANGUP=yes)\n")
+			fmt.Fprintf(&dialplan, " same => n,AGI(agi://app:4573/join-party,%s,${CHANNEL(endpoint)},${RINGRING_CONFERENCE})\n", partyIDs[contextName])
+			dialplan.WriteString(" same => n,GotoIf($[\"${RINGRING_JOIN_READY}\"=\"1\"]?rr-join-call:rr-join-unavailable)\n")
+			dialplan.WriteString(" same => n(rr-join-call),Wait(0.5)\n")
+			dialplan.WriteString(" same => n,ConfBridge(${RINGRING_CONFERENCE},ringring_bridge,ringring_joiner)\n")
+			dialplan.WriteString(" same => n,Hangup()\n")
+			dialplan.WriteString(" same => n(rr-join-unavailable),Wait(0.5)\n")
+			writeRingRingOperator(&dialplan, partyIDs[contextName], "service-unavailable", writeLocalServiceUnavailable)
 		}
 		writeFriendlyInvalid(&dialplan, partyIDs[contextName], "_X!")
 		writeFriendlyInvalid(&dialplan, partyIDs[contextName], "_*X!")
