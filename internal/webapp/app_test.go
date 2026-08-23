@@ -764,6 +764,7 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 		"for both SIP User ID and Authentication ID", "Use your extension only as the display number",
 		"Grandstream HT801 V2", "Port Settings → FXS PORT → General Settings", "sip.example.test:5061",
 		"SIP Authenticate ID", "SIP Authentication Password", "NAT Traversal", "Keep-alive", "SIP Registration",
+		"Register Expiration", "5 minutes", "reconnect promptly after a RingRing server restart",
 		"PCMU / G.711 μ-law", "via RTP (RFC2833)", "Authenticate Server Certificate chain",
 		"Status → Port Status", "saved password as blank afterward", "HT80x V2 administration guide",
 	} {

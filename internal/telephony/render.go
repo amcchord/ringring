@@ -112,7 +112,7 @@ func Render(devices []DialDevice, services []model.RoutingServices) (Configurati
 		dialplan.WriteString(" same => n,Wait(1)\n")
 		dialplan.WriteString(" same => n,Set(AGIEXITONHANGUP=yes)\n")
 		fmt.Fprintf(&dialplan, " same => n,AGI(agi://app:4573/choose-extension,%s,${CHANNEL(endpoint)})\n", partyIDs[contextName])
-		dialplan.WriteString(" same => n,Hangup()\n")
+		writeAGIFailureFallback(&dialplan)
 		service := serviceByParty[partyIDs[contextName]]
 		if service.TimeEnabled {
 			dialplan.WriteString("exten => *11,1,Answer()\n")
@@ -124,7 +124,7 @@ func Render(devices []DialDevice, services []model.RoutingServices) (Configurati
 			dialplan.WriteString("exten => *12,1,Answer()\n")
 			dialplan.WriteString(" same => n,Wait(1)\n")
 			fmt.Fprintf(&dialplan, " same => n,AGI(agi://app:4573/weather,%s)\n", service.PartyID)
-			dialplan.WriteString(" same => n,Hangup()\n")
+			writeAGIFailureFallback(&dialplan)
 		}
 		if service.RadioEnabled {
 			station, ok := radio.Resolve(service.RadioStation)
@@ -134,6 +134,7 @@ func Render(devices []DialDevice, services []model.RoutingServices) (Configurati
 			dialplan.WriteString("exten => *13,1,Answer()\n")
 			dialplan.WriteString(" same => n,Wait(1)\n")
 			fmt.Fprintf(&dialplan, " same => n,MP3Player(%s)\n", station.StreamURL)
+			writeFriendlyServiceUnavailable(&dialplan)
 			dialplan.WriteString(" same => n,Hangup()\n")
 		}
 		if service.AIEnabled {
@@ -144,7 +145,8 @@ func Render(devices []DialDevice, services []model.RoutingServices) (Configurati
 			dialplan.WriteString(" same => n,GotoIf($[\"${RINGRING_AI_READY}\"=\"1\"]?bridge:unavailable)\n")
 			dialplan.WriteString(" same => n(bridge),Dial(AudioSocket/app:4574/${RINGRING_AI_CALL_ID}/c(slin))\n")
 			dialplan.WriteString(" same => n,Hangup()\n")
-			dialplan.WriteString(" same => n(unavailable),Playback(ss-noservice)\n")
+			dialplan.WriteString(" same => n(unavailable),Playback(sorry)\n")
+			dialplan.WriteString(" same => n,Playback(please-try-call-later)\n")
 			dialplan.WriteString(" same => n,Hangup()\n")
 		}
 
@@ -160,12 +162,45 @@ func Render(devices []DialDevice, services []model.RoutingServices) (Configurati
 			}
 			fmt.Fprintf(&dialplan, "exten => %s,1,NoOp(RingRing party call)\n", extension)
 			fmt.Fprintf(&dialplan, " same => n,Dial(%s,30)\n", strings.Join(endpoints, "&"))
-			dialplan.WriteString(" same => n,Hangup()\n")
+			dialplan.WriteString(" same => n,GotoIf($[\"${DIALSTATUS}\"=\"ANSWER\"]?done:unavailable)\n")
+			dialplan.WriteString(" same => n(unavailable),Answer()\n")
+			dialplan.WriteString(" same => n,Wait(1)\n")
+			writeFriendlyPhoneUnavailable(&dialplan)
+			dialplan.WriteString(" same => n(done),Hangup()\n")
 		}
-		dialplan.WriteString("exten => _X!,1,Playback(invalid)\n same => n,Hangup()\n\n")
+		writeFriendlyInvalid(&dialplan, "_X!")
+		writeFriendlyInvalid(&dialplan, "_*X!")
+		dialplan.WriteString("\n")
 	}
 
 	return Configuration{PJSIP: pjsip.Bytes(), Dialplan: dialplan.Bytes()}, nil
+}
+
+func writeAGIFailureFallback(dialplan *bytes.Buffer) {
+	dialplan.WriteString(" same => n,GotoIf($[\"${AGISTATUS}\"=\"SUCCESS\"]?done:unavailable)\n")
+	dialplan.WriteString(" same => n(unavailable),Playback(sorry)\n")
+	dialplan.WriteString(" same => n,Playback(please-try-call-later)\n")
+	dialplan.WriteString(" same => n(done),Hangup()\n")
+}
+
+func writeFriendlyServiceUnavailable(dialplan *bytes.Buffer) {
+	dialplan.WriteString(" same => n,Playback(sorry)\n")
+	dialplan.WriteString(" same => n,Playback(please-try-call-later)\n")
+}
+
+func writeFriendlyPhoneUnavailable(dialplan *bytes.Buffer) {
+	dialplan.WriteString(" same => n,Playback(sorry)\n")
+	dialplan.WriteString(" same => n,Playback(number-not-answering)\n")
+	dialplan.WriteString(" same => n,Playback(please-try-call-later)\n")
+}
+
+func writeFriendlyInvalid(dialplan *bytes.Buffer, pattern string) {
+	fmt.Fprintf(dialplan, "exten => %s,1,Answer()\n", pattern)
+	dialplan.WriteString(" same => n,Wait(1)\n")
+	dialplan.WriteString(" same => n,Playback(sorry)\n")
+	dialplan.WriteString(" same => n,Playback(cannot-complete-as-dialed)\n")
+	dialplan.WriteString(" same => n,Playback(please-try-again)\n")
+	dialplan.WriteString(" same => n,Hangup()\n")
 }
 
 func FromRoutingDevices(devices []model.RoutingDevice, decrypt func(string, []byte) (string, error)) ([]DialDevice, error) {

@@ -215,3 +215,34 @@ func TestRenderOmitsDisabledSpecialNumbers(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderAnswersInvalidAndUnavailableCallsWithFriendlyPrompts(t *testing.T) {
+	config, err := Render([]DialDevice{
+		{PartyID: "pty_one", DeviceID: "dev_one", Extension: "101", SIPUsername: "rrd_one", SIPSecret: "secret-a"},
+		{PartyID: "pty_two", DeviceID: "dev_two", Extension: "202", SIPUsername: "rrd_two", SIPSecret: "secret-b"},
+	}, []model.RoutingServices{
+		{PartyID: "pty_one", WeatherEnabled: true},
+		{PartyID: "pty_two", RadioEnabled: true, RadioStation: radio.DefaultStationID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialplan := string(config.Dialplan)
+	for _, required := range []string{
+		"same => n,GotoIf($[\"${DIALSTATUS}\"=\"ANSWER\"]?done:unavailable)",
+		"same => n(unavailable),Answer()\n same => n,Wait(1)\n same => n,Playback(sorry)\n same => n,Playback(number-not-answering)\n same => n,Playback(please-try-call-later)",
+		"exten => _X!,1,Answer()\n same => n,Wait(1)\n same => n,Playback(sorry)\n same => n,Playback(cannot-complete-as-dialed)\n same => n,Playback(please-try-again)",
+		"exten => _*X!,1,Answer()\n same => n,Wait(1)\n same => n,Playback(sorry)\n same => n,Playback(cannot-complete-as-dialed)\n same => n,Playback(please-try-again)",
+		"same => n,GotoIf($[\"${AGISTATUS}\"=\"SUCCESS\"]?done:unavailable)",
+	} {
+		if !strings.Contains(dialplan, required) {
+			t.Fatalf("friendly failure route missing %q:\n%s", required, dialplan)
+		}
+	}
+	if strings.Count(dialplan, "exten => _X!,1,Answer()") != 2 || strings.Count(dialplan, "exten => _*X!,1,Answer()") != 2 {
+		t.Fatalf("each party must own its numeric and star-code fallbacks:\n%s", dialplan)
+	}
+	if strings.Count(dialplan, "Playback(cannot-complete-as-dialed)") != 4 {
+		t.Fatalf("invalid-call prompts must remain inside each party context:\n%s", dialplan)
+	}
+}

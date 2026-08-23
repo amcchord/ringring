@@ -2,6 +2,31 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-22 — Give failed calls a friendly voice
+
+### Shipped
+
+- Added party-scoped spoken fallbacks for invalid numeric extensions and disabled or unknown star codes. Asterisk now answers and says that the call cannot be completed before asking the caller to try again, rather than returning a bare fast-busy tone.
+- Made explicit member routes inspect `DIALSTATUS`. Busy, offline, or unanswered party phones now receive a generic number-not-answering and retry-later response; a successfully answered conversation bypasses the fallback.
+- Added generic retry-later responses when the private FastAGI connection is unavailable, the AI authorization gate refuses a call, or a radio player exits unexpectedly. Existing FastAGI handlers retain their own safe in-call failure prompts.
+- Extended the local SIP smoke harness to accept a host-shared temporary root for Colima and added authenticated end-to-end calls that require both an invalid number and a disabled star line to answer, play out, send BYE, and leave no channel behind.
+
+### Findings and decisions
+
+- The physical HT801 V2's configured dial plan already accepts variable-length numeric destinations and star codes, so no adapter dial-plan change was needed. Its SIP registration was enabled over UDP, but the default 60-minute refresh left the adapter showing Registered after a server restart while Asterisk had no live contact. Setting only Register Expiration to 5 minutes and applying the page immediately restored the live contact; no server, identity, password, codec, or DTMF value changed. The setup guide now carries that recovery setting.
+- Production currently generates one member extension for one configured phone. Calling that same extension from its only phone is not a two-phone call and can return busy. Only `*10`, `*11`, and `*15` are currently routed; `*12`, `*13`, and `*14` are disabled and previously had no star-code fallback.
+- Keep every failure pattern inside the caller's authenticated party context and use only bundled Asterisk sounds. The response discloses no endpoint, member, party, presence, credential, or failure detail and cannot reach a public or cross-party destination.
+
+### Verification
+
+- Focused renderer tests pass and cover per-party numeric/star fallbacks, unreachable-member handling, FastAGI failure handling, prompt selection, and tenant-local duplication.
+- The complete local `make sip-smoke` gate passes in Colima. It loads the generated patterns into pinned Asterisk 22.10.1, confirms every prompt file, places authenticated TLS calls to invalid `222` and disabled `*12`, observes answered calls of prompt-length duration with server BYE and zero remaining channels, and preserves the existing mixed-transport member call, bidirectional PCMU, `*10`, and authenticated `*15` checks.
+- `make check`, `make security`, and `make admin-test` all pass locally after the change, including formatting, shell/operator fixtures, `go vet`, the complete race-enabled suite, reachable-vulnerability scanning, and administrator tests. The physical adapter's five-minute registration refresh is saved and production reports one live contact again.
+
+### Remaining
+
+- Publish the focused change, deploy it through the guarded backup/restore-drilled upgrade, and then retry invalid, disabled, `*11`, `*15`, and two-device member calls on physical hardware.
+
 ## 2026-08-22 — Keep the release gate local
 
 ### Shipped

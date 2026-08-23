@@ -102,7 +102,7 @@
     </dl>
     <div class="device-guide-next">
       <span aria-hidden="true">→</span>
-      <div><strong>Then open SIP Settings</strong><p>Keep <strong>SIP Registration</strong> on, choose <strong>TLS</strong> for SIP Transport, and keep the <strong>sips</strong> URI scheme. Under Codec Settings, put <strong>PCMU / G.711 μ-law</strong> first and prefer DTMF <strong>via RTP (RFC2833)</strong>. Under Advanced Settings, turn <strong>Authenticate Server Certificate chain</strong> on.</p></div>
+      <div><strong>Then open SIP Settings</strong><p>Keep <strong>SIP Registration</strong> on, set <strong>Register Expiration</strong> to <strong>5 minutes</strong>, choose <strong>TLS</strong> for SIP Transport, and keep the <strong>sips</strong> URI scheme. The shorter refresh helps the phone reconnect promptly after a RingRing server restart. Under Codec Settings, put <strong>PCMU / G.711 μ-law</strong> first and prefer DTMF <strong>via RTP (RFC2833)</strong>. Under Advanced Settings, turn <strong>Authenticate Server Certificate chain</strong> on.</p></div>
     </div>
     <details class="device-guide-fallback">
       <summary>Use the UDP fallback only if TLS will not register</summary>

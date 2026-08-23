@@ -16,9 +16,10 @@ for container in $containers; do
   fi
 done
 
-work_directory=$(mktemp -d /tmp/ringring-sip-smoke.XXXXXX)
+temporary_root=${RINGRING_SMOKE_TMP_ROOT:-/tmp}
+work_directory=$(mktemp -d "$temporary_root/ringring-sip-smoke.XXXXXX")
 case "$work_directory" in
-  /tmp/ringring-sip-smoke.*) ;;
+  "$temporary_root"/ringring-sip-smoke.*) ;;
   *) echo "Unexpected temporary directory: $work_directory" >&2; exit 1 ;;
 esac
 
@@ -167,6 +168,9 @@ grep -Fq ' same => n,Echo()' "$work_directory/state/extensions.conf"
 grep -Fq 'exten => *15,1,Answer()' "$work_directory/state/extensions.conf"
 grep -Fq "choose-extension,pty_smoke,\${CHANNEL(endpoint)}" "$work_directory/state/extensions.conf"
 grep -q '^exten => 102,1,NoOp(RingRing party call)$' "$work_directory/state/extensions.conf"
+grep -Fq 'GotoIf($["${DIALSTATUS}"="ANSWER"]?done:unavailable)' "$work_directory/state/extensions.conf"
+grep -Fq 'exten => _X!,1,Answer()' "$work_directory/state/extensions.conf"
+grep -Fq 'exten => _*X!,1,Answer()' "$work_directory/state/extensions.conf"
 
 docker run -d --name ringring-sip-smoke-asterisk \
   --network "$network" --network-alias ringring-sip-smoke.test --ip 172.31.89.20 \
@@ -283,6 +287,18 @@ for prompt in hello your extension is auth-thankyou; do
   docker exec ringring-sip-smoke-asterisk \
     test -s "/var/lib/asterisk/sounds/en/$prompt.gsm"
 done
+for prompt in sorry number-not-answering please-try-call-later cannot-complete-as-dialed please-try-again; do
+  docker exec ringring-sip-smoke-asterisk \
+    test -s "/var/lib/asterisk/sounds/en/$prompt.gsm"
+done
+invalid_number=$(docker exec ringring-sip-smoke-asterisk \
+  asterisk -rx 'dialplan show 222@rr-party-pty_smoke')
+printf '%s\n' "$invalid_number" | grep -Fq "'_X!'"
+printf '%s\n' "$invalid_number" | grep -Fq 'cannot-complete-as-dialed'
+invalid_service=$(docker exec ringring-sip-smoke-asterisk \
+  asterisk -rx 'dialplan show *12@rr-party-pty_smoke')
+printf '%s\n' "$invalid_service" | grep -Fq "'_*X!'"
+printf '%s\n' "$invalid_service" | grep -Fq 'cannot-complete-as-dialed'
 docker rm -f ringring-sip-smoke-register-a >/dev/null
 
 echo "Sending a host-scoped incoming ring test to phone B..."
@@ -396,6 +412,30 @@ printf '%s\n' "$channels" | grep -q '^0 active channels'
 
 docker rm ringring-sip-smoke-phone-a >/dev/null
 find "$work_directory/logs/ringring-sip-smoke-phone-a" -type f -delete
+for destination in 222 '*12'; do
+  echo "Calling unavailable destination $destination and checking for an answered spoken response..."
+  failure_started=$(date +%s)
+  run_and_wait ringring-sip-smoke-phone-a 20 \
+    --network "$network" --ip 172.31.89.40 --volume "$scenario_mount" \
+    --volume "$work_directory/certs:/certs:ro" \
+    --volume "$work_directory/logs/ringring-sip-smoke-phone-a:/logs" --workdir /logs \
+    "$sipp_image" ringring-sip-smoke.test:5061 -t l1 -tls_version 1.2 \
+    -tls_ca /certs/ca.crt -tls_cert /certs/client.crt -tls_key /certs/client.key \
+    -sf /scenarios/friendly-failure.xml \
+    -i 172.31.89.40 -p 5061 -mi 172.31.89.40 -mp 4000 \
+    -s "$destination" -au rr_smoke_a -ap smoke-only-a-7Qm4s9Vx -m 1 -aa \
+    -key branch_tag failure -trace_msg -trace_err
+  failure_elapsed=$(($(date +%s) - failure_started))
+  if test "$failure_elapsed" -lt 3 || test "$failure_elapsed" -gt 15; then
+    echo "The friendly failure prompt had an unexpected duration." >&2
+    exit 1
+  fi
+  channels=$(docker exec ringring-sip-smoke-asterisk asterisk -rx 'core show channels count')
+  printf '%s\n' "$channels" | grep -q '^0 active channels'
+  docker rm ringring-sip-smoke-phone-a >/dev/null
+  find "$work_directory/logs/ringring-sip-smoke-phone-a" -type f -delete
+done
+
 echo "Calling *10 and checking the single-phone RTP echo..."
 run_and_wait ringring-sip-smoke-phone-a 30 \
   --network "$network" --ip 172.31.89.40 --volume "$scenario_mount" \
@@ -459,4 +499,4 @@ if docker logs ringring-sip-smoke-app 2>&1 | grep -Eq 'change extension from pho
 fi
 channels=$(docker exec ringring-sip-smoke-asterisk asterisk -rx 'core show channels count')
 printf '%s\n' "$channels" | grep -q '^0 active channels'
-echo "SIP smoke test passed: verified TLS 1.2 plus UDP registration, host-added same-extension routing, mixed-transport extension calling, *10 echo, bidirectional RTP, and authenticated *15 DTMF extension selection."
+echo "SIP smoke test passed: verified TLS 1.2 plus UDP registration, host-added same-extension routing, mixed-transport extension calling, answered spoken fallbacks for unavailable numbers and star lines, *10 echo, bidirectional RTP, and authenticated *15 DTMF extension selection."
