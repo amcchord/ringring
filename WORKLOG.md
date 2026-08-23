@@ -17,6 +17,13 @@ This is the durable, chronological project record. Add new entries at the top. C
 
 - `go test ./internal/webapp -count=1` passes.
 - Browser QA with a populated member checked the collapsed and expanded gear states; corners stay rounded and weather, phone, add, and remove controls remain visible.
+- `make check` passes locally, including the security contract, shell validation, `go vet`, and the race-enabled Go suite.
+
+### Production
+
+- Published the corner fix as `e071f2d128228609af6e9ad21329765f527c444a`; production is running descendant `f8fd69adda826c1d6790a0ba1035f9f8499b4a2d`, which also repairs the APNs provider-key runtime permission guard. Verified post-deploy archive `ringring-20260823T221101Z-f8fd69a.tar.gz` is present with its checksum.
+- Public verification initially caught Docker reusing the previous app image even though the checkout contained the fix. With zero active Asterisk channels, rebuilt only the app image without cache and recreated only the app container; the public stylesheet now serves `.compact-member-card { overflow: hidden; }`.
+- `ringringctl doctor`, database and credential integrity, SIP contact checks, clean-checkout verification, and public `/healthz` and `/readyz` all pass with the app, Asterisk, and Caddy healthy.
 
 ## 2026-08-23 — Wake the iPhone for calls and bring the party menu to life
 
