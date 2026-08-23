@@ -36,6 +36,7 @@ func TestSharedAccessibilityContract(t *testing.T) {
 		`.device-ring-button:disabled { color: #625a77;`,
 		`.add-device-card input { min-height: 48px;`,
 		`.member-card-footer > .member-add-device > summary, .member-remove-link { width: 100%;`,
+		`.compact-member-card { overflow: hidden;`,
 		`.invite-actions summary { min-height: 44px;`,
 		`.call-list li { min-height: 44px;`,
 		`.device-guide-jump { min-height: 70px;`,

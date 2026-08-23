@@ -385,7 +385,7 @@ input:focus { border-color: var(--purple); box-shadow: 0 0 0 4px rgba(108,76,255
 .phonebook-layout { grid-template-columns: minmax(260px, .62fr) minmax(0, 1.38fr); }
 .quick-dial-panel p { line-height: 1.75; }
 .text-link { min-height: 44px; display: inline-flex; align-items: center; color: var(--purple-dark); font-weight: 900; }
-.compact-member-card { overflow: visible; }
+.compact-member-card { overflow: hidden; }
 .compact-member-heading { grid-template-columns: 82px minmax(0, 1fr) auto; }
 .member-on-call { color: #17492f; background: var(--mint); border-color: #2f7e58; }
 .member-on-call .presence-indicator { background: #20b77a; box-shadow: 0 0 0 3px rgba(32,183,122,.18); }

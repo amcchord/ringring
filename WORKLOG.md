@@ -2,6 +2,22 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-23 — Clip compact member cards to their rounded corners
+
+### Shipped
+
+- Restored the compact member card's inherited overflow clipping so the colored heading and white phone strip stay inside the 22px rounded outline.
+- Added an executable CSS contract to prevent reintroducing `overflow: visible`.
+
+### Decision
+
+- Keep the gear panel in normal card flow and clip only paint outside the outer card; expanding the gear still grows the card and keeps every control visible.
+
+### Verification
+
+- `go test ./internal/webapp -count=1` passes.
+- Browser QA with a populated member checked the collapsed and expanded gear states; corners stay rounded and weather, phone, add, and remove controls remain visible.
+
 ## 2026-08-23 — Wake the iPhone for calls and bring the party menu to life
 
 ### Shipped
