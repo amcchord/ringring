@@ -24,6 +24,13 @@ This is the durable, chronological project record. Add new entries at the top. C
 - The bundled greeting is verified as 16-bit mono PCM at 8 kHz and 0.6835 seconds. Voice tests pin pre-roll-before-generated-audio ordering, cache behavior, fixed prompt privacy, and the absence of the removed notices.
 - `make sip-smoke` passes with verified TLS 1.2 and UDP phones, live three-phone joining by dialing the already-active extension, announcement authorization, original-owner teardown, zero residual channels/CDR, mixed-transport media, operator fallbacks, `*10`, and authenticated `*15`.
 
+### Production and TestFlight
+
+- Published and deployed exact server runtime `7aa76516f9e9d207ad39aa4ccb908f84eac0f4c8` from `888e791448fd3d144fa2aff7652bb01f5bcef9f1` through the guarded fast-forward upgrader after confirming zero active Asterisk channels. Pre/post archives `ringring-20260824T174428Z-888e791.tar.gz` and `ringring-20260824T174617Z-7aa7651.tar.gz` both pass checksum, safe-extraction, SQLite, foreign-key, credential-decryption, isolated-readiness, and telephony-regeneration drills.
+- Production is clean at the published release, all three containers are healthy, `ringringctl doctor` plus public `/healthz` and `/readyz` pass, and recent app logs contain no error/fatal line. The Asterisk image contains the 11,014-byte local greeting; its generated dialplan contains neither the retired `*14` route nor AudioSocket, and the public site contains no retired AI-chat copy.
+- Published iOS release source `30a80db40f9eb96f80ed4ef56e790bba9090f8a4`, archived and exported `0.1.0` build `6` with temporary App Store Connect authentication, and removed the mode-`0600` key after each signing/upload operation. The 43,925,426-byte IPA has SHA-256 `ed1248194b57b2b3d15e80822b727475f0fbd688e629a334616e985ab9cb44c3`, production APNs, `applinks:ringring.live`, `audio`/`voip` background modes, and no embedded temporary key.
+- Apple validation and upload completed without errors as delivery `ba0b726f-9527-47dc-b14a-18f0350de44b`. App Store Connect reports build `6` **VALID · APP_STORE_ELIGIBLE**; it is attached to **RingRing Internal** with the current 697-character direct-join, call-menu-hierarchy, background-call, and regression test matrix.
+
 ### Remaining
 
 - Listen to the bundled greeting and measure perceived first-word latency on physical family handsets. Complete one TestFlight one-tap join and one three-phone direct-extension join before treating the interaction as hardware-verified.

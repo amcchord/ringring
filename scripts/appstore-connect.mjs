@@ -9,8 +9,8 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const command = process.argv[2] ?? "inspect";
-if (!new Set(["inspect", "validate", "sync", "export", "upload"]).has(command)) {
-  console.error("Usage: node scripts/appstore-connect.mjs [inspect|validate|sync|export <archive> <output> <options-plist>|upload <ipa>]");
+if (!new Set(["inspect", "validate", "sync", "export", "upload", "distribute"]).has(command)) {
+  console.error("Usage: node scripts/appstore-connect.mjs [inspect|validate|sync|export <archive> <output> <options-plist>|upload <ipa>|distribute <build>]");
   process.exit(2);
 }
 
@@ -503,6 +503,61 @@ async function exportBuild(credentials, requestedArchive, requestedOutput, reque
   console.log(`Exported ${path.basename(archivePath)} for App Store Connect`);
 }
 
+async function distributeBuild(token, app, requestedBuild) {
+  if (!/^\d+$/.test(requestedBuild ?? "")) throw new Error("distribute requires a numeric build number");
+  const query = new URLSearchParams({
+    "filter[app]": app.id,
+    "filter[version]": requestedBuild,
+    limit: "5",
+  });
+  const candidates = (await api(token, `/v1/builds?${query}`)).data;
+  const build = candidates.find((item) => item.attributes.version === requestedBuild);
+  if (!build) throw new Error(`App Store Connect does not contain build ${requestedBuild}`);
+  if (build.attributes.processingState !== "VALID") {
+    throw new Error(`build ${requestedBuild} is ${build.attributes.processingState}, not VALID`);
+  }
+
+  const groups = (await api(token, `/v1/apps/${app.id}/betaGroups?limit=50`)).data;
+  const group = groups.find((item) => item.attributes.name === "RingRing Internal" && item.attributes.isInternalGroup === true);
+  if (!group) throw new Error("the RingRing Internal TestFlight group is unavailable");
+
+  const notes = metadataFile("release_notes");
+  const localizations = (await api(token, `/v1/builds/${build.id}/betaBuildLocalizations?limit=50`)).data;
+  const localization = localizations.find((item) => item.attributes.locale === locale);
+  if (localization) {
+    if (localization.attributes.whatsNew !== notes) {
+      await api(token, `/v1/betaBuildLocalizations/${localization.id}`, {
+        method: "PATCH",
+        body: { data: { type: "betaBuildLocalizations", id: localization.id, attributes: { whatsNew: notes } } },
+      });
+    }
+  } else {
+    await api(token, "/v1/betaBuildLocalizations", {
+      method: "POST",
+      body: {
+        data: {
+          type: "betaBuildLocalizations",
+          attributes: { locale, whatsNew: notes },
+          relationships: { build: { data: { type: "builds", id: build.id } } },
+        },
+      },
+    });
+  }
+
+  const attached = (await api(token, `/v1/betaGroups/${group.id}/builds?limit=50`)).data;
+  if (!attached.some((item) => item.id === build.id)) {
+    await api(token, `/v1/builds/${build.id}/relationships/betaGroups`, {
+      method: "POST",
+      body: { data: [{ type: "betaGroups", id: group.id }] },
+    });
+  }
+  const verified = (await api(token, `/v1/betaGroups/${group.id}/builds?limit=50`)).data;
+  if (!verified.some((item) => item.id === build.id)) {
+    throw new Error(`build ${requestedBuild} was not attached to RingRing Internal`);
+  }
+  console.log(`Build ${requestedBuild} is VALID and available to RingRing Internal with current test notes`);
+}
+
 async function main() {
   if (command === "validate") {
     desiredMetadata();
@@ -525,6 +580,10 @@ async function main() {
   }
   const token = makeToken(credentials);
   const app = await findApp(token);
+  if (command === "distribute") {
+    await distributeBuild(token, app, process.argv[3]);
+    return;
+  }
   if (command === "inspect") {
     await inspect(token, app);
     return;

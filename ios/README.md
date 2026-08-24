@@ -44,9 +44,10 @@ xcodebuild -project RingRing.xcodeproj -scheme RingRing \
 node ../scripts/appstore-connect.mjs export \
   /tmp/RingRing.xcarchive /tmp/RingRing-export AppStoreExportOptions.plist
 node ../scripts/appstore-connect.mjs upload /tmp/RingRing-export/RingRing.ipa
+node ../scripts/appstore-connect.mjs distribute 6
 ```
 
-The helper obtains the App Store Connect credential from AustinLand, gives Xcode or Apple's uploader a mode-`0600` temporary key, and removes it in a `finally` block. It never places a signing key in the repository or a persistent key-search directory. After Apple finishes processing, attach the validated build to the existing internal group and add the matching physical test matrix from `TESTFLIGHT.md`.
+The helper obtains the App Store Connect credential from AustinLand, gives Xcode or Apple's uploader a mode-`0600` temporary key, and removes it in a `finally` block. It never places a signing key in the repository or a persistent key-search directory. After Apple finishes processing, `distribute` requires a valid numeric build, adds the current release notes as its test matrix, attaches it only to the existing **RingRing Internal** group, and verifies the relationship.
 
 ## Provisioning contract
 
