@@ -33,16 +33,15 @@
 - [x] Web accessibility and simulated mobile usability pass.
 - [ ] Real-device usability pass with family phones, ATAs, and mobile background transitions.
 
-## Milestone 3 — OpenAI voice
+## Milestone 3 — One-way voice assistance
 
 - [x] Automated per-party OpenAI project/service-account provisioning.
 - [x] Per-party encrypted runtime key use.
 - [x] Immediate party-key revocation and replacement.
 - [x] Host-set project hard spend limit with an operator ceiling and fail-closed provider reconciliation.
-- [x] Adults-only Realtime voice line with conservative instructions, disclosure, bounded calls, and no tools.
-- [x] AI disclosure for generated weather speech and no default transcript retention.
-- [x] Default-closed operator gate plus authenticated adult-extension authorization across storage, web, telephony, FastAGI, and Realtime boundaries.
-- [ ] External child-safety review and confirmation of OpenAI Zero Data Retention before use by callers under 13.
+- [x] Fixed-script operator, weather, and conference-join speech with no caller-audio upload or transcript retention.
+- [x] Bundled immediate greeting while operator and weather TTS loads or generates.
+- [x] Retire the open-ended conversation line, adult-extension classification, media bridge, and host controls.
 
 ## Milestone 4 — Dependable self-hosting
 

@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/amcchord/ringring/internal/apns"
@@ -35,8 +34,9 @@ const (
 	operatorReasonMisdial            = "misdial"
 	operatorReasonPhoneUnavailable   = "phone-unavailable"
 	operatorReasonServiceUnavailable = "service-unavailable"
-	operatorCacheVersion             = "v3"
-	weatherSetupCacheVersion         = "v1"
+	operatorCacheVersion             = "v4"
+	weatherSetupCacheVersion         = "v2"
+	weatherCacheVersion              = "v3"
 )
 
 type PartySource interface {
@@ -50,15 +50,6 @@ type ExtensionManager interface {
 type WeatherLocationManager interface {
 	WeatherLocationForDevice(context.Context, string, string) (model.WeatherLocation, error)
 	SetWeatherLocationByDevice(context.Context, string, string, store.WeatherLocationInput) (model.WeatherLocation, bool, error)
-}
-
-type AIAdultAccessSource interface {
-	AIAdultAccessForDevice(context.Context, string, string) (bool, error)
-}
-
-type OperatorDisclosureStore interface {
-	OperatorDisclosureForDevice(context.Context, string, string) (bool, error)
-	MarkOperatorDisclosureForDevice(context.Context, string, string, time.Time) error
 }
 
 type SecretDecryptor interface {
@@ -94,8 +85,6 @@ type PhonePushNotifier interface {
 
 type Server struct {
 	Source             PartySource
-	AIAdultAccess      AIAdultAccessSource
-	OperatorDisclosure OperatorDisclosureStore
 	Extensions         ExtensionManager
 	WeatherLocations   WeatherLocationManager
 	Reconcile          func(context.Context) error
@@ -114,14 +103,6 @@ type Server struct {
 	Now                func() time.Time
 	CacheDuration      time.Duration
 	JoinAudioTTL       time.Duration
-	AIModel            string
-	AIRealtimeURL      string
-	AICallMaxDuration  time.Duration
-	AIMaxConcurrent    int
-	AIAdultOnlyEnabled bool
-	aiMu               sync.Mutex
-	aiTickets          map[string]aiTicket
-	aiActive           int
 }
 
 func (s *Server) Serve(listener net.Listener) error {
@@ -158,8 +139,6 @@ func (s *Server) handle(connection net.Conn) {
 		s.handleWeather(reader, writer, environment)
 	case "operator":
 		s.handleOperator(reader, writer, environment)
-	case "ai-authorize":
-		s.handleAIAuthorize(reader, writer, environment)
 	case "choose-extension":
 		s.handleChooseExtension(reader, writer, environment)
 	case "join-party":
@@ -180,34 +159,25 @@ func (s *Server) handleOperator(reader *bufio.Reader, writer *bufio.Writer, envi
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	partyID := environment["agi_arg_1"]
-	endpoint := environment["agi_arg_3"]
-	discloseAI := true
-	markDisclosure := false
-	if s.OperatorDisclosure != nil && safePartyID.MatchString(partyID) && safePartyID.MatchString(endpoint) {
-		disclosed, err := s.OperatorDisclosure.OperatorDisclosureForDevice(ctx, partyID, endpoint)
-		if err != nil {
-			s.logger().Warn("check RingRing operator disclosure", "error_class", observability.ErrorClass(err))
-		} else {
-			discloseAI = !disclosed
-			markDisclosure = !disclosed
-		}
+	type audioResult struct {
+		path string
+		err  error
 	}
-	path, err := s.operatorAudio(ctx, partyID, environment["agi_arg_2"], discloseAI)
-	if err != nil {
-		s.logger().Warn("prepare RingRing operator", "error_class", observability.ErrorClass(err))
+	generated := make(chan audioResult, 1)
+	go func() {
+		path, err := s.operatorAudio(ctx, partyID, environment["agi_arg_2"])
+		generated <- audioResult{path: path, err: err}
+	}()
+	if err := agiCommand(reader, writer, `STREAM FILE "ringring-here" ""`); err != nil {
 		return
 	}
-	if err := agiCommand(reader, writer, `STREAM FILE "`+path+`" ""`); err != nil {
+	audio := <-generated
+	if audio.err != nil {
+		s.logger().Warn("prepare RingRing operator", "error_class", observability.ErrorClass(audio.err))
 		return
 	}
-	if markDisclosure {
-		now := time.Now()
-		if s.Now != nil {
-			now = s.Now()
-		}
-		if err := s.OperatorDisclosure.MarkOperatorDisclosureForDevice(ctx, partyID, endpoint, now); err != nil {
-			s.logger().Warn("mark RingRing operator disclosure", "error_class", observability.ErrorClass(err))
-		}
+	if err := agiCommand(reader, writer, `STREAM FILE "`+audio.path+`" ""`); err != nil {
+		return
 	}
 	if err := agiCommand(reader, writer, "SET VARIABLE RINGRING_OPERATOR_READY 1"); err != nil {
 		return
@@ -340,13 +310,25 @@ func (s *Server) handleWeather(reader *bufio.Reader, writer *bufio.Writer, envir
 			return
 		}
 	}
-	path, err := s.weatherAudio(ctx, partyID, location)
-	if err != nil {
-		s.logger().Warn("prepare weather line", "error_class", observability.ErrorClass(err))
+	type audioResult struct {
+		path string
+		err  error
+	}
+	generated := make(chan audioResult, 1)
+	go func() {
+		path, err := s.weatherAudio(ctx, partyID, location)
+		generated <- audioResult{path: path, err: err}
+	}()
+	if err := agiCommand(reader, writer, `STREAM FILE "ringring-here" ""`); err != nil {
+		return
+	}
+	audio := <-generated
+	if audio.err != nil {
+		s.logger().Warn("prepare weather line", "error_class", observability.ErrorClass(audio.err))
 		_ = agiCommand(reader, writer, "EXEC Playback ss-noservice")
 		return
 	}
-	if err := agiCommand(reader, writer, `STREAM FILE "`+path+`" ""`); err == nil {
+	if err := agiCommand(reader, writer, `STREAM FILE "`+audio.path+`" ""`); err == nil {
 		result = "ready"
 	}
 }
@@ -360,11 +342,25 @@ func (s *Server) collectWeatherLocation(ctx context.Context, reader *bufio.Reade
 		if attempt > 0 {
 			prompt = "retry"
 		}
-		path, err := s.weatherSetupAudio(ctx, partyID, prompt)
-		if err != nil {
-			return err
+		type audioResult struct {
+			path string
+			err  error
 		}
-		postalCode, err := agiCommandResult(reader, writer, `GET DATA "`+path+`" 12000 5`)
+		generated := make(chan audioResult, 1)
+		go func() {
+			path, err := s.weatherSetupAudio(ctx, partyID, prompt)
+			generated <- audioResult{path: path, err: err}
+		}()
+		if attempt == 0 {
+			if err := agiCommand(reader, writer, `STREAM FILE "ringring-here" ""`); err != nil {
+				return err
+			}
+		}
+		audio := <-generated
+		if audio.err != nil {
+			return audio.err
+		}
+		postalCode, err := agiCommandResult(reader, writer, `GET DATA "`+audio.path+`" 12000 5`)
 		if err != nil {
 			return err
 		}
@@ -400,7 +396,7 @@ func (s *Server) collectWeatherLocation(ctx context.Context, reader *bufio.Reade
 	return errWeatherLocationNotResolved
 }
 
-func (s *Server) operatorAudio(ctx context.Context, partyID, reason string, discloseAI bool) (string, error) {
+func (s *Server) operatorAudio(ctx context.Context, partyID, reason string) (string, error) {
 	if s.Source == nil || s.Cipher == nil || s.Speech == nil || s.AudioDir == "" || s.PlaybackDir == "" {
 		return "", errors.New("RingRing operator is not fully configured")
 	}
@@ -414,15 +410,11 @@ func (s *Server) operatorAudio(ctx context.Context, partyID, reason string, disc
 	if party.OpenAIStatus != "ready" || party.OpenAIUsagePausedForSpendLimit() || party.OpenAIKeyCiphertext == "" {
 		return "", errors.New("party operator voice is unavailable")
 	}
-	promptName, phrase, err := operatorPrompt(reason, services, discloseAI)
+	promptName, phrase, err := operatorPrompt(reason, services)
 	if err != nil {
 		return "", err
 	}
-	disclosureVariant := "repeat"
-	if discloseAI {
-		disclosureVariant = "first"
-	}
-	filename := "operator-" + operatorCacheVersion + "-" + promptName + "-" + disclosureVariant + "-" + partyID + ".wav"
+	filename := "operator-" + operatorCacheVersion + "-" + promptName + "-" + partyID + ".wav"
 	localPath := filepath.Join(s.AudioDir, filename)
 	if info, err := os.Stat(localPath); err == nil && info.Size() > 44 &&
 		(services.UpdatedAt.IsZero() || !info.ModTime().Before(services.UpdatedAt)) {
@@ -464,7 +456,7 @@ func (s *Server) weatherSetupAudio(ctx context.Context, partyID, promptName stri
 	phrase := ""
 	switch promptName {
 	case "initial":
-		phrase = "Ring ring! RingRing doesn't know which local weather you want yet. This is an AI-generated voice. Enter your five digit U.S. ZIP code. RingRing will save the place for this extension. Your party host can change it or turn weather off later."
+		phrase = "RingRing doesn't know which local weather you want yet. Enter your five digit U.S. ZIP code. RingRing will save the place for this extension. Your party host can change it or turn weather off later."
 	case "retry":
 		phrase = "Let's try that again. Enter five digits for a U.S. ZIP code."
 	case "failed":
@@ -498,11 +490,7 @@ func (s *Server) weatherSetupAudio(ctx context.Context, partyID, promptName stri
 	return filepath.Join(s.PlaybackDir, strings.TrimSuffix(filename, ".wav")), nil
 }
 
-func operatorPrompt(reason string, services model.PartyServices, discloseAI bool) (string, string, error) {
-	disclosure := ""
-	if discloseAI {
-		disclosure = " I'm an AI-generated voice, not a person."
-	}
+func operatorPrompt(reason string, services model.PartyServices) (string, string, error) {
 	switch reason {
 	case operatorReasonHelp:
 		features := []string{
@@ -518,14 +506,14 @@ func operatorPrompt(reason string, services model.PartyServices, discloseAI bool
 		if services.RadioEnabled {
 			features = append(features, "For radio, dial star one three")
 		}
-		return reason, "Ring ring! Hi! I'm the RingRing operator." + disclosure + " Dial a family extension to ring someone. " +
+		return reason, "Dial a family extension to ring someone. " +
 			strings.Join(features, ". ") + ". To join a live party call, dial the star one six code shown in the RingRing phonebook. Dial zero whenever you need this tour. RingRing cannot call regular or emergency numbers, so keep another way to get help.", nil
 	case operatorReasonMisdial:
-		return reason, "Oops-a-daisy! RingRing operator here." + disclosure + " That number doesn't live in this party. Check the RingRing phonebook and try again, or dial zero for a quick tour. RingRing cannot call regular or emergency numbers.", nil
+		return reason, "Oops-a-daisy! That number doesn't live in this party. Check the RingRing phonebook and try again, or dial zero for a quick tour. RingRing cannot call regular or emergency numbers.", nil
 	case operatorReasonPhoneUnavailable:
-		return reason, "Ring ring, operator here!" + disclosure + " That phone couldn't answer right now. Try again in a bit, or dial zero if you need help.", nil
+		return reason, "That phone couldn't answer right now. Try again in a bit, or dial zero if you need help.", nil
 	case operatorReasonServiceUnavailable:
-		return reason, "Ring ring, operator here!" + disclosure + " That special line is taking a quick break. Try again soon, or dial zero if you need help.", nil
+		return reason, "That special line is taking a quick break. Try again soon, or dial zero if you need help.", nil
 	default:
 		return "", "", errors.New("invalid operator prompt")
 	}
@@ -545,7 +533,7 @@ func (s *Server) weatherAudio(ctx context.Context, partyID string, location mode
 	if !safePartyID.MatchString(location.MemberID) {
 		return "", errors.New("invalid weather member ID")
 	}
-	filename := "weather-v2-" + location.MemberID + ".wav"
+	filename := "weather-" + weatherCacheVersion + "-" + location.MemberID + ".wav"
 	localPath := filepath.Join(s.AudioDir, filename)
 	cacheDuration := s.CacheDuration
 	if cacheDuration == 0 {
@@ -597,7 +585,7 @@ func weatherPhrase(label string, conditions weather.Conditions) string {
 		precipitation = 100
 	}
 	return fmt.Sprintf(
-		"Hello. This weather report uses an AI-generated voice. In %s, it is %.0f degrees Fahrenheit with %s. It feels like %.0f degrees. Today's high is %.0f and the low is %.0f, with a %d percent chance of precipitation. Weather data is from Open-Meteo.",
+		"In %s, it is %.0f degrees Fahrenheit with %s. It feels like %.0f degrees. Today's high is %.0f and the low is %.0f, with a %d percent chance of precipitation. Weather data is from Open-Meteo.",
 		label, math.Round(conditions.Temperature), weather.Description(conditions.WeatherCode),
 		math.Round(conditions.ApparentTemperature), math.Round(conditions.High), math.Round(conditions.Low), precipitation,
 	)

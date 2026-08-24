@@ -22,7 +22,7 @@ final class AppModel: ObservableObject {
     private var pushKit: PushKitCoordinator?
     private var pushToken: String?
     private var registeredPushToken: String?
-    private var isPreview = false
+    private var usesPreviewData = false
 
     init() {
 #if DEBUG
@@ -39,10 +39,10 @@ final class AppModel: ObservableObject {
         }
         let previewsConfiguredPhone = arguments.contains("--preview-call-menu") || arguments.contains("--preview-active-call") || arguments.contains("--preview-settings")
         if previewsConfiguredPhone {
-            isPreview = true
+            usesPreviewData = true
             account = SIPAccount(server: "ringring.live", port: 5061, transport: "tls", username: "preview_phone", password: "preview-only", extension: "103")
             destinations = [
-                DialDestination(kind: .call, label: "Join Kitchen phone + Workshop phone", detail: "2 phones are talking now.", dial: "*16101"),
+                DialDestination(kind: .call, label: "Kitchen phone + Workshop phone", detail: "2 phones are on the call — tap to join.", dial: "*16101"),
                 DialDestination(kind: .person, label: "Kitchen phone", detail: nil, dial: "101"),
                 DialDestination(kind: .person, label: "Workshop phone", detail: nil, dial: "102"),
                 DialDestination(kind: .service, label: "Echo test", detail: "Hear your own voice come back.", dial: "*10"),
@@ -98,7 +98,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func claimInvitation(displayName: String, extension extensionValue: String, adultExtension: Bool) {
+	func claimInvitation(displayName: String, extension extensionValue: String) {
         guard !isProvisioning, let invitation = pendingInvitation else { return }
         let normalizedName = PhoneInvitationDetails.normalizedName(displayName)
         let normalizedExtension = extensionValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -112,11 +112,10 @@ final class AppModel: ObservableObject {
         Task {
             defer { isProvisioning = false }
             do {
-                let provisioned = try await invitationClient.claim(PhoneInvitationClaim(
-                    displayName: normalizedName,
-                    extension: normalizedExtension,
-                    adultExtension: adultExtension,
-                    deviceLabel: "iPhone app"
+				let provisioned = try await invitationClient.claim(PhoneInvitationClaim(
+					displayName: normalizedName,
+					extension: normalizedExtension,
+					deviceLabel: "iPhone app"
                 ), using: invitation.link)
                 try install(provisioned)
                 pendingInvitation = nil
@@ -212,14 +211,14 @@ final class AppModel: ObservableObject {
     }
 
     func refresh() {
-        guard !isPreview else { return }
+        guard !usesPreviewData else { return }
         phone.refresh()
         registerPushTokenIfPossible()
         Task { await refreshMenu() }
     }
 
     func refreshMenu() async {
-        guard !isPreview, let currentAccount = account, phone.callPhase == .idle else { return }
+        guard !usesPreviewData, let currentAccount = account, phone.callPhase == .idle else { return }
         do {
             let state = try await phoneAPI.fetchState(for: currentAccount)
             let updatedAccount = SIPAccount(

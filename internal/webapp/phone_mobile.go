@@ -53,7 +53,7 @@ func (a *App) grandstreamPhonebookAPI(w http.ResponseWriter, r *http.Request) {
 	document, err := provisioning.GrandstreamPhonebookXML(phoneCallDestinations(
 		device.Extension,
 		members,
-		availableFirstCallLines(party, services, a.cfg.AIAdultOnlyEnabled, device.AdultExtension),
+		availableFirstCallLines(party, services),
 	))
 	if err != nil {
 		a.logger.Error("encode Grandstream phonebook", "error_class", observability.ErrorClass(err))
@@ -84,20 +84,20 @@ func (a *App) phoneStateAPI(w http.ResponseWriter, r *http.Request) {
 		writeAPIProblem(w, http.StatusInternalServerError, "Phone menu unavailable", "RingRing could not safely refresh this phone menu. Please try again.")
 		return
 	}
-	destinations := phoneCallDestinations(device.Extension, members, availableFirstCallLines(party, services, a.cfg.AIAdultOnlyEnabled, device.AdultExtension))
+	destinations := phoneCallDestinations(device.Extension, members, availableFirstCallLines(party, services))
 	activeCalls, _, _, _ := a.activePartyCalls(r.Context(), device.PartyID, members, false)
 	for _, call := range activeCalls {
 		participants := append([]string(nil), call.Participants...)
 		sort.Strings(participants)
-		label := "Join a live call"
+		label := "Party call in progress"
 		if len(participants) > 0 {
-			label = "Join " + strings.Join(participants, " + ")
+			label = strings.Join(participants, " + ")
 		}
-		detail := "A party call is happening now."
+		detail := "On a call now — tap to join."
 		if call.PhoneCount == 1 {
-			detail = "1 phone is talking now."
+			detail = "1 phone is on the call — tap to join."
 		} else if call.PhoneCount > 1 {
-			detail = strconv.Itoa(call.PhoneCount) + " phones are talking now."
+			detail = strconv.Itoa(call.PhoneCount) + " phones are on the call — tap to join."
 		}
 		destinations = append(destinations, provisioning.PhoneDestination{
 			Kind: "call", Label: label, Detail: detail, Dial: call.JoinNumber,

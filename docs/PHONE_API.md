@@ -21,14 +21,13 @@ A general invitation is the 48-hour `/join/{token}` link and QR a host makes bef
 1. Accept only an HTTPS URL whose exact path is `/join/{token}` with a 43-character URL-safe token. Do not send the URL to a browser, link preview, analytics service, or QR service.
 2. Derive the API URL on the same origin: `/api/v1/phone-invitations/{token}`.
 3. `GET` that API URL with redirects, cookies, and caching disabled. This preview does **not** consume the invitation and returns only `version`, `party_name`, and `suggested_extension`.
-4. Show the party name, collect a 1–40 character phone/member label, offer the suggested 2–5 digit extension, and explicitly ask whether this is an adult extension. Public emergency and crisis numbers are reserved and must not be offered.
+4. Show the party name, collect a 1–40 character phone/member label, and offer the suggested 2–5 digit extension. Public emergency and crisis numbers are reserved and must not be offered.
 5. `POST` one `application/json` claim to the same URL:
 
    ```json
    {
      "display_name": "Studio phone",
      "extension": "103",
-     "adult_extension": false,
      "device_label": "Phone app"
    }
    ```

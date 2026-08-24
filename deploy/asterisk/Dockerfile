@@ -37,11 +37,14 @@ RUN apt-get update \
 COPY --from=build /stage/usr/ /usr/
 COPY --from=build /stage/var/lib/asterisk/ /var/lib/asterisk/
 COPY config/ /etc/asterisk/
+COPY sounds/ /var/lib/asterisk/sounds/
 COPY entrypoint.sh /usr/local/bin/ringring-asterisk-entrypoint
 COPY refresh-tls.sh /usr/local/bin/ringring-asterisk-refresh-tls
 RUN find /etc/asterisk -maxdepth 1 -type f -exec chown asterisk:ringring {} + \
-    && find /etc/asterisk -maxdepth 1 -type f -exec chmod 0640 {} + \
-    && chmod 0755 /usr/local/bin/ringring-asterisk-entrypoint /usr/local/bin/ringring-asterisk-refresh-tls
+	&& find /etc/asterisk -maxdepth 1 -type f -exec chmod 0640 {} + \
+	&& find /var/lib/asterisk/sounds -type f -name 'ringring-*.wav' -exec chown asterisk:ringring {} + \
+	&& find /var/lib/asterisk/sounds -type f -name 'ringring-*.wav' -exec chmod 0644 {} + \
+	&& chmod 0755 /usr/local/bin/ringring-asterisk-entrypoint /usr/local/bin/ringring-asterisk-refresh-tls
 
 EXPOSE 5060/udp 5061/tcp 5038/tcp 10000-10199/udp
 ENTRYPOINT ["/usr/local/bin/ringring-asterisk-entrypoint"]

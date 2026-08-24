@@ -380,32 +380,32 @@ func TestPartyCallConferencesAreScopedEphemeralAndNeverRecorded(t *testing.T) {
 	}
 }
 
-func TestAIConversationRequiresAdultExtensionAtEveryBoundary(t *testing.T) {
-	required := map[string][]string{
-		".env.example":                      {"AI_ADULT_ONLY_ENABLED=false"},
-		"ringringctl":                       {"AI_ADULT_ONLY_ENABLED=false", "AI_ADULT_ONLY_ENABLED must be true or false", "ringring verify-openai-retention"},
-		"cmd/ringring/main.go":              {"EnforceAIAdultOnlyGate", "AIAdultAccess: database", "AIAdultOnlyEnabled: cfg.AIAdultOnlyEnabled"},
-		"internal/config/config.go":         {`envStrictBool("AI_ADULT_ONLY_ENABLED", false)`},
-		"internal/openaiadmin/client.go":    {"/organization/data_retention", "/data_retention", "organization_default", "none", "zero_data_retention", "enhanced_zero_data_retention", "has not enabled Zero Data Retention"},
-		"internal/store/store.go":           {"ErrAIAdultOnly", "input.AIEnabled && !input.AIAdultOnlyEnabled", "EnforceAIAdultOnlyGate", "m.adult_extension = 1", "d.revoked_at IS NULL"},
-		"internal/telephony/reconciler.go":  {"!r.AIAdultOnlyEnabled", "services[index].AIEnabled = false"},
-		"internal/telephony/render.go":      {"${CHANNEL(endpoint)}", "RINGRING_AI_DENIED"},
-		"internal/voice/ai.go":              {"!s.AIAdultOnlyEnabled", "AI conversation adult-only gate is closed", "AIAdultAccessForDevice"},
-		"internal/webapp/app.go":            {"aiEnabled && !a.cfg.AIAdultOnlyEnabled", `r.FormValue("adult_extension")`, "AdultExtension: adultExtension"},
-		"scripts/restore-drill.sh":          {"--env AI_ADULT_ONLY_ENABLED=false"},
+func TestAIConversationIsAbsentFromRuntimeAndUserInterfaces(t *testing.T) {
+	forbidden := map[string][]string{
+		".env.example":                      {"AI_AUDIO_ADDR", "AI_REALTIME_MODEL", "AI_ADULT_ONLY_ENABLED"},
+		"compose.yaml":                      {`"4574"`},
+		"ringringctl":                       {"AI_AUDIO_ADDR", "AI_ADULT_ONLY_ENABLED"},
+		"cmd/ringring/main.go":              {"ServeAudioSocket", "AIAdultAccess:", "AIAudioAddr"},
+		"internal/config/config.go":         {"AIAudioAddr", "AIRealtimeModel", "AIAdultOnlyEnabled"},
+		"internal/telephony/render.go":      {"exten => *14", "ai-authorize", "AudioSocket"},
+		"internal/telephony/reconciler.go":  {"AIAdultOnlyEnabled"},
+		"internal/voice/server.go":          {`case "ai-authorize"`, "AIAdultAccessSource"},
+		"internal/webapp/app.go":            {`r.FormValue("ai_enabled")`, `r.FormValue("adult_extension")`},
+		"web/templates/home.html":           {"AI chat", ">*14<"},
 		"web/templates/join.html":           {`name="adult_extension"`, "Adult extension (18+)"},
-		"web/templates/party_settings.html": {"$conversationReady", "Only adult extensions can call", "provider retention may apply"},
+		"web/templates/party_settings.html": {`name="ai_enabled"`, "RingRing AI · adults only"},
+		"ios/RingRing/Views.swift":          {"Adult extension (18+)", `case "*14"`},
 	}
-	for filename, markers := range required {
+	for filename, markers := range forbidden {
 		contents := readRepositoryFile(t, filename)
 		for _, marker := range markers {
-			if !strings.Contains(contents, marker) {
-				t.Errorf("%s is missing adult-extension boundary %q", filename, marker)
+			if strings.Contains(contents, marker) {
+				t.Errorf("%s retained removed AI conversation marker %q", filename, marker)
 			}
 		}
 	}
-	if strings.Contains(readRepositoryFile(t, "internal/voice/ai.go"), "WAIT FOR DIGIT 8000") {
-		t.Fatal("adult extension authorization must not add a repeated keypad confirmation")
+	if _, err := os.Stat(filepath.Join(repositoryRoot(t), "internal/voice/ai.go")); !os.IsNotExist(err) {
+		t.Fatalf("removed AI conversation bridge still exists: %v", err)
 	}
 }
 
@@ -497,7 +497,7 @@ func TestMemberWeatherStaysBoundedToAuthenticatedExtensionAndHostParty(t *testin
 		},
 		"internal/voice/server.go": {
 			"WeatherLocationForDevice(ctx, partyID, endpoint)", "location.MemberID",
-			"weather-v2-", "save the place for this extension",
+			"weatherCacheVersion", "save the place for this extension",
 		},
 		"internal/webapp/app.go": {
 			`POST /parties/{partyID}/members/{memberID}/weather`, "updateMemberWeather",
@@ -554,7 +554,7 @@ func TestPhoneProvisioningAPIKeepsTheOneTimePartyBoundary(t *testing.T) {
 	required := map[string][]string{
 		"internal/webapp/app.go": {
 			`GET /openapi.yaml`, `GET /api/v1/phone-provisioning/{token}`, `GET /provision/ios/{token}`,
-			"phoneProvisioningDocument", "ConsumeProvisioningToken", "device.PartyID", "device.MemberID",
+			"phoneProvisioningDocument", "ConsumeProvisioningToken", "device.PartyID",
 			`w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")`, `Type: "about:blank"`,
 		},
 		"internal/webapp/ratelimit.go": {
@@ -684,8 +684,7 @@ func TestPrivateFirstCallCardStaysInsideSuccessfulMemberSetup(t *testing.T) {
 	for _, marker := range []string{
 		"type callDirectoryEntry struct", "DisplayName string", "Extension   string",
 		"directoryMembers, err := a.store.ListMembers", "data.CallDirectory = privateCallDirectory(directoryMembers)",
-		"device.RevokedAt == nil", "availableFirstCallLines(party, services, a.cfg.AIAdultOnlyEnabled, member.AdultExtension)",
-		`services.AIEnabled && voiceReady && adultOnlyEnabled && memberAdultAllowed`,
+		"device.RevokedAt == nil", "availableFirstCallLines(party, services)",
 	} {
 		if !strings.Contains(app, marker) {
 			t.Errorf("internal/webapp/app.go is missing private first-call boundary %q", marker)

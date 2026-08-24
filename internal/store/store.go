@@ -35,7 +35,6 @@ var (
 	ErrOpenAISpendLimit = errors.New("OpenAI spend limit state changed")
 	ErrInvalidRadio     = errors.New("radio station is not in the catalog")
 	ErrInvalidWeather   = errors.New("weather location is invalid")
-	ErrAIAdultOnly      = errors.New("AI conversation adult-only gate is closed")
 )
 
 const MaxDevicesPerMember = 8
@@ -84,7 +83,6 @@ type NewClaim struct {
 	MemberID            string
 	DisplayName         string
 	Extension           string
-	AdultExtension      bool
 	DeviceID            string
 	DeviceLabel         string
 	SIPUsername         string
@@ -142,8 +140,6 @@ type ServiceSettingsInput struct {
 	WeatherLongitude    float64
 	RadioEnabled        bool
 	RadioStation        string
-	AIEnabled           bool
-	AIAdultOnlyEnabled  bool
 	UpdatedAt           time.Time
 }
 
@@ -182,9 +178,9 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate database: %w", err)
 	}
-	if err := ensurePartyServicesAIColumn(db); err != nil {
+	if err := ensureLegacyPartyServicesAIColumn(db); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("migrate AI service setting: %w", err)
+		return nil, fmt.Errorf("preserve legacy AI service column: %w", err)
 	}
 	if err := ensurePartyServicesRadioStationColumn(db); err != nil {
 		_ = db.Close()
@@ -202,9 +198,9 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate OpenAI spend limit state: %w", err)
 	}
-	if err := ensureMemberAdultExtensionColumn(db); err != nil {
+	if err := ensureLegacyMemberAdultExtensionColumn(db); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("migrate adult extension setting: %w", err)
+		return nil, fmt.Errorf("preserve legacy adult extension column: %w", err)
 	}
 	if err := ensureMemberWeatherColumns(db); err != nil {
 		_ = db.Close()
@@ -266,7 +262,7 @@ func ensureMemberWeatherColumns(db *sql.DB) error {
 	return err
 }
 
-func ensureMemberAdultExtensionColumn(db *sql.DB) error {
+func ensureLegacyMemberAdultExtensionColumn(db *sql.DB) error {
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('members') WHERE name = 'adult_extension'`).Scan(&count); err != nil {
 		return err
@@ -391,7 +387,7 @@ func ensurePartyServicesWeatherSetupColumn(db *sql.DB) error {
 	return err
 }
 
-func ensurePartyServicesAIColumn(db *sql.DB) error {
+func ensureLegacyPartyServicesAIColumn(db *sql.DB) error {
 	rows, err := db.Query(`PRAGMA table_info(party_services)`)
 	if err != nil {
 		return err
@@ -753,14 +749,14 @@ func (s *Store) SetPartyOpenAIKeyRotationStatus(ctx context.Context, partyID, ho
 
 func (s *Store) PartyServices(ctx context.Context, partyID string) (model.PartyServices, error) {
 	var services model.PartyServices
-	var timeEnabled, weatherEnabled, weatherSetupAllowed, radioEnabled, aiEnabled int
+	var timeEnabled, weatherEnabled, weatherSetupAllowed, radioEnabled int
 	var updated int64
 	err := s.db.QueryRowContext(ctx, `
 		SELECT party_id, time_enabled, weather_enabled, weather_setup_allowed, weather_query, weather_label,
-			weather_latitude, weather_longitude, radio_enabled, radio_station, ai_enabled, updated_at
+			weather_latitude, weather_longitude, radio_enabled, radio_station, updated_at
 		FROM party_services WHERE party_id = ?`, partyID).Scan(
 		&services.PartyID, &timeEnabled, &weatherEnabled, &weatherSetupAllowed, &services.WeatherQuery, &services.WeatherLabel,
-		&services.WeatherLatitude, &services.WeatherLongitude, &radioEnabled, &services.RadioStation, &aiEnabled, &updated,
+		&services.WeatherLatitude, &services.WeatherLongitude, &radioEnabled, &services.RadioStation, &updated,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		if _, err := s.partyByID(ctx, partyID); err != nil {
@@ -775,15 +771,11 @@ func (s *Store) PartyServices(ctx context.Context, partyID string) (model.PartyS
 	services.WeatherEnabled = weatherEnabled != 0
 	services.WeatherSetupAllowed = weatherSetupAllowed != 0
 	services.RadioEnabled = radioEnabled != 0
-	services.AIEnabled = aiEnabled != 0
 	services.UpdatedAt = fromUnix(updated)
 	return services, nil
 }
 
 func (s *Store) UpdatePartyServices(ctx context.Context, partyID, hostUserID string, input ServiceSettingsInput) (model.PartyServices, error) {
-	if input.AIEnabled && !input.AIAdultOnlyEnabled {
-		return model.PartyServices{}, ErrAIAdultOnly
-	}
 	station, ok := radio.Resolve(input.RadioStation)
 	if !ok {
 		return model.PartyServices{}, ErrInvalidRadio
@@ -807,7 +799,7 @@ func (s *Store) UpdatePartyServices(ctx context.Context, partyID, hostUserID str
 			ai_enabled = excluded.ai_enabled,
 			updated_at = excluded.updated_at`,
 		boolInt(input.TimeEnabled), boolInt(input.WeatherEnabled), boolInt(input.WeatherSetupAllowed), input.WeatherQuery, input.WeatherLabel,
-		input.WeatherLatitude, input.WeatherLongitude, boolInt(input.RadioEnabled), station.ID, boolInt(input.AIEnabled), unix(input.UpdatedAt), partyID, hostUserID,
+		input.WeatherLatitude, input.WeatherLongitude, boolInt(input.RadioEnabled), station.ID, 0, unix(input.UpdatedAt), partyID, hostUserID,
 	)
 	if err != nil {
 		return model.PartyServices{}, fmt.Errorf("update party services: %w", err)
@@ -819,7 +811,7 @@ func (s *Store) UpdatePartyServices(ctx context.Context, partyID, hostUserID str
 		PartyID: partyID, TimeEnabled: input.TimeEnabled, WeatherEnabled: input.WeatherEnabled, WeatherSetupAllowed: input.WeatherSetupAllowed,
 		WeatherQuery: input.WeatherQuery, WeatherLabel: input.WeatherLabel,
 		WeatherLatitude: input.WeatherLatitude, WeatherLongitude: input.WeatherLongitude,
-		RadioEnabled: input.RadioEnabled, RadioStation: station.ID, AIEnabled: input.AIEnabled, UpdatedAt: input.UpdatedAt.UTC(),
+		RadioEnabled: input.RadioEnabled, RadioStation: station.ID, UpdatedAt: input.UpdatedAt.UTC(),
 	}, nil
 }
 
@@ -915,35 +907,14 @@ func validWeatherLocation(input WeatherLocationInput) bool {
 		input.Latitude >= -90 && input.Latitude <= 90 && input.Longitude >= -180 && input.Longitude <= 180 && !input.UpdatedAt.IsZero()
 }
 
-// EnforceAIAdultOnlyGate clears every durable conversation-line preference
-// while the operator gate is closed. This keeps upgrades and rollbacks fail
-// closed even when an older database contains an enabled *14 setting.
-func (s *Store) EnforceAIAdultOnlyGate(ctx context.Context, enabled bool, now time.Time) error {
-	if enabled {
-		return nil
-	}
+// DisableLegacyAIConversation clears the retired conversation-line preference.
+// The column remains only for forward-only SQLite and rollback compatibility.
+func (s *Store) DisableLegacyAIConversation(ctx context.Context, now time.Time) error {
 	if _, err := s.db.ExecContext(ctx, `
 		UPDATE party_services SET ai_enabled = 0, updated_at = ? WHERE ai_enabled = 1`, unix(now)); err != nil {
-		return fmt.Errorf("close AI conversation adult-only gate: %w", err)
+		return fmt.Errorf("disable legacy AI conversation: %w", err)
 	}
 	return nil
-}
-
-// AIAdultAccessForDevice authorizes from Asterisk's authenticated endpoint,
-// not caller ID. Unknown, revoked, cross-party, and unapproved devices all
-// return the same closed result.
-func (s *Store) AIAdultAccessForDevice(ctx context.Context, partyID, sipUsername string) (bool, error) {
-	var allowed int
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM devices d
-			JOIN members m ON m.id = d.member_id
-			WHERE m.party_id = ? AND d.sip_username = ? AND d.revoked_at IS NULL
-				AND m.adult_extension = 1
-		)`, partyID, sipUsername).Scan(&allowed); err != nil {
-		return false, fmt.Errorf("check member adult AI access: %w", err)
-	}
-	return allowed == 1, nil
 }
 
 // PartyMemberForDevice resolves the friendly name used for an active-call
@@ -951,81 +922,22 @@ func (s *Store) AIAdultAccessForDevice(ctx context.Context, partyID, sipUsername
 // cross-party, and unknown devices receive the same not-found result.
 func (s *Store) PartyMemberForDevice(ctx context.Context, partyID, sipUsername string) (model.Member, error) {
 	var member model.Member
-	var adultExtension int
 	var created int64
 	err := s.db.QueryRowContext(ctx, `
-		SELECT m.id, m.party_id, m.display_name, m.extension, m.adult_extension, m.created_at
+		SELECT m.id, m.party_id, m.display_name, m.extension, m.created_at
 		FROM devices d
 		JOIN members m ON m.id = d.member_id
 		WHERE m.party_id = ? AND d.sip_username = ? AND d.revoked_at IS NULL`,
 		partyID, sipUsername,
-	).Scan(&member.ID, &member.PartyID, &member.DisplayName, &member.Extension, &adultExtension, &created)
+	).Scan(&member.ID, &member.PartyID, &member.DisplayName, &member.Extension, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.Member{}, ErrNotFound
 	}
 	if err != nil {
 		return model.Member{}, fmt.Errorf("load party member from phone: %w", err)
 	}
-	member.AdultExtension = adultExtension == 1
 	member.CreatedAt = fromUnix(created)
 	return member, nil
-}
-
-// OperatorDisclosureForDevice reports whether the member extension belonging
-// to an active authenticated device has already heard the RingRing operator's
-// AI-voice disclosure. Devices on the same extension deliberately share this
-// one bit of state; no call, destination, reason, or audio data is retained.
-func (s *Store) OperatorDisclosureForDevice(ctx context.Context, partyID, sipUsername string) (bool, error) {
-	var disclosed int
-	err := s.db.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM operator_disclosures o WHERE o.member_id = m.id
-		)
-		FROM devices d
-		JOIN members m ON m.id = d.member_id
-		WHERE m.party_id = ? AND d.sip_username = ? AND d.revoked_at IS NULL`,
-		partyID, sipUsername,
-	).Scan(&disclosed)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, ErrNotFound
-	}
-	if err != nil {
-		return false, fmt.Errorf("check operator disclosure: %w", err)
-	}
-	return disclosed == 1, nil
-}
-
-// MarkOperatorDisclosureForDevice records only that the member extension has
-// successfully heard the disclosure. The active device and party join keeps
-// the update inside the authenticated caller's party boundary.
-func (s *Store) MarkOperatorDisclosureForDevice(ctx context.Context, partyID, sipUsername string, disclosedAt time.Time) error {
-	result, err := s.db.ExecContext(ctx, `
-		INSERT INTO operator_disclosures (member_id, disclosed_at)
-		SELECT m.id, ?
-		FROM devices d
-		JOIN members m ON m.id = d.member_id
-		WHERE m.party_id = ? AND d.sip_username = ? AND d.revoked_at IS NULL
-		ON CONFLICT(member_id) DO NOTHING`, unix(disclosedAt), partyID, sipUsername)
-	if err != nil {
-		return fmt.Errorf("mark operator disclosure: %w", err)
-	}
-	if rows, err := result.RowsAffected(); err != nil {
-		return fmt.Errorf("count marked operator disclosures: %w", err)
-	} else if rows == 0 {
-		var active int
-		if err := s.db.QueryRowContext(ctx, `
-			SELECT EXISTS (
-				SELECT 1 FROM devices d
-				JOIN members m ON m.id = d.member_id
-				WHERE m.party_id = ? AND d.sip_username = ? AND d.revoked_at IS NULL
-			)`, partyID, sipUsername).Scan(&active); err != nil {
-			return fmt.Errorf("verify operator disclosure device: %w", err)
-		}
-		if active == 0 {
-			return ErrNotFound
-		}
-	}
-	return nil
 }
 
 // ListOpenAIProjectIDs returns the provider projects that could supply a party
@@ -1235,7 +1147,7 @@ func (s *Store) ClaimInvitation(ctx context.Context, input NewClaim) (model.Part
 
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO members (id, party_id, display_name, extension, adult_extension, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)`, input.MemberID, partyID, input.DisplayName, input.Extension, boolInt(input.AdultExtension), unix(input.Now))
+		VALUES (?, ?, ?, ?, 0, ?)`, input.MemberID, partyID, input.DisplayName, input.Extension, unix(input.Now))
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return model.Party{}, model.Member{}, model.Device{}, ErrExtensionTaken
@@ -1278,7 +1190,7 @@ func (s *Store) ClaimInvitation(ctx context.Context, input NewClaim) (model.Part
 		return model.Party{}, model.Member{}, model.Device{}, fmt.Errorf("commit invitation claim: %w", err)
 	}
 
-	member := model.Member{ID: input.MemberID, PartyID: partyID, DisplayName: input.DisplayName, Extension: input.Extension, AdultExtension: input.AdultExtension, CreatedAt: input.Now.UTC()}
+	member := model.Member{ID: input.MemberID, PartyID: partyID, DisplayName: input.DisplayName, Extension: input.Extension, CreatedAt: input.Now.UTC()}
 	device := model.Device{ID: input.DeviceID, MemberID: input.MemberID, Label: input.DeviceLabel, SIPUsername: input.SIPUsername, SIPSecretCiphertext: input.SIPSecretCiphertext, CreatedAt: input.Now.UTC()}
 	return party, member, device, nil
 }
@@ -1308,7 +1220,7 @@ func (s *Store) SuggestedExtension(ctx context.Context, partyID string) (string,
 
 func (s *Store) ListMembers(ctx context.Context, partyID string) ([]model.Member, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.id, m.party_id, m.display_name, m.extension, m.adult_extension,
+		SELECT m.id, m.party_id, m.display_name, m.extension,
 			m.weather_query, m.weather_label, m.weather_latitude, m.weather_longitude, m.weather_updated_at, m.created_at,
 			d.id, d.label, d.sip_username, d.created_at, d.revoked_at,
 			r.echo_tested_at, r.outgoing_call_tested_at, r.incoming_call_tested_at
@@ -1326,12 +1238,11 @@ func (s *Store) ListMembers(ctx context.Context, partyID string) ([]model.Member
 	byID := make(map[string]int)
 	for rows.Next() {
 		var member model.Member
-		var adultExtension int
 		var memberCreated int64
 		var weatherUpdated sql.NullInt64
 		var deviceID, deviceLabel, sipUsername sql.NullString
 		var deviceCreated, revoked, echoTested, outgoingTested, incomingTested sql.NullInt64
-		if err := rows.Scan(&member.ID, &member.PartyID, &member.DisplayName, &member.Extension, &adultExtension,
+		if err := rows.Scan(&member.ID, &member.PartyID, &member.DisplayName, &member.Extension,
 			&member.Weather.Query, &member.Weather.Label, &member.Weather.Latitude, &member.Weather.Longitude, &weatherUpdated, &memberCreated,
 			&deviceID, &deviceLabel, &sipUsername, &deviceCreated, &revoked,
 			&echoTested, &outgoingTested, &incomingTested); err != nil {
@@ -1339,7 +1250,6 @@ func (s *Store) ListMembers(ctx context.Context, partyID string) ([]model.Member
 		}
 		index, ok := byID[member.ID]
 		if !ok {
-			member.AdultExtension = adultExtension == 1
 			member.Weather.MemberID = member.ID
 			if weatherUpdated.Valid {
 				member.Weather.UpdatedAt = fromUnix(weatherUpdated.Int64)
@@ -1798,9 +1708,7 @@ func (s *Store) RoutingServices(ctx context.Context) ([]model.RoutingServices, e
 			CASE WHEN COALESCE(s.weather_enabled, 0) = 1 AND COALESCE(s.weather_setup_allowed, 1) = 1 AND p.openai_status = 'ready'
 				AND p.openai_spend_limit_status NOT IN ('updating', 'update-error') THEN 1 ELSE 0 END,
 			COALESCE(s.radio_enabled, 0),
-			COALESCE(s.radio_station, 'groove-salad'),
-			CASE WHEN COALESCE(s.ai_enabled, 0) = 1 AND p.openai_status = 'ready'
-				AND p.openai_spend_limit_status NOT IN ('updating', 'update-error') THEN 1 ELSE 0 END
+			COALESCE(s.radio_station, 'groove-salad')
 		FROM parties p LEFT JOIN party_services s ON s.party_id = p.id
 		ORDER BY p.id`)
 	if err != nil {
@@ -1810,8 +1718,8 @@ func (s *Store) RoutingServices(ctx context.Context) ([]model.RoutingServices, e
 	var services []model.RoutingServices
 	for rows.Next() {
 		var item model.RoutingServices
-		var timeEnabled, weatherEnabled, weatherSetupEnabled, radioEnabled, aiEnabled int
-		if err := rows.Scan(&item.PartyID, &timeEnabled, &weatherEnabled, &weatherSetupEnabled, &radioEnabled, &item.RadioStation, &aiEnabled); err != nil {
+		var timeEnabled, weatherEnabled, weatherSetupEnabled, radioEnabled int
+		if err := rows.Scan(&item.PartyID, &timeEnabled, &weatherEnabled, &weatherSetupEnabled, &radioEnabled, &item.RadioStation); err != nil {
 			return nil, fmt.Errorf("scan routing services: %w", err)
 		}
 		item.TimeEnabled = timeEnabled != 0
@@ -1821,7 +1729,6 @@ func (s *Store) RoutingServices(ctx context.Context) ([]model.RoutingServices, e
 		if _, ok := radio.Lookup(item.RadioStation); !ok {
 			return nil, errors.New("routing state contains an unsupported radio station")
 		}
-		item.AIEnabled = aiEnabled != 0
 		services = append(services, item)
 	}
 	return services, rows.Err()
@@ -2053,11 +1960,6 @@ CREATE TABLE IF NOT EXISTS devices (
     revoked_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS devices_member ON devices(member_id);
-
-CREATE TABLE IF NOT EXISTS operator_disclosures (
-    member_id TEXT PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
-    disclosed_at INTEGER NOT NULL CHECK(disclosed_at > 0)
-);
 
 CREATE TABLE IF NOT EXISTS device_readiness (
     device_id TEXT PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,

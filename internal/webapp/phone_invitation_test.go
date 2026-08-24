@@ -134,7 +134,7 @@ func TestPhoneInvitationAPIClaimsAnExtensionAndReturnsPhoneSettings(t *testing.T
 	}
 
 	claimResponse := postPhoneInvitation(t, server.Client(), inviteURL, phoneInvitationClaim{
-		DisplayName: "Workshop phone", Extension: "102", AdultExtension: false, DeviceLabel: "iPhone app",
+		DisplayName: "Workshop phone", Extension: "102", DeviceLabel: "iPhone app",
 	})
 	claimBody := readBody(t, claimResponse)
 	if claimResponse.StatusCode != http.StatusOK || !strings.Contains(claimResponse.Header.Get("Cache-Control"), "no-store") {

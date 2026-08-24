@@ -51,7 +51,6 @@ type PartyServices struct {
 	WeatherLongitude    float64
 	RadioEnabled        bool
 	RadioStation        string
-	AIEnabled           bool
 	UpdatedAt           time.Time
 }
 
@@ -62,7 +61,6 @@ type RoutingServices struct {
 	WeatherSetupEnabled bool
 	RadioEnabled        bool
 	RadioStation        string
-	AIEnabled           bool
 }
 
 type Invitation struct {
@@ -75,14 +73,13 @@ type Invitation struct {
 }
 
 type Member struct {
-	ID             string
-	PartyID        string
-	DisplayName    string
-	Extension      string
-	AdultExtension bool
-	Weather        WeatherLocation
-	CreatedAt      time.Time
-	Devices        []Device
+	ID          string
+	PartyID     string
+	DisplayName string
+	Extension   string
+	Weather     WeatherLocation
+	CreatedAt   time.Time
+	Devices     []Device
 }
 
 // WeatherLocation belongs to one member/extension. Multiple phones on that

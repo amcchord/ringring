@@ -43,7 +43,6 @@ type Registry struct {
 	http            map[httpKey]httpValue
 	reconciliations map[string]uint64
 	voice           map[voiceKey]uint64
-	aiActive        int
 }
 
 type HealthSnapshot struct {
@@ -153,18 +152,6 @@ func (r *Registry) ObserveVoice(service, result string) {
 	r.mu.Unlock()
 }
 
-func (r *Registry) SetAIActive(active int) {
-	if r == nil {
-		return
-	}
-	if active < 0 {
-		active = 0
-	}
-	r.mu.Lock()
-	r.aiActive = active
-	r.mu.Unlock()
-}
-
 func (r *Registry) Handler(snapshot HealthSnapshotFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/metrics" {
@@ -196,7 +183,6 @@ type registrySnapshot struct {
 	http            map[httpKey]httpValue
 	reconciliations map[string]uint64
 	voice           map[voiceKey]uint64
-	aiActive        int
 }
 
 func (r *Registry) snapshot() registrySnapshot {
@@ -211,7 +197,6 @@ func (r *Registry) snapshot() registrySnapshot {
 		http:            make(map[httpKey]httpValue, len(r.http)),
 		reconciliations: make(map[string]uint64, len(r.reconciliations)),
 		voice:           make(map[voiceKey]uint64, len(r.voice)),
-		aiActive:        r.aiActive,
 	}
 	for key, value := range r.http {
 		copy.http[key] = value
@@ -287,8 +272,6 @@ func (r *Registry) render(health HealthSnapshot) string {
 	for _, key := range voiceKeys {
 		fmt.Fprintf(&output, "ringring_voice_service_requests_total{service=\"%s\",result=\"%s\"} %d\n", key.service, key.result, snapshot.voice[key])
 	}
-	writeMetricHelp(&output, "ringring_ai_calls_active", "Current AI AudioSocket bridges without caller or party labels.", "gauge")
-	fmt.Fprintf(&output, "ringring_ai_calls_active %d\n", snapshot.aiActive)
 	return output.String()
 }
 
@@ -331,7 +314,7 @@ func normalizeStatus(status int) string {
 
 func normalizeVoiceService(value string) string {
 	switch value {
-	case "weather", "operator", "ai_authorize", "ai_bridge", "extension", "conference_join":
+	case "weather", "operator", "extension", "conference_join":
 		return value
 	default:
 		return "other"

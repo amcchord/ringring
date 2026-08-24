@@ -13,7 +13,6 @@ type PhoneDevice struct {
 	PartyID             string
 	MemberID            string
 	Extension           string
-	AdultExtension      bool
 	SIPUsername         string
 	SIPSecretCiphertext string
 }
@@ -41,13 +40,12 @@ func ensurePhonePushTable(db *sql.DB) error {
 
 func (s *Store) PhoneDeviceBySIPUsername(ctx context.Context, username string) (PhoneDevice, error) {
 	var device PhoneDevice
-	var adult int
 	err := s.db.QueryRowContext(ctx, `
-		SELECT d.id, m.party_id, m.id, m.extension, m.adult_extension,
+		SELECT d.id, m.party_id, m.id, m.extension,
 			d.sip_username, d.sip_secret_ciphertext
 		FROM devices d JOIN members m ON m.id = d.member_id
 		WHERE d.sip_username = ? AND d.revoked_at IS NULL`, username).Scan(
-		&device.DeviceID, &device.PartyID, &device.MemberID, &device.Extension, &adult,
+		&device.DeviceID, &device.PartyID, &device.MemberID, &device.Extension,
 		&device.SIPUsername, &device.SIPSecretCiphertext,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -56,7 +54,6 @@ func (s *Store) PhoneDeviceBySIPUsername(ctx context.Context, username string) (
 	if err != nil {
 		return PhoneDevice{}, fmt.Errorf("load phone API device: %w", err)
 	}
-	device.AdultExtension = adult == 1
 	return device, nil
 }
 

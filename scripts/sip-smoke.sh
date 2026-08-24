@@ -143,7 +143,7 @@ docker run -d --name ringring-sip-smoke-app \
   --env DATABASE_PATH=/data/ringring.db --env SIP_PUBLIC_HOST=172.31.89.20 \
   --env ASTERISK_CONFIG_DIR=/asterisk --env ASTERISK_AMI_ADDR=172.31.89.20:5038 \
   --env ASTERISK_AMI_USER=ringring --env ASTERISK_AMI_SECRET=isolatedsmoketest \
-  --env FASTAGI_ADDR=:4573 --env AI_AUDIO_ADDR=:4574 \
+	--env FASTAGI_ADDR=:4573 \
   --env DEV_AUTH=true \
   --volume "$work_directory/app:/data" --volume "$work_directory/state:/asterisk" \
   ringring-app-sip-smoke:local >/dev/null
@@ -403,7 +403,7 @@ docker run -d --name ringring-sip-smoke-phone-b \
   -mi 172.31.89.30 -mp 6000 -m 1 -aa -rtp_echo -trace_msg -trace_err >/dev/null
 sleep 1
 
-echo "Calling extension 102, publishing it live, and joining from another party phone..."
+echo "Calling extension 102, publishing it live, and joining by dialing 102 from another party phone..."
 docker run -d --name ringring-sip-smoke-phone-a \
   --network "$network" --ip 172.31.89.40 --volume "$scenario_mount" \
   --volume "$work_directory/certs:/certs:ro" \
@@ -448,7 +448,7 @@ docker run -d --name ringring-sip-smoke-register-generated \
   --volume "$work_directory/logs/ringring-sip-smoke-register-generated:/logs" --workdir /logs \
   "$sipp_image" 172.31.89.20:5060 -sf /scenarios/friendly-failure.xml \
   -i 172.31.89.60 -p 5066 -mi 172.31.89.60 -mp 7000 \
-  -s '*16102' -au "$added_sip_username" -ap "$added_sip_password" -m 1 -aa \
+  -s 102 -au "$added_sip_username" -ap "$added_sip_password" -m 1 -aa \
   -key branch_tag joincall -key sip_user "$added_sip_username" -trace_msg -trace_err >/dev/null
 
 join_ready=0
@@ -595,4 +595,4 @@ if docker logs ringring-sip-smoke-app 2>&1 | grep -Eq 'change extension from pho
 fi
 channels=$(docker exec ringring-sip-smoke-asterisk asterisk -rx 'core show channels count')
 printf '%s\n' "$channels" | grep -q '^0 active channels'
-echo "SIP smoke test passed: verified TLS 1.2 plus UDP registration, host-added same-extension routing, live three-phone party-call joining with original-caller teardown, mixed-transport extension calling, party-scoped RingRing operator routing with bundled fallback, answered spoken responses for unavailable numbers and star lines, *10 echo, bidirectional RTP, and authenticated *15 DTMF extension selection."
+echo "SIP smoke test passed: verified TLS 1.2 plus UDP registration, host-added same-extension routing, live three-phone party-call joining by dialing the active extension with original-caller teardown, mixed-transport extension calling, party-scoped RingRing operator routing with bundled fallback, answered spoken responses for unavailable numbers and star lines, *10 echo, bidirectional RTP, and authenticated *15 DTMF extension selection."

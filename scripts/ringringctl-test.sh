@@ -200,7 +200,6 @@ assert_successful_install() {
   grep -qx 'HOST_SIGNUP_CODE=rainbow-42' "$config/app.env" || fail 'signup code was not rendered'
   grep -qx 'OPENAI_ADMIN_KEY=sk-admin-abcdefghijklmnop' "$config/app.env" || fail 'OpenAI key was not rendered'
   grep -qx 'OPENAI_PARTY_SPEND_LIMIT_CENTS=2500' "$config/app.env" || fail 'spend ceiling was not rendered'
-  grep -qx 'AI_ADULT_ONLY_ENABLED=false' "$config/app.env" || fail 'adult-only AI gate did not default closed'
   grep -qx 'RINGRING_DOMAIN=phone.example.test' "$checkout/.env" || fail 'Compose domain was not rendered'
   app_ami=$(sed -n 's/^ASTERISK_AMI_SECRET=//p' "$config/app.env")
   asterisk_ami=$(sed -n 's/^ASTERISK_AMI_SECRET=//p' "$config/asterisk.env")
@@ -249,17 +248,11 @@ assert_successful_install() {
   assert_mode "$config/apns" 750
   assert_mode "$config/apns/AuthKey_ABCDEFGHIJ.p8" 440
   grep -q '^docker compose up -d --force-recreate app$' "$log" || fail 'APNs configuration did not recreate the app'
-  sed 's/^AI_ADULT_ONLY_ENABLED=false$/AI_ADULT_ONLY_ENABLED=true/' "$config/app.env" >"$fixture/app.approved.env"
-  chmod 0600 "$fixture/app.approved.env"
-  mv "$fixture/app.approved.env" "$config/app.env"
-  : >"$log"
-  doctor_output=$(run_ctl doctor 2>&1) || fail "doctor rejected the verified approval fixture: $doctor_output"
-  if RINGRING_TEST_FAIL_RETENTION=1 run_ctl openai-retention >/dev/null 2>&1; then
-    fail 'standalone retention check ignored provider verification failure'
-  fi
-  sed 's/^AI_ADULT_ONLY_ENABLED=true$/AI_ADULT_ONLY_ENABLED=false/' "$config/app.env" >"$fixture/app.closed.env"
-  chmod 0600 "$fixture/app.closed.env"
-  mv "$fixture/app.closed.env" "$config/app.env"
+	: >"$log"
+	doctor_output=$(run_ctl doctor 2>&1) || fail "doctor rejected the updated fixture: $doctor_output"
+	if RINGRING_TEST_FAIL_RETENTION=1 run_ctl openai-retention >/dev/null 2>&1; then
+		fail 'standalone retention check ignored provider verification failure'
+	fi
   sed 's/^METRICS_ADDR=.*/METRICS_ADDR=0.0.0.0:9090/' "$config/app.env" >"$fixture/app.invalid-metrics.env"
   chmod 0600 "$fixture/app.invalid-metrics.env"
   mv "$fixture/app.invalid-metrics.env" "$config/app.env"

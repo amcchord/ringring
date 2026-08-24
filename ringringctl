@@ -431,14 +431,9 @@ write_install_configuration() {
     printf 'ASTERISK_CONFIG_DIR=/asterisk\n'
     printf 'ASTERISK_AMI_ADDR=asterisk:5038\n'
     printf 'ASTERISK_AMI_USER=ringring\n'
-    printf 'ASTERISK_AMI_SECRET=%s\n' "$ami_secret"
-    printf 'FASTAGI_ADDR=:4573\n'
-    printf 'AI_AUDIO_ADDR=:4574\n'
-    printf 'AI_REALTIME_MODEL=gpt-realtime-2.1\n'
-    printf 'AI_CALL_MAX_DURATION=3m\n'
-    printf 'AI_MAX_CONCURRENT=2\n'
-    printf 'AI_ADULT_ONLY_ENABLED=false\n'
-    printf 'VOICE_AUDIO_DIR=/asterisk/audio\n'
+		printf 'ASTERISK_AMI_SECRET=%s\n' "$ami_secret"
+		printf 'FASTAGI_ADDR=:4573\n'
+		printf 'VOICE_AUDIO_DIR=/asterisk/audio\n'
     printf 'VOICE_PLAYBACK_DIR=/var/lib/ringring/asterisk/audio\n'
     printf 'TZ=%s\n' "$timezone"
   } >"$staging/app.env"
@@ -481,11 +476,6 @@ validate_installed_configuration() {
   test -n "$(env_value "$config_dir/app.env" SESSION_SECRET)" || die "The session secret is empty."
   metrics_address=$(optional_env_value "$config_dir/app.env" METRICS_ADDR)
   test -z "$metrics_address" || test "$metrics_address" = 127.0.0.1:9090 || die "METRICS_ADDR must remain on 127.0.0.1:9090."
-  ai_adult_only_enabled=$(optional_env_value "$config_dir/app.env" AI_ADULT_ONLY_ENABLED)
-  case "$ai_adult_only_enabled" in
-    ''|true|false) ;;
-    *) die "AI_ADULT_ONLY_ENABLED must be true or false." ;;
-  esac
   apns_team_id=$(optional_env_value "$config_dir/app.env" APNS_TEAM_ID)
   apns_key_id=$(optional_env_value "$config_dir/app.env" APNS_KEY_ID)
   apns_private_key=$(optional_env_value "$config_dir/app.env" APNS_PRIVATE_KEY_FILE)

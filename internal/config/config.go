@@ -30,11 +30,6 @@ type Config struct {
 	AsteriskAMIUser            string
 	AsteriskAMISecret          string
 	FastAGIAddr                string
-	AIAudioAddr                string
-	AIRealtimeModel            string
-	AICallMaxDuration          time.Duration
-	AIMaxConcurrent            int
-	AIAdultOnlyEnabled         bool
 	APNSTeamID                 string
 	APNSKeyID                  string
 	APNSPrivateKeyFile         string
@@ -47,10 +42,6 @@ type Config struct {
 }
 
 func Load() (Config, error) {
-	aiAdultOnlyEnabled, err := envStrictBool("AI_ADULT_ONLY_ENABLED", false)
-	if err != nil {
-		return Config{}, err
-	}
 	cfg := Config{
 		Environment:                env("APP_ENV", "development"),
 		HTTPAddr:                   env("HTTP_ADDR", ":8080"),
@@ -68,11 +59,6 @@ func Load() (Config, error) {
 		AsteriskAMIUser:            env("ASTERISK_AMI_USER", "ringring"),
 		AsteriskAMISecret:          os.Getenv("ASTERISK_AMI_SECRET"),
 		FastAGIAddr:                env("FASTAGI_ADDR", ":4573"),
-		AIAudioAddr:                env("AI_AUDIO_ADDR", ":4574"),
-		AIRealtimeModel:            env("AI_REALTIME_MODEL", "gpt-realtime-2.1"),
-		AICallMaxDuration:          envDuration("AI_CALL_MAX_DURATION", 3*time.Minute),
-		AIMaxConcurrent:            envInt("AI_MAX_CONCURRENT", 2),
-		AIAdultOnlyEnabled:         aiAdultOnlyEnabled,
 		APNSTeamID:                 os.Getenv("APNS_TEAM_ID"),
 		APNSKeyID:                  os.Getenv("APNS_KEY_ID"),
 		APNSPrivateKeyFile:         os.Getenv("APNS_PRIVATE_KEY_FILE"),
@@ -88,12 +74,16 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("APP_BASE_URL: %w", err)
 	}
 
-	if cfg.MasterKey, err = decodeKey("RINGRING_MASTER_KEY"); err != nil {
+	masterKey, err := decodeKey("RINGRING_MASTER_KEY")
+	if err != nil {
 		return Config{}, err
 	}
-	if cfg.SessionSecret, err = decodeKey("SESSION_SECRET"); err != nil {
+	cfg.MasterKey = masterKey
+	sessionSecret, err := decodeKey("SESSION_SECRET")
+	if err != nil {
 		return Config{}, err
 	}
+	cfg.SessionSecret = sessionSecret
 
 	if cfg.Environment == "production" {
 		if len(cfg.MasterKey) != 32 || len(cfg.SessionSecret) != 32 {
@@ -108,12 +98,6 @@ func Load() (Config, error) {
 		if cfg.MetricsAddr != "127.0.0.1:9090" {
 			return Config{}, errors.New("production METRICS_ADDR must remain 127.0.0.1:9090")
 		}
-	}
-	if cfg.AICallMaxDuration < 30*time.Second || cfg.AICallMaxDuration > 10*time.Minute {
-		return Config{}, errors.New("AI_CALL_MAX_DURATION must be between 30s and 10m")
-	}
-	if cfg.AIMaxConcurrent < 1 || cfg.AIMaxConcurrent > 20 {
-		return Config{}, errors.New("AI_MAX_CONCURRENT must be between 1 and 20")
 	}
 	apnsRequired := []string{cfg.APNSTeamID, cfg.APNSKeyID, cfg.APNSPrivateKeyFile}
 	apnsValues := 0
@@ -171,21 +155,6 @@ func envBool(name string, fallback bool) bool {
 	return err == nil && parsed
 }
 
-func envStrictBool(name string, fallback bool) (bool, error) {
-	value := os.Getenv(name)
-	if value == "" {
-		return fallback, nil
-	}
-	switch value {
-	case "true":
-		return true, nil
-	case "false":
-		return false, nil
-	default:
-		return false, fmt.Errorf("%s must be true or false", name)
-	}
-}
-
 func envInt(name string, fallback int) int {
 	value := os.Getenv(name)
 	if value == "" {
@@ -193,18 +162,6 @@ func envInt(name string, fallback int) int {
 	}
 	parsed, err := strconv.Atoi(value)
 	if err != nil || parsed < 1 {
-		return fallback
-	}
-	return parsed
-}
-
-func envDuration(name string, fallback time.Duration) time.Duration {
-	value := os.Getenv(name)
-	if value == "" {
-		return fallback
-	}
-	parsed, err := time.ParseDuration(value)
-	if err != nil {
 		return fallback
 	}
 	return parsed

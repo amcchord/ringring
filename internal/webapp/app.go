@@ -175,7 +175,6 @@ type PageData struct {
 	JoinDisplayName          string
 	JoinExtension            string
 	JoinDeviceLabel          string
-	JoinAdultExtension       bool
 	Claim                    model.ClaimedDevice
 	SIPPublicHost            string
 	SIPUsernameDisplay       string
@@ -217,7 +216,6 @@ type PageData struct {
 	OpenAISpendPending       string
 	OpenAISpendLimitMax      string
 	OpenAISpendLimitMaxInput string
-	AIAdultOnlyEnabled       bool
 }
 
 type authSession struct {
@@ -226,10 +224,9 @@ type authSession struct {
 }
 
 type joinFormValues struct {
-	DisplayName    string
-	Extension      string
-	DeviceLabel    string
-	AdultExtension bool
+	DisplayName string
+	Extension   string
+	DeviceLabel string
 }
 
 type setupFlash struct {
@@ -265,10 +262,10 @@ type phoneInvitationPreview struct {
 }
 
 type phoneInvitationClaim struct {
-	DisplayName    string `json:"display_name"`
-	Extension      string `json:"extension"`
-	AdultExtension bool   `json:"adult_extension"`
-	DeviceLabel    string `json:"device_label,omitempty"`
+	DisplayName          string `json:"display_name"`
+	Extension            string `json:"extension"`
+	LegacyAdultExtension bool   `json:"adult_extension"` // Accepted only so released clients can upgrade cleanly; ignored.
+	DeviceLabel          string `json:"device_label,omitempty"`
 }
 
 type statusWriter struct {
@@ -328,7 +325,7 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 	if cfg.AsteriskConfigDir != "" {
 		app.telephony = &telephony.Reconciler{
 			Source: database, Cipher: cipher, ConfigDir: cfg.AsteriskConfigDir,
-			Reloader: ami, AIAdultOnlyEnabled: cfg.AIAdultOnlyEnabled,
+			Reloader: ami,
 		}
 	}
 
@@ -1605,12 +1602,7 @@ func (a *App) updateServices(w http.ResponseWriter, r *http.Request, session aut
 		return
 	}
 	weatherRequested := r.FormValue("weather_enabled") != ""
-	aiEnabled := r.FormValue("ai_enabled") != ""
 	settingsURL := "/parties/" + url.PathEscape(partyID) + "/settings"
-	if aiEnabled && !a.cfg.AIAdultOnlyEnabled {
-		a.errorPage(w, http.StatusConflict, "The AI conversation line is locked", "The server operator has not opened the adults-only preview. Weather and the other family lines still work.", settingsURL, "Back to party settings")
-		return
-	}
 	radioStationID := r.FormValue("radio_station")
 	if radioStationID == "" {
 		radioStationID = existing.RadioStation
@@ -1620,34 +1612,15 @@ func (a *App) updateServices(w http.ResponseWriter, r *http.Request, session aut
 		a.errorPage(w, http.StatusBadRequest, "Choose a listed radio station", "RingRing only accepts the fixed stations shown on the party settings page.", settingsURL, "Back to party settings")
 		return
 	}
-	if (weatherRequested || aiEnabled) && party.OpenAIStatus != "ready" {
-		a.errorPage(w, http.StatusConflict, "The AI lines need their voice", "Wait until this party's AI status says ready, then turn an AI-powered line on.", settingsURL, "Back to party settings")
+	if weatherRequested && party.OpenAIStatus != "ready" {
+		a.errorPage(w, http.StatusConflict, "Weather needs its voice", "Wait until this party's voice status says ready, then turn weather on.", settingsURL, "Back to party settings")
 		return
-	}
-	if aiEnabled && !existing.AIEnabled {
-		members, memberErr := a.store.ListMembers(r.Context(), partyID)
-		if memberErr != nil {
-			a.internalError(w, r, memberErr)
-			return
-		}
-		adultAllowed := false
-		for _, member := range members {
-			if member.AdultExtension {
-				adultAllowed = true
-				break
-			}
-		}
-		if !adultAllowed {
-			a.errorPage(w, http.StatusConflict, "Create an adult extension first", "At least one extension must be marked Adult extension (18+) before you can turn on *14.", settingsURL, "Back to party settings")
-			return
-		}
 	}
 	_, err = a.store.UpdatePartyServices(r.Context(), partyID, session.User.ID, store.ServiceSettingsInput{
 		TimeEnabled: r.FormValue("time_enabled") != "", WeatherEnabled: weatherRequested, WeatherSetupAllowed: weatherRequested,
 		WeatherQuery: existing.WeatherQuery, WeatherLabel: existing.WeatherLabel,
 		WeatherLatitude: existing.WeatherLatitude, WeatherLongitude: existing.WeatherLongitude,
-		RadioEnabled: r.FormValue("radio_enabled") != "", RadioStation: radioStation.ID, AIEnabled: aiEnabled,
-		AIAdultOnlyEnabled: a.cfg.AIAdultOnlyEnabled, UpdatedAt: a.now(),
+		RadioEnabled: r.FormValue("radio_enabled") != "", RadioStation: radioStation.ID, UpdatedAt: a.now(),
 	})
 	if err != nil {
 		a.internalError(w, r, err)
@@ -2181,8 +2154,7 @@ func (a *App) claimInvitation(w http.ResponseWriter, r *http.Request) {
 	displayName := strings.Join(strings.Fields(r.FormValue("display_name")), " ")
 	extensionValue := strings.TrimSpace(r.FormValue("extension"))
 	deviceLabel := strings.Join(strings.Fields(r.FormValue("device_label")), " ")
-	adultExtension := r.FormValue("adult_extension") != ""
-	values := joinFormValues{DisplayName: displayName, Extension: extensionValue, DeviceLabel: deviceLabel, AdultExtension: adultExtension}
+	values := joinFormValues{DisplayName: displayName, Extension: extensionValue, DeviceLabel: deviceLabel}
 	invitedParty, err := a.store.PartyByInvitation(r.Context(), secure.Hash(token), a.now())
 	if err != nil {
 		a.invitationError(w, err)
@@ -2240,7 +2212,7 @@ func (a *App) claimInvitation(w http.ResponseWriter, r *http.Request) {
 	_, sipSecret, err := a.saveWithNewSIPCredentials(deviceID, func(username, ciphertext string) error {
 		party, member, device, err = a.store.ClaimInvitation(r.Context(), store.NewClaim{
 			TokenHash: secure.Hash(token), MemberID: memberID, DisplayName: displayName, Extension: extensionValue,
-			AdultExtension: adultExtension, DeviceID: deviceID, DeviceLabel: deviceLabel, SIPUsername: username,
+			DeviceID: deviceID, DeviceLabel: deviceLabel, SIPUsername: username,
 			SIPSecretCiphertext: ciphertext, Provisioning: provisionRecord, Now: now,
 		})
 		return err
@@ -2267,7 +2239,7 @@ func (a *App) claimInvitation(w http.ResponseWriter, r *http.Request) {
 	data.Claim = model.ClaimedDevice{Party: party, Member: member, Device: device, SIPSecret: sipSecret}
 	data.SIPPublicHost = a.cfg.SIPPublicHost
 	data.CallDirectory = privateCallDirectory(directoryMembers)
-	data.FirstCallLines = availableFirstCallLines(party, services, a.cfg.AIAdultOnlyEnabled, member.AdultExtension)
+	data.FirstCallLines = availableFirstCallLines(party, services)
 	if err := a.addLinphoneSetup(&data, provisionToken); err != nil {
 		a.logger.Error("prepare claimed Linphone setup", "error_class", observability.ErrorClass(err))
 	}
@@ -2291,7 +2263,7 @@ func privateCallDirectory(members []model.Member) []callDirectoryEntry {
 	return directory
 }
 
-func availableFirstCallLines(party model.Party, services model.PartyServices, adultOnlyEnabled, memberAdultAllowed bool) []firstCallLine {
+func availableFirstCallLines(party model.Party, services model.PartyServices) []firstCallLine {
 	lines := []firstCallLine{
 		{Number: "*10", Title: "Echo test", Description: "Hear your own voice come back."},
 		{Number: "*15", Title: "Pick another extension", Description: "Choose a new number by phone."},
@@ -2309,9 +2281,6 @@ func availableFirstCallLines(party model.Party, services model.PartyServices, ad
 	}
 	if services.RadioEnabled {
 		lines = append(lines, firstCallLine{Number: "*13", Title: "Internet radio", Description: "Play the host's chosen station."})
-	}
-	if services.AIEnabled && voiceReady && adultOnlyEnabled && memberAdultAllowed {
-		lines = append(lines, firstCallLine{Number: "*14", Title: "RingRing AI · adults only", Description: "Talk with a clearly disclosed AI voice."})
 	}
 	return lines
 }
@@ -2331,7 +2300,6 @@ func (a *App) renderJoinForm(w http.ResponseWriter, r *http.Request, party model
 	data.JoinDisplayName = values.DisplayName
 	data.JoinExtension = values.Extension
 	data.JoinDeviceLabel = values.DeviceLabel
-	data.JoinAdultExtension = values.AdultExtension
 	data.FormError = message
 	data.FormInvalid = make(map[string]bool, len(invalidFields))
 	for _, field := range invalidFields {
@@ -2541,7 +2509,7 @@ func (a *App) phoneInvitationAPI(w http.ResponseWriter, r *http.Request) {
 	username, sipSecret, err := a.saveWithNewSIPCredentials(deviceID, func(username, ciphertext string) error {
 		party, member, _, err = a.store.ClaimInvitation(r.Context(), store.NewClaim{
 			TokenHash: secure.Hash(token), MemberID: memberID, DisplayName: displayName, Extension: extensionValue,
-			AdultExtension: claim.AdultExtension, DeviceID: deviceID, DeviceLabel: deviceLabel, SIPUsername: username,
+			DeviceID: deviceID, DeviceLabel: deviceLabel, SIPUsername: username,
 			SIPSecretCiphertext: ciphertext, Now: a.now(),
 		})
 		return err
@@ -2562,7 +2530,7 @@ func (a *App) phoneInvitationAPI(w http.ResponseWriter, r *http.Request) {
 
 	document, err := provisioning.PhoneJSON(provisioning.LinphoneConfig{
 		Server: a.cfg.SIPPublicHost, Username: username, Password: sipSecret, Extension: member.Extension,
-	}, phoneCallDestinations(member.Extension, directoryMembers, availableFirstCallLines(party, services, a.cfg.AIAdultOnlyEnabled, member.AdultExtension)))
+	}, phoneCallDestinations(member.Extension, directoryMembers, availableFirstCallLines(party, services)))
 	if err != nil {
 		a.logger.Error("encode phone API invitation claim", "error_class", observability.ErrorClass(err))
 		writeAPIProblem(w, http.StatusInternalServerError, "Phone setup unavailable", "RingRing could not safely prepare these phone settings. Ask the party host for a fresh invitation.")
@@ -2696,16 +2664,9 @@ func (a *App) phoneProvisioningDocument(ctx context.Context, token string) ([]by
 	if err != nil {
 		return nil, fmt.Errorf("load phone provisioning directory: %w", err)
 	}
-	memberAdultAllowed := false
-	for _, member := range members {
-		if member.ID == device.MemberID {
-			memberAdultAllowed = member.AdultExtension
-			break
-		}
-	}
 	document, err := provisioning.PhoneJSON(provisioning.LinphoneConfig{
 		Server: a.cfg.SIPPublicHost, Username: device.SIPUsername, Password: password, Extension: device.Extension,
-	}, phoneCallDestinations(device.Extension, members, availableFirstCallLines(party, services, a.cfg.AIAdultOnlyEnabled, memberAdultAllowed)))
+	}, phoneCallDestinations(device.Extension, members, availableFirstCallLines(party, services)))
 	if err != nil {
 		return nil, fmt.Errorf("encode phone provisioning document: %w", err)
 	}
@@ -2890,7 +2851,6 @@ func (a *App) pageData(session *authSession) PageData {
 	data := PageData{
 		AuthConfigured: a.cfg.HostSignupEnabled(), DevAuth: a.cfg.DevAuth,
 		SignupEnabled: a.cfg.HostSignupEnabled(), SignupCode: a.cfg.HostSignupCode != "",
-		AIAdultOnlyEnabled: a.cfg.AIAdultOnlyEnabled,
 	}
 	if session != nil {
 		data.User = &session.User

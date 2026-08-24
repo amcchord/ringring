@@ -80,12 +80,6 @@ ASTERISK_AMI_ADDR=asterisk:5038
 ASTERISK_AMI_USER=ringring
 ASTERISK_AMI_SECRET=<URL-safe random secret>
 FASTAGI_ADDR=:4573
-AI_AUDIO_ADDR=:4574
-AI_REALTIME_MODEL=gpt-realtime-2.1
-AI_CALL_MAX_DURATION=3m
-AI_MAX_CONCURRENT=2
-# Set true only when intentionally offering the adults-only *14 preview.
-AI_ADULT_ONLY_ENABLED=false
 # Optional; configure with ringringctl rather than pasting the .p8 here.
 APNS_TEAM_ID=
 APNS_KEY_ID=
@@ -145,15 +139,9 @@ Party OpenAI key replacement adds a nullable `parties.openai_api_key_id` column 
 
 Host-set spend limits add three forward-only `parties` columns for the last confirmed amount, one pending amount, and its reconciliation state. Existing parties migrate to an honest `unknown` local state without changing their provider project or interrupting current routing; the host's first save verifies or replaces the chosen amount. A new update also mirrors its pause into the older `openai_status` column, so rollback keeps AI routes unavailable rather than ignoring an uncertain provider result. Do not roll back or edit the pending amount mid-update. Return to this release and choose **Finish spend limit update**, which safely repeats that exact amount until OpenAI confirms active enforcement. Do not submit the production form as a deployment probe because it deliberately changes the party's provider limit.
 
-`METRICS_ADDR` and `AI_AUDIO_ADDR` are private container traffic and must not be published on the host. The metrics listener exports only bounded aggregate health/activity and Caddy does not proxy it; see [Privacy-preserving observability](OBSERVABILITY.md). The reference limits `*14` calls to three minutes and two concurrent sessions in addition to each party project's hard monthly spend limit.
+`METRICS_ADDR` is loopback-only and must not be published on the host. The metrics listener exports only bounded aggregate health/activity and Caddy does not proxy it; see [Privacy-preserving observability](OBSERVABILITY.md). Party hard spend limits continue to bound the remaining one-way text-to-speech requests.
 
-`AI_ADULT_ONLY_ENABLED` is a server-operator gate for the open-ended `*14` conversation line, not a party preference. It defaults to `false`; fresh installs write that value explicitly, and older deployments that omit it are also closed. While closed, RingRing rejects host attempts to enable `*14`, clears any older saved `ai_enabled` preference at startup, removes the route from generated Asterisk configuration, refuses FastAGI authorization and party-key decryption, and refuses the Realtime WebSocket bridge. Time, weather text-to-speech, radio, echo, extension selection, and ordinary party calls are unaffected.
-
-Set the gate to `true` only when this deployment intentionally offers an adults-only preview. A member chooses **Adult extension (18+)** once while claiming a new extension. Existing extensions migrate to non-adult, the host cannot enable `*14` until at least one adult extension exists, and every call is authorized from the active authenticated SIP endpoint in the same party. Do not mark a child or shared handset adult. The call disclosure explains that audio goes to OpenAI and provider retention may apply even though RingRing stores no audio or transcript.
-
-Edit the root-only `/etc/ringring/app.env`, set exactly `AI_ADULT_ONLY_ENABLED=true`, run `cd /opt/ringring && docker compose up -d --force-recreate app`, and then run `sudo /opt/ringring/ringringctl doctor`. To revoke the preview, set the value back to `false` and recreate the app container; startup closes saved conversation preferences before telephony reconciliation.
-
-The independent `sudo /opt/ringring/ringringctl openai-retention` command still makes bounded, read-only requests to OpenAI's official [organization](https://developers.openai.com/api/reference/python/resources/admin/subresources/organization/subresources/data_retention/methods/retrieve) and [project](https://developers.openai.com/api/reference/python/resources/admin/subresources/organization/subresources/projects/subresources/data_retention/methods/retrieve) data-retention endpoints. Success prints only `status`, the non-secret organization ZDR type, and the number of party projects checked. A forbidden or `not_eligible` response, modified-abuse-monitoring or project `none` mode, unknown/malformed result, missing administrator key, timeout, or transport error fails the command and is not confirmation. This audit is not a runtime precondition for the adult-only preview and must not be used to imply that RingRing is ready for minors. OpenAI's [Under 18 API Guidance](https://developers.openai.com/api/docs/guides/safety-checks/under-18-api-guidance) and an external under-18 safety/privacy review remain release gates before offering `*14` to minors. Do not put review evidence, provider responses, or administrator credentials in the repository.
+The independent `sudo /opt/ringring/ringringctl openai-retention` command makes bounded, read-only requests to OpenAI's official [organization](https://developers.openai.com/api/reference/python/resources/admin/subresources/organization/subresources/data_retention/methods/retrieve) and [project](https://developers.openai.com/api/reference/python/resources/admin/subresources/organization/subresources/projects/subresources/data_retention/methods/retrieve) data-retention endpoints. Success prints only `status`, the non-secret organization ZDR type, and the number of party projects checked. A forbidden or `not_eligible` response, unknown/malformed result, missing administrator key, timeout, or transport error fails the command and is not confirmation. Current RingRing model calls contain only code-controlled speech text, weather labels, or an authenticated joining member label—never caller audio—but the audit remains useful evidence about provider posture. Do not put provider responses or administrator credentials in the repository.
 
 ## SIP authentication firewall
 
@@ -350,11 +338,9 @@ external script. Deploy the application binary normally; its embedded template
 and asset cannot drift independently. Rolling back restores the script-free
 sheet and needs no data or configuration migration.
 
-### `*14` upgrade and rollback
+### Retired conversation-line upgrade and rollback
 
-The `*14` release adds `party_services.ai_enabled` with a forward-only startup migration. Take the app-state backup while the app is stopped, then restart the old version before beginning the normal update. The column defaults to disabled and older RingRing builds ignore it, so rolling the app image and checkout back leaves the migrated database usable; the four `AI_*` environment variables are also ignored by older builds. Keep the database backup until the upgraded app, private port `4574`, and generated Asterisk dialplan have all been verified. Do not publish port `4574` during either upgrade or rollback.
-
-The adults-only release adds the forward-only `members.adult_extension` boolean and replaces the former operator variable with `AI_ADULT_ONLY_ENABLED`. Existing members migrate to false, and older builds safely ignore the additive column. A deployment that still has only `AI_CHILD_SAFETY_APPROVED` remains closed because the new variable defaults false. Before rollback, set `AI_ADULT_ONLY_ENABLED=false`, recreate the app so durable `*14` preferences are cleared, and leave the older gate false as well. The isolated restore drill explicitly overrides the new gate to false. The standalone read-only ZDR audit remains available but is no longer coupled to startup or `doctor`; it changes no provider state.
+This release removes the conversation route, private media listener, invitation adult classification, host control, and related environment variables. Startup clears any legacy `party_services.ai_enabled` value before telephony reconciliation, and new claims keep the legacy `members.adult_extension` field false. Both additive columns remain in SQLite for forward-only migration and rollback compatibility; do not drop them during a normal upgrade. Generated Asterisk configuration must contain no `*14` or AudioSocket route, and Compose no longer exposes private port `4574`. Before intentionally rolling back to a release that contains the old feature, explicitly keep its operator gate false so rollback cannot revive a saved conversation preference.
 
 ### `*15` upgrade and rollback
 

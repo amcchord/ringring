@@ -38,10 +38,8 @@ func TestMetricsHandlerRendersBoundedAggregates(t *testing.T) {
 	registry.HTTPFinished("private-party-id", "PURGE", 999, -time.Second)
 	registry.ObserveReconciliation(true)
 	registry.ObserveReconciliation(false)
-	registry.ObserveVoice("ai_bridge", "completed")
 	registry.ObserveVoice("operator", "ready")
 	registry.ObserveVoice("caller-supplied-value", "caller-result")
-	registry.SetAIActive(2)
 
 	handler := registry.Handler(func(context.Context) HealthSnapshot {
 		return HealthSnapshot{
@@ -66,10 +64,8 @@ func TestMetricsHandlerRendersBoundedAggregates(t *testing.T) {
 		"ringring_http_requests_total{surface=\"other\",method=\"OTHER\",status_class=\"other\"} 1",
 		"ringring_telephony_reconciliations_total{result=\"success\"} 1",
 		"ringring_telephony_reconciliations_total{result=\"error\"} 1",
-		"ringring_voice_service_requests_total{service=\"ai_bridge\",result=\"completed\"} 1",
 		"ringring_voice_service_requests_total{service=\"operator\",result=\"ready\"} 1",
 		"ringring_voice_service_requests_total{service=\"other\",result=\"error\"} 1",
-		"ringring_ai_calls_active 2",
 	} {
 		if !strings.Contains(body, expected) {
 			t.Errorf("metrics omitted %q\n%s", expected, body)

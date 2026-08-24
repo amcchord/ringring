@@ -151,8 +151,8 @@ func main() {
 		os.Exit(1)
 	}
 	defer database.Close()
-	if err := database.EnforceAIAdultOnlyGate(context.Background(), cfg.AIAdultOnlyEnabled, time.Now()); err != nil {
-		logger.Error("enforce AI conversation adult-only gate", "error", err)
+	if err := database.DisableLegacyAIConversation(context.Background(), time.Now()); err != nil {
+		logger.Error("disable legacy AI conversation setting", "error", err)
 		os.Exit(1)
 	}
 	cipher, err := secure.NewCipher(cfg.MasterKey)
@@ -200,14 +200,8 @@ func main() {
 		os.Exit(1)
 	}
 	defer voiceListener.Close()
-	aiListener, err := net.Listen("tcp", cfg.AIAudioAddr)
-	if err != nil {
-		logger.Error("listen for AI AudioSocket", "address", cfg.AIAudioAddr, "error", err)
-		os.Exit(1)
-	}
-	defer aiListener.Close()
 	voiceServer := &voice.Server{
-		Source: database, AIAdultAccess: database, OperatorDisclosure: database,
+		Source:     database,
 		Extensions: database, WeatherLocations: database, Reconcile: app.ReconcileTelephony,
 		JoinMembers: database, ConferenceAnnounce: telephony.AMI{
 			Address: cfg.AsteriskAMIAddr, Username: cfg.AsteriskAMIUser, Secret: cfg.AsteriskAMISecret,
@@ -215,21 +209,13 @@ func main() {
 		PhonePushes: database, PushNotifier: pushNotifier, PushEnvironment: cfg.APNSEnvironment,
 		Cipher: cipher, Weather: weather.New(nil), Speech: openairuntime.New(nil),
 		AudioDir: cfg.VoiceAudioDir, PlaybackDir: cfg.VoicePlaybackDir, Logger: logger,
-		AIModel: cfg.AIRealtimeModel, AICallMaxDuration: cfg.AICallMaxDuration, AIMaxConcurrent: cfg.AIMaxConcurrent,
-		AIAdultOnlyEnabled: cfg.AIAdultOnlyEnabled,
-		Metrics:            app.Metrics(),
+		Metrics: app.Metrics(),
 	}
 	go func() {
 		if err := voiceServer.Serve(voiceListener); err != nil {
 			logger.Error("FastAGI server stopped", "error", err)
 		}
 	}()
-	go func() {
-		if err := voiceServer.ServeAudioSocket(aiListener); err != nil {
-			logger.Error("AI AudioSocket server stopped", "error", err)
-		}
-	}()
-
 	server := &http.Server{
 		Addr: cfg.HTTPAddr, Handler: app,
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second,
@@ -241,7 +227,6 @@ func main() {
 	go func() {
 		<-shutdownSignals.Done()
 		_ = voiceListener.Close()
-		_ = aiListener.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := metricsServer.Shutdown(ctx); err != nil {
@@ -252,7 +237,7 @@ func main() {
 		}
 	}()
 
-	logger.Info("RingRing listening", "address", cfg.HTTPAddr, "metrics_address", cfg.MetricsAddr, "fastagi_address", cfg.FastAGIAddr, "ai_audio_address", cfg.AIAudioAddr, "environment", cfg.Environment)
+	logger.Info("RingRing listening", "address", cfg.HTTPAddr, "metrics_address", cfg.MetricsAddr, "fastagi_address", cfg.FastAGIAddr, "environment", cfg.Environment)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Error("HTTP server stopped", "error", err)
 		os.Exit(1)

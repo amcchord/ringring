@@ -89,13 +89,11 @@ struct PendingInvitation: Identifiable, Equatable, Sendable {
 struct PhoneInvitationClaim: Encodable, Equatable, Sendable {
     let displayName: String
     let `extension`: String
-    let adultExtension: Bool
     let deviceLabel: String
 
     private enum CodingKeys: String, CodingKey {
         case displayName = "display_name"
         case `extension`
-        case adultExtension = "adult_extension"
         case deviceLabel = "device_label"
     }
 }

@@ -9,7 +9,6 @@ import (
 func TestMetricsAddressDefaultsAndCanBeOverridden(t *testing.T) {
 	for _, name := range []string{
 		"APP_ENV", "APP_BASE_URL", "METRICS_ADDR", "RINGRING_MASTER_KEY", "SESSION_SECRET",
-		"AI_CALL_MAX_DURATION", "AI_MAX_CONCURRENT", "AI_ADULT_ONLY_ENABLED",
 		"APNS_TEAM_ID", "APNS_KEY_ID", "APNS_PRIVATE_KEY_FILE", "APNS_BUNDLE_ID", "APNS_ENVIRONMENT",
 	} {
 		t.Setenv(name, "")
@@ -61,33 +60,6 @@ func TestAPNsConfigurationIsOptionalButAtomic(t *testing.T) {
 	t.Setenv("APNS_ENVIRONMENT", "staging")
 	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "APNS_ENVIRONMENT") {
 		t.Fatalf("invalid APNs environment was accepted: %v", err)
-	}
-}
-
-func TestAIAdultOnlyGateIsExplicitAndStrict(t *testing.T) {
-	for _, name := range []string{"APP_ENV", "APP_BASE_URL", "RINGRING_MASTER_KEY", "SESSION_SECRET", "AI_ADULT_ONLY_ENABLED"} {
-		t.Setenv(name, "")
-	}
-	closed, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if closed.AIAdultOnlyEnabled {
-		t.Fatal("AI adult-only gate defaulted open")
-	}
-
-	t.Setenv("AI_ADULT_ONLY_ENABLED", "true")
-	approved, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !approved.AIAdultOnlyEnabled {
-		t.Fatal("explicit AI adult-only enablement was ignored")
-	}
-
-	t.Setenv("AI_ADULT_ONLY_ENABLED", "TRUE")
-	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "AI_ADULT_ONLY_ENABLED") {
-		t.Fatalf("malformed adult-only gate did not fail closed: %v", err)
 	}
 }
 

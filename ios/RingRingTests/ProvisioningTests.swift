@@ -57,14 +57,13 @@ struct ProvisioningTests {
     }
 
     @Test func invitationClaimUsesDocumentedJSONFields() throws {
-        let claim = PhoneInvitationClaim(displayName: "Studio phone", extension: "103", adultExtension: false, deviceLabel: "iPhone app")
+		let claim = PhoneInvitationClaim(displayName: "Studio phone", extension: "103", deviceLabel: "iPhone app")
         let encoded = try JSONEncoder().encode(claim)
         let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
         #expect(object["display_name"] as? String == "Studio phone")
         #expect(object["extension"] as? String == "103")
-        #expect(object["adult_extension"] as? Bool == false)
-        #expect(object["device_label"] as? String == "iPhone app")
-        #expect(object.count == 4)
+		#expect(object["device_label"] as? String == "iPhone app")
+		#expect(object.count == 3)
     }
 
     @Test func rejectsCredentialsQueriesAndUnrelatedPaths() throws {

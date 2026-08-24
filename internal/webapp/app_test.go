@@ -384,35 +384,29 @@ func TestProvisionOpenAIStoresPartyCredentialsWithoutChangingProviderRetention(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, adultOnlyEnabled := range []bool{false, true} {
-		partyID := "pty_provision_closed"
-		projectID := "proj_provision_closed"
-		if adultOnlyEnabled {
-			partyID = "pty_provision_open"
-			projectID = "proj_provision_open"
-		}
-		party, err := database.CreateParty(ctx, store.NewParty{ID: partyID, Name: "Provision test", Slug: partyID, HostUserID: host.ID, CreatedAt: now})
-		if err != nil {
-			t.Fatal(err)
-		}
-		manager := &fakeOpenAIProjects{provisioned: openaiadmin.ProvisionedProject{
-			ProjectID: projectID, ServiceAccountID: "svc_test", APIKeyID: "key_test",
-			APIKey: "private-runtime-key", SpendLimitCents: 1000,
-		}}
-		app := &App{
-			cfg: config.Config{AIAdultOnlyEnabled: adultOnlyEnabled}, store: database, cipher: cipher, openAI: manager,
-			logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		}
-		if err := app.provisionOpenAI(ctx, party); err != nil {
-			t.Fatal(err)
-		}
-		if manager.organizationRetentionCalls != 0 || manager.retentionAttempts != 0 || manager.archiveAttempts != 0 {
-			t.Fatalf("adult-only provisioning changed or audited provider retention: %#v", manager)
-		}
-		stored, err := database.PartyForHost(ctx, party.ID, host.ID)
-		if err != nil || stored.OpenAIProjectID != projectID || stored.OpenAIStatus != "ready" || stored.OpenAIKeyCiphertext == "" {
-			t.Fatalf("party project was not stored normally: party=%#v error=%v", stored, err)
-		}
+	partyID := "pty_provision_voice"
+	projectID := "proj_provision_voice"
+	party, err := database.CreateParty(ctx, store.NewParty{ID: partyID, Name: "Provision test", Slug: partyID, HostUserID: host.ID, CreatedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := &fakeOpenAIProjects{provisioned: openaiadmin.ProvisionedProject{
+		ProjectID: projectID, ServiceAccountID: "svc_test", APIKeyID: "key_test",
+		APIKey: "private-runtime-key", SpendLimitCents: 1000,
+	}}
+	app := &App{
+		cfg: config.Config{}, store: database, cipher: cipher, openAI: manager,
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	if err := app.provisionOpenAI(ctx, party); err != nil {
+		t.Fatal(err)
+	}
+	if manager.organizationRetentionCalls != 0 || manager.retentionAttempts != 0 || manager.archiveAttempts != 0 {
+		t.Fatalf("voice provisioning changed or audited provider retention: %#v", manager)
+	}
+	stored, err := database.PartyForHost(ctx, party.ID, host.ID)
+	if err != nil || stored.OpenAIProjectID != projectID || stored.OpenAIStatus != "ready" || stored.OpenAIKeyCiphertext == "" {
+		t.Fatalf("party project was not stored normally: party=%#v error=%v", stored, err)
 	}
 }
 
@@ -430,7 +424,7 @@ func TestPrivateCallDirectoryIncludesOnlyMembersWithAnActivePhone(t *testing.T) 
 
 func TestFirstCallLinesMatchCurrentlyDialableServices(t *testing.T) {
 	party := model.Party{OpenAIStatus: "ready", OpenAISpendLimitStatus: "ready"}
-	services := model.PartyServices{TimeEnabled: true, WeatherEnabled: true, RadioEnabled: true, AIEnabled: true}
+	services := model.PartyServices{TimeEnabled: true, WeatherEnabled: true, RadioEnabled: true}
 	numbers := func(lines []firstCallLine) string {
 		var values []string
 		for _, line := range lines {
@@ -438,26 +432,20 @@ func TestFirstCallLinesMatchCurrentlyDialableServices(t *testing.T) {
 		}
 		return strings.Join(values, ",")
 	}
-	if got := numbers(availableFirstCallLines(party, services, false, true)); got != "*10,*15,*11,*12,*13" {
-		t.Fatalf("closed-gate first-call lines = %q", got)
-	}
-	if got := numbers(availableFirstCallLines(party, services, true, false)); got != "*10,*15,*11,*12,*13" {
-		t.Fatalf("non-adult first-call lines = %q", got)
-	}
-	if got := numbers(availableFirstCallLines(party, services, true, true)); got != "*10,*15,*11,*12,*13,*14" {
-		t.Fatalf("adult-extension first-call lines = %q", got)
+	if got := numbers(availableFirstCallLines(party, services)); got != "*10,*15,*11,*12,*13" {
+		t.Fatalf("first-call lines retained a removed or unavailable route: %q", got)
 	}
 	setupServices := model.PartyServices{TimeEnabled: true, WeatherSetupAllowed: true}
-	setupLines := availableFirstCallLines(party, setupServices, false, false)
+	setupLines := availableFirstCallLines(party, setupServices)
 	if got := numbers(setupLines); got != "*10,*15,*11,*12" || setupLines[len(setupLines)-1].Description != "Enter a ZIP once, then hear the local forecast." {
 		t.Fatalf("unknown-location first-call lines = %#v", setupLines)
 	}
 	disabledKnown := model.PartyServices{TimeEnabled: true, WeatherLabel: "Portland, Maine"}
-	if got := numbers(availableFirstCallLines(party, disabledKnown, false, false)); got != "*10,*15,*11" {
+	if got := numbers(availableFirstCallLines(party, disabledKnown)); got != "*10,*15,*11" {
 		t.Fatalf("host-disabled known weather lines = %q", got)
 	}
 	party.OpenAISpendLimitStatus = "update-error"
-	if got := numbers(availableFirstCallLines(party, services, true, true)); got != "*10,*15,*11,*13" {
+	if got := numbers(availableFirstCallLines(party, services)); got != "*10,*15,*11,*13" {
 		t.Fatalf("spend-paused first-call lines = %q", got)
 	}
 }
@@ -591,7 +579,7 @@ func TestSuccessfulClaimGetsPrivateFirstCallCard(t *testing.T) {
 	}
 	if _, err := database.UpdatePartyServices(ctx, party.ID, host.ID, store.ServiceSettingsInput{
 		TimeEnabled: true, WeatherEnabled: true, WeatherQuery: "Portland, Maine", WeatherLabel: "Portland, Maine",
-		RadioEnabled: true, RadioStation: "drone-zone", AIEnabled: true, AIAdultOnlyEnabled: true, UpdatedAt: now,
+		RadioEnabled: true, RadioStation: "drone-zone", UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -746,39 +734,26 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if err := database.UpdatePartyOpenAI(t.Context(), partyID, "proj_test", "svc_test", "key_old", initialPartyKey, "ready", 1000); err != nil {
 		t.Fatal(err)
 	}
-	lockedAI := postForm(t, client, server.URL+"/parties/"+partyID+"/services", url.Values{
-		"csrf": {csrf}, "ai_enabled": {"1"},
-	})
-	if lockedAI.StatusCode != http.StatusConflict || !strings.Contains(readBody(t, lockedAI), "server operator") {
-		t.Fatal("AI line was not held behind the operator adult-only gate")
-	}
 	lockedPartyPage := get(t, client, server.URL+"/parties/"+partyID+"/settings")
 	lockedPartyBody := readBody(t, lockedPartyPage)
-	if !strings.Contains(lockedPartyBody, "server operator has not opened the adults-only preview") || !strings.Contains(lockedPartyBody, `name="ai_enabled" value="1"  disabled`) {
-		t.Fatal("party page did not explain or disable the closed AI conversation gate")
-	}
-	app.cfg.AIAdultOnlyEnabled = true
-	noAdultAI := postForm(t, client, server.URL+"/parties/"+partyID+"/services", url.Values{
-		"csrf": {csrf}, "ai_enabled": {"1"},
-	})
-	if noAdultAI.StatusCode != http.StatusConflict || !strings.Contains(readBody(t, noAdultAI), "adult extension") {
-		t.Fatal("AI line was enabled without an adult extension")
+	if strings.Contains(lockedPartyBody, `name="ai_enabled"`) || strings.Contains(lockedPartyBody, "RingRing AI · adults only") {
+		t.Fatal("removed AI conversation controls remained on party settings")
 	}
 	devHost, err := database.UpsertGoogleUser(t.Context(), store.GoogleProfile{Subject: "dev:host@example.test", Email: "host@example.test", Name: "Local Host"}, fixedNow, "unused")
 	if err != nil {
 		t.Fatal(err)
 	}
-	adultToken := strings.Repeat("a", 43)
+	memberToken := strings.Repeat("a", 43)
 	if err := database.CreateInvitation(t.Context(), store.NewInvitation{
-		ID: "inv_adult_service", PartyID: partyID, CreatedByUserID: devHost.ID, TokenHash: secure.Hash(adultToken),
+		ID: "inv_weather_service", PartyID: partyID, CreatedByUserID: devHost.ID, TokenHash: secure.Hash(memberToken),
 		ExpiresAt: fixedNow.Add(time.Hour), CreatedAt: fixedNow,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, _, err := database.ClaimInvitation(t.Context(), store.NewClaim{
-		TokenHash: secure.Hash(adultToken), MemberID: "mem_adult_service", DisplayName: "Adult phone", Extension: "700", AdultExtension: true,
-		DeviceID: "dev_adult_service", DeviceLabel: "Adult ATA", SIPUsername: "654321", SIPSecretCiphertext: "encrypted",
-		Provisioning: store.NewProvisioningToken{TokenHash: secure.Hash("adult-provision"), ExpiresAt: fixedNow.Add(time.Hour), CreatedAt: fixedNow}, Now: fixedNow,
+		TokenHash: secure.Hash(memberToken), MemberID: "mem_weather_service", DisplayName: "Weather phone", Extension: "700",
+		DeviceID: "dev_weather_service", DeviceLabel: "Weather ATA", SIPUsername: "654321", SIPSecretCiphertext: "encrypted",
+		Provisioning: store.NewProvisioningToken{TokenHash: secure.Hash("weather-provision"), ExpiresAt: fixedNow.Add(time.Hour), CreatedAt: fixedNow}, Now: fixedNow,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -808,13 +783,13 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !services.TimeEnabled || !services.WeatherEnabled || !services.RadioEnabled || services.RadioStation != "drone-zone" || !services.AIEnabled {
+	if !services.TimeEnabled || !services.WeatherEnabled || !services.RadioEnabled || services.RadioStation != "drone-zone" {
 		t.Fatalf("unexpected service settings: %#v", services)
 	}
 	if !strings.Contains(serviceBody, `value="drone-zone" selected`) {
 		t.Fatal("party page did not keep the selected radio station")
 	}
-	memberWeather := postForm(t, client, server.URL+"/parties/"+partyID+"/members/mem_adult_service/weather", url.Values{
+	memberWeather := postForm(t, client, server.URL+"/parties/"+partyID+"/members/mem_weather_service/weather", url.Values{
 		"csrf": {csrf}, "weather_query": {" Portland,   Maine "},
 	})
 	memberWeatherBody := readBody(t, memberWeather)
@@ -825,7 +800,7 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if err != nil || len(membersWithWeather) != 1 || membersWithWeather[0].Weather.Label != "Portland, Maine" {
 		t.Fatalf("member weather location = %#v error=%v", membersWithWeather, err)
 	}
-	if err := database.DeleteMember(t.Context(), partyID, devHost.ID, "mem_adult_service"); err != nil {
+	if err := database.DeleteMember(t.Context(), partyID, devHost.ID, "mem_weather_service"); err != nil {
 		t.Fatal(err)
 	}
 	invalidRadio := postForm(t, client, server.URL+"/parties/"+partyID+"/services", url.Values{
@@ -842,8 +817,8 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(routingServices) != 1 || !routingServices[0].WeatherEnabled || !routingServices[0].AIEnabled {
-		t.Fatalf("AI-powered services were not routable: %#v", routingServices)
+	if len(routingServices) != 1 || !routingServices[0].WeatherEnabled {
+		t.Fatalf("weather routing retained the removed conversation line: %#v", routingServices)
 	}
 
 	keyManager := &fakeOpenAIProjects{
@@ -883,7 +858,7 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 		t.Fatalf("unexpected pending spend state: %#v", pendingParty)
 	}
 	routingServices, err = database.RoutingServices(t.Context())
-	if err != nil || len(routingServices) != 1 || routingServices[0].WeatherEnabled || routingServices[0].AIEnabled {
+	if err != nil || len(routingServices) != 1 || routingServices[0].WeatherEnabled {
 		t.Fatalf("AI-powered routes were not paused for uncertain spend state: %#v error=%v", routingServices, err)
 	}
 	blockedRotation := postForm(t, client, server.URL+"/parties/"+partyID+"/openai-key/rotate", url.Values{"csrf": {csrf}})
@@ -908,8 +883,8 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 		t.Fatalf("unexpected confirmed spend state: %#v error=%v", confirmedParty, err)
 	}
 	routingServices, err = database.RoutingServices(t.Context())
-	if err != nil || len(routingServices) != 1 || !routingServices[0].WeatherEnabled || !routingServices[0].AIEnabled {
-		t.Fatalf("AI-powered routes did not resume after spend confirmation: %#v error=%v", routingServices, err)
+	if err != nil || len(routingServices) != 1 || !routingServices[0].WeatherEnabled {
+		t.Fatalf("weather did not resume cleanly after spend confirmation: %#v error=%v", routingServices, err)
 	}
 	missingRotationCSRF := postForm(t, client, server.URL+"/parties/"+partyID+"/openai-key/rotate", url.Values{})
 	if missingRotationCSRF.StatusCode != http.StatusForbidden || keyManager.createAttempts != 0 {
@@ -946,7 +921,7 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(routingServices) != 1 || routingServices[0].WeatherEnabled || routingServices[0].AIEnabled {
+	if len(routingServices) != 1 || routingServices[0].WeatherEnabled {
 		t.Fatalf("AI-powered routes were not paused after partial rotation: %#v", routingServices)
 	}
 	retriedRotation := postForm(t, client, server.URL+"/parties/"+partyID+"/openai-key/rotate", url.Values{"csrf": {csrf}})
@@ -965,8 +940,8 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(routingServices) != 1 || !routingServices[0].WeatherEnabled || !routingServices[0].AIEnabled {
-		t.Fatalf("AI-powered routes did not resume after rotation: %#v", routingServices)
+	if len(routingServices) != 1 || !routingServices[0].WeatherEnabled {
+		t.Fatalf("weather did not resume cleanly after rotation: %#v", routingServices)
 	}
 
 	invite := postForm(t, client, server.URL+"/parties/"+partyID+"/invites", url.Values{"csrf": {csrf}})
@@ -992,19 +967,19 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 		t.Fatalf("join status = %d", join.StatusCode)
 	}
 	joinBody := readBody(t, join)
-	if !strings.Contains(joinBody, `id="extension" name="extension" value="101"`) || !strings.Contains(joinBody, "RingRing suggested an available number") || !strings.Contains(joinBody, "Public emergency and crisis numbers are unavailable") || !strings.Contains(joinBody, "Adult extension (18+)") {
+	if !strings.Contains(joinBody, `id="extension" name="extension" value="101"`) || !strings.Contains(joinBody, "RingRing suggested an available number") || !strings.Contains(joinBody, "Public emergency and crisis numbers are unavailable") || strings.Contains(joinBody, "Adult extension (18+)") {
 		t.Fatal("empty-party invitation did not prefill and explain a safe extension")
 	}
 	joinCSRF := firstMatch(t, joinBody, `name="csrf" value="([^"]+)"`)
 	setup := postForm(t, client, inviteURL, url.Values{
-		"csrf": {joinCSRF}, "display_name": {"Blue phone"}, "extension": {"101"}, "device_label": {"ATA"}, "adult_extension": {"1"},
+		"csrf": {joinCSRF}, "display_name": {"Blue phone"}, "extension": {"101"}, "device_label": {"ATA"},
 	})
 	setupBody := readBody(t, setup)
 	if setup.StatusCode != http.StatusOK || !strings.Contains(setupBody, "You are extension 101") || !strings.Contains(setupBody, "sip.example.test") || !strings.Contains(setupBody, "Scan it with the <em>RingRing app.</em>") || !strings.Contains(setupBody, "Scan it with <em>Linphone.</em>") || !strings.Contains(setupBody, "One file. <em>RingRing ready.</em>") || !strings.Contains(setupBody, "/provision/wp826/") || !strings.Contains(setupBody, "Download WP826 setup file") || !strings.Contains(setupBody, "Maintenance → Upgrade and Provisioning → Config File") || !strings.Contains(setupBody, "data:image/png;base64,") || !strings.Contains(setupBody, `href="ringring://join?provision=`) || !strings.Contains(setupBody, `id="ios-provision-url"`) || !strings.Contains(setupBody, `id="phone-provision-url"`) || !strings.Contains(setupBody, `/api/v1/phone-provisioning/`) || !strings.Contains(setupBody, `href="/openapi.yaml"`) || !strings.Contains(setupBody, "Use only one setup URL") || !strings.Contains(setupBody, "href=\"sip-linphone:?linphone-fetch-config=http%3A%2F%2F") || strings.Contains(setupBody, "#ZgotmplZ") || !strings.Contains(setupBody, "Use the scanner inside RingRing") || !strings.Contains(setupBody, "Use Linphone’s scanner—not the regular Camera app") || !strings.Contains(setupBody, "TLS · port 5061") || !strings.Contains(setupBody, "UDP · port 5060") || !strings.Contains(setupBody, "TLS protects phone sign-in and call setup") || !strings.Contains(setupBody, "voice audio is still server-relayed RTP, not encrypted media") || !strings.Contains(setupBody, "Test both directions") || !strings.Contains(setupBody, "dial <strong>*10</strong>") || !strings.Contains(setupBody, "Pick a different extension by phone") || !strings.Contains(setupBody, "Dial <strong>*15</strong>") || !strings.Contains(setupBody, "press <strong>1</strong> to save") || !strings.Contains(setupBody, `data-copy-setup`) || !strings.Contains(setupBody, `data-copy-target="setup-password"`) || !strings.Contains(setupBody, "This copies the password too") || !strings.Contains(setupBody, "SIP user, user ID, authentication ID") || !strings.Contains(setupBody, "Do not forward router ports") || !strings.Contains(setupBody, "Digits only") || !strings.Contains(setupBody, "Copy uses the exact unspaced value") {
 		t.Fatalf("setup response was not successful: status=%d", setup.StatusCode)
 	}
-	if !strings.Contains(setupBody, ">*14<") {
-		t.Fatal("adult extension setup did not advertise the enabled adults-only AI line")
+	if strings.Contains(setupBody, ">*14<") || strings.Contains(setupBody, "AI chat") {
+		t.Fatal("setup advertised the removed AI conversation line")
 	}
 	oldUsername := firstMatch(t, setupBody, `id="setup-username" data-setup-value="([1-9][0-9]{5})"`)
 	oldPassword := firstMatch(t, setupBody, `id="setup-password" data-setup-value="([1-9][0-9]{11})"`)
@@ -1401,7 +1376,7 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	if phoneConfig.Version != provisioning.PhoneProvisioningVersion || phoneConfig.SIP.Server != "sip.example.test" || phoneConfig.SIP.Port != 5061 || phoneConfig.SIP.Transport != "tls" || phoneConfig.SIP.Username != freshUsername || phoneConfig.SIP.Extension != "101" || phoneConfig.SIP.Password == "" {
 		t.Fatalf("unexpected phone provisioning document: %#v", phoneConfig)
 	}
-	if len(phoneConfig.Destinations) != 6 || phoneConfig.Destinations[0].Kind != "service" || phoneConfig.Destinations[0].Label != "Echo test" || phoneConfig.Destinations[0].Dial != "*10" {
+	if len(phoneConfig.Destinations) != 5 || phoneConfig.Destinations[0].Kind != "service" || phoneConfig.Destinations[0].Label != "Echo test" || phoneConfig.Destinations[0].Dial != "*10" {
 		t.Fatalf("unexpected phone call menu: %#v", phoneConfig.Destinations)
 	}
 	for _, privateValue := range []string{"Blue phone", "Cousins Club", "ATA", "host@example.test", "proj_test"} {

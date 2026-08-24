@@ -133,9 +133,8 @@ docker run -d --name "$container" --network none --read-only --cap-drop ALL \
   --security-opt no-new-privileges --env-file "$payload/secrets/app.env" \
   --env APP_BASE_URL=https://restore.invalid --env HOST_SIGNUP_CODE= \
   --env OPENAI_ADMIN_KEY= --env GOOGLE_CLIENT_ID= --env GOOGLE_CLIENT_SECRET= \
-  --env AI_ADULT_ONLY_ENABLED=false \
-  --env SIP_PUBLIC_HOST=restore.invalid --env ASTERISK_AMI_SECRET= \
-  --env HTTP_ADDR=:8080 --env FASTAGI_ADDR=:4573 --env AI_AUDIO_ADDR=:4574 \
+	--env SIP_PUBLIC_HOST=restore.invalid --env ASTERISK_AMI_SECRET= \
+	--env HTTP_ADDR=:8080 --env FASTAGI_ADDR=:4573 \
   --volume "$payload/app:/data" --volume "$work_directory/asterisk:/asterisk" \
   --volume "$payload/secrets/apns:/run/secrets/ringring-apns:ro" \
   "$app_image" >/dev/null

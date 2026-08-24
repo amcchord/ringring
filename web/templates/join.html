@@ -16,10 +16,6 @@
       <label for="extension">Extension <small>required</small></label>
       <input id="extension" name="extension" value="{{.JoinExtension}}" inputmode="numeric" pattern="[0-9]{2,5}" minlength="2" maxlength="5" placeholder="101" required autocomplete="off" aria-describedby="extension-help{{if index .FormInvalid "extension"}} join-error{{end}}" aria-required="true" {{if index .FormInvalid "extension"}}aria-invalid="true"{{end}}>
       <small class="field-hint" id="extension-help">RingRing suggested an available number. Keep it or choose 2–5 digits. Public emergency and crisis numbers are unavailable here because RingRing cannot call them.</small>
-      <label class="adult-extension-choice">
-        <input type="checkbox" name="adult_extension" value="1" {{if .JoinAdultExtension}}checked{{end}}>
-        <span><strong>Adult extension (18+)</strong><small>For an adult’s phone—not a child or shared phone. Enables the optional *14 AI line.</small></span>
-      </label>
       <label for="device-label">What kind of phone? <small>optional</small></label>
       <input id="device-label" name="device_label" value="{{.JoinDeviceLabel}}" maxlength="40" placeholder="Grandstream adapter" autocomplete="off" {{if index .FormInvalid "device-label"}}aria-describedby="join-error" aria-invalid="true"{{end}}>
       <button class="button button-primary" type="submit">Claim this number <span aria-hidden="true">→</span></button>

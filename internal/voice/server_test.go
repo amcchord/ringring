@@ -31,35 +31,6 @@ type fakePartySource struct {
 
 type failingPartySource struct{ err error }
 
-type fakeAIAdultAccess bool
-
-func (f fakeAIAdultAccess) AIAdultAccessForDevice(context.Context, string, string) (bool, error) {
-	return bool(f), nil
-}
-
-type fakeOperatorDisclosure struct {
-	disclosed bool
-	checks    int
-	marks     int
-	partyID   string
-	endpoint  string
-}
-
-func (f *fakeOperatorDisclosure) OperatorDisclosureForDevice(_ context.Context, partyID, endpoint string) (bool, error) {
-	f.checks++
-	f.partyID = partyID
-	f.endpoint = endpoint
-	return f.disclosed, nil
-}
-
-func (f *fakeOperatorDisclosure) MarkOperatorDisclosureForDevice(_ context.Context, partyID, endpoint string, _ time.Time) error {
-	f.marks++
-	f.partyID = partyID
-	f.endpoint = endpoint
-	f.disclosed = true
-	return nil
-}
-
 func (f failingPartySource) PartyVoiceSettings(context.Context, string) (model.Party, model.PartyServices, error) {
 	return model.Party{}, model.PartyServices{}, f.err
 }
@@ -292,7 +263,7 @@ func (f *fakeWeatherLocationManager) SetWeatherLocationByDevice(_ context.Contex
 	return f.value, true, nil
 }
 
-func TestOperatorAudioUsesPartyKeyDisclosesAIAndCaches(t *testing.T) {
+func TestOperatorAudioUsesPartyKeyOmitsNoticeAndCaches(t *testing.T) {
 	cipher, err := secure.NewCipher(make([]byte, 32))
 	if err != nil {
 		t.Fatal(err)
@@ -306,31 +277,31 @@ func TestOperatorAudioUsesPartyKeyDisclosesAIAndCaches(t *testing.T) {
 		Source: fakePartySource{
 			party: model.Party{ID: "pty_operator", Name: "Private Family Name", OpenAIStatus: "ready", OpenAIKeyCiphertext: ciphertext},
 			services: model.PartyServices{
-				PartyID: "pty_operator", TimeEnabled: true, WeatherEnabled: true, RadioEnabled: true, AIEnabled: true,
+				PartyID: "pty_operator", TimeEnabled: true, WeatherEnabled: true, RadioEnabled: true,
 			},
 		},
 		Cipher: cipher, Speech: speech, AudioDir: t.TempDir(), PlaybackDir: "/voice",
 	}
 
-	path, err := server.operatorAudio(t.Context(), "pty_operator", operatorReasonHelp, true)
+	path, err := server.operatorAudio(t.Context(), "pty_operator", operatorReasonHelp)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if path != "/voice/operator-v3-help-first-pty_operator" || speech.key != "party-operator-key" || speech.calls != 1 {
+	if path != "/voice/operator-v4-help-pty_operator" || speech.key != "party-operator-key" || speech.calls != 1 {
 		t.Fatalf("unexpected operator output: path=%q key=%q calls=%d", path, speech.key, speech.calls)
 	}
-	for _, phrase := range []string{"RingRing operator", "AI-generated voice", "not a person", "star one zero", "star one one", "star one two", "star one three", "star one five", "regular or emergency"} {
+	for _, phrase := range []string{"star one zero", "star one one", "star one two", "star one three", "star one five", "regular or emergency"} {
 		if !strings.Contains(speech.input, phrase) {
 			t.Fatalf("operator tour omitted %q: %q", phrase, speech.input)
 		}
 	}
-	for _, privateOrAdultOnly := range []string{"Private Family Name", "star one four"} {
-		if strings.Contains(speech.input, privateOrAdultOnly) {
-			t.Fatalf("operator tour exposed or advertised %q: %q", privateOrAdultOnly, speech.input)
+	for _, privateOrRemoved := range []string{"Private Family Name", "star one four", "AI-generated voice", "not a person"} {
+		if strings.Contains(speech.input, privateOrRemoved) {
+			t.Fatalf("operator tour exposed or advertised %q: %q", privateOrRemoved, speech.input)
 		}
 	}
 
-	if _, err := server.operatorAudio(t.Context(), "pty_operator", operatorReasonHelp, true); err != nil {
+	if _, err := server.operatorAudio(t.Context(), "pty_operator", operatorReasonHelp); err != nil {
 		t.Fatal(err)
 	}
 	if speech.calls != 1 {
@@ -339,27 +310,23 @@ func TestOperatorAudioUsesPartyKeyDisclosesAIAndCaches(t *testing.T) {
 }
 
 func TestOperatorPromptMentionsOnlyEnabledFamilySafeLines(t *testing.T) {
-	_, prompt, err := operatorPrompt(operatorReasonHelp, model.PartyServices{}, false)
+	_, prompt, err := operatorPrompt(operatorReasonHelp, model.PartyServices{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(prompt, "AI-generated") || strings.Contains(prompt, "not a person") {
-		t.Fatalf("repeat operator prompt retained its AI disclosure: %q", prompt)
+		t.Fatalf("operator prompt retained an AI notice: %q", prompt)
 	}
 	for _, disabled := range []string{"star one one", "star one two", "star one three", "star one four"} {
 		if strings.Contains(prompt, disabled) {
 			t.Fatalf("disabled or adult-only line %q appeared in operator tour: %q", disabled, prompt)
 		}
 	}
-	_, firstPrompt, err := operatorPrompt(operatorReasonHelp, model.PartyServices{}, true)
-	if err != nil || !strings.Contains(firstPrompt, "AI-generated voice, not a person") {
-		t.Fatalf("first operator prompt lacked its disclosure: %q, %v", firstPrompt, err)
-	}
-	_, setupPrompt, err := operatorPrompt(operatorReasonHelp, model.PartyServices{WeatherEnabled: true, WeatherSetupAllowed: true}, false)
+	_, setupPrompt, err := operatorPrompt(operatorReasonHelp, model.PartyServices{WeatherEnabled: true, WeatherSetupAllowed: true})
 	if err != nil || !strings.Contains(setupPrompt, "For the weather, dial star one two") {
 		t.Fatalf("operator omitted member weather route: %q, %v", setupPrompt, err)
 	}
-	if _, _, err := operatorPrompt("caller-supplied-value", model.PartyServices{}, true); err == nil {
+	if _, _, err := operatorPrompt("caller-supplied-value", model.PartyServices{}); err == nil {
 		t.Fatal("unrecognized operator reason was accepted")
 	}
 }
@@ -373,45 +340,41 @@ func TestOperatorFastAGISetsReadyOnlyAfterPlayback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	disclosures := &fakeOperatorDisclosure{}
 	server := &Server{
 		Source: fakePartySource{
 			party:    model.Party{ID: "pty_operator", OpenAIStatus: "ready", OpenAIKeyCiphertext: ciphertext},
 			services: model.PartyServices{PartyID: "pty_operator"},
 		},
-		OperatorDisclosure: disclosures,
-		Cipher:             cipher, Speech: &fakeSpeech{}, AudioDir: t.TempDir(), PlaybackDir: "/voice",
+		Cipher: cipher, Speech: &fakeSpeech{}, AudioDir: t.TempDir(), PlaybackDir: "/voice",
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Metrics: observability.New(),
 	}
-	reader := scriptedAGI("0", "0", "0")
+	reader := scriptedAGI("0", "0", "0", "0")
 	var commands bytes.Buffer
 	server.handleOperator(reader, bufio.NewWriter(&commands), map[string]string{
 		"agi_arg_1": "pty_operator", "agi_arg_2": operatorReasonMisdial, "agi_arg_3": "123456",
 	})
 	want := "SET VARIABLE RINGRING_OPERATOR_READY 0\n" +
-		`STREAM FILE "/voice/operator-v3-misdial-first-pty_operator" ""` + "\n" +
+		`STREAM FILE "ringring-here" ""` + "\n" +
+		`STREAM FILE "/voice/operator-v4-misdial-pty_operator" ""` + "\n" +
 		"SET VARIABLE RINGRING_OPERATOR_READY 1\n"
 	if commands.String() != want {
 		t.Fatalf("unexpected operator FastAGI exchange:\n%s", commands.String())
 	}
-	if disclosures.checks != 1 || disclosures.marks != 1 || disclosures.partyID != "pty_operator" || disclosures.endpoint != "123456" {
-		t.Fatalf("unexpected first disclosure state: %#v", disclosures)
-	}
-
-	reader = scriptedAGI("0", "0", "0")
+	reader = scriptedAGI("0", "0", "0", "0")
 	commands.Reset()
 	server.handleOperator(reader, bufio.NewWriter(&commands), map[string]string{
 		"agi_arg_1": "pty_operator", "agi_arg_2": operatorReasonMisdial, "agi_arg_3": "123456",
 	})
 	want = "SET VARIABLE RINGRING_OPERATOR_READY 0\n" +
-		`STREAM FILE "/voice/operator-v3-misdial-repeat-pty_operator" ""` + "\n" +
+		`STREAM FILE "ringring-here" ""` + "\n" +
+		`STREAM FILE "/voice/operator-v4-misdial-pty_operator" ""` + "\n" +
 		"SET VARIABLE RINGRING_OPERATOR_READY 1\n"
-	if commands.String() != want || disclosures.checks != 2 || disclosures.marks != 1 {
-		t.Fatalf("repeat operator exchange or disclosure state was wrong:\n%s\n%#v", commands.String(), disclosures)
+	if commands.String() != want {
+		t.Fatalf("cached operator exchange was wrong:\n%s", commands.String())
 	}
 }
 
-func TestOperatorDoesNotMarkDisclosureWhenPlaybackFails(t *testing.T) {
+func TestOperatorDoesNotBecomeReadyWhenPlaybackFails(t *testing.T) {
 	cipher, err := secure.NewCipher(make([]byte, 32))
 	if err != nil {
 		t.Fatal(err)
@@ -420,34 +383,29 @@ func TestOperatorDoesNotMarkDisclosureWhenPlaybackFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	disclosures := &fakeOperatorDisclosure{}
 	server := &Server{
 		Source: fakePartySource{
 			party:    model.Party{ID: "pty_operator", OpenAIStatus: "ready", OpenAIKeyCiphertext: ciphertext},
 			services: model.PartyServices{PartyID: "pty_operator"},
 		},
-		OperatorDisclosure: disclosures,
-		Cipher:             cipher,
-		Speech:             &fakeSpeech{},
-		AudioDir:           t.TempDir(),
-		PlaybackDir:        "/voice",
-		Logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Metrics:            observability.New(),
+		Cipher:      cipher,
+		Speech:      &fakeSpeech{},
+		AudioDir:    t.TempDir(),
+		PlaybackDir: "/voice",
+		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Metrics:     observability.New(),
 	}
 	reader := scriptedAGI("0", "-1")
 	var commands bytes.Buffer
 	server.handleOperator(reader, bufio.NewWriter(&commands), map[string]string{
 		"agi_arg_1": "pty_operator", "agi_arg_2": operatorReasonHelp, "agi_arg_3": "123456",
 	})
-	if disclosures.checks != 1 || disclosures.marks != 0 || disclosures.disclosed {
-		t.Fatalf("failed playback changed disclosure state: %#v", disclosures)
-	}
 	if strings.Contains(commands.String(), "SET VARIABLE RINGRING_OPERATOR_READY 1") {
 		t.Fatalf("failed playback marked the operator ready:\n%s", commands.String())
 	}
 }
 
-func TestWeatherAudioUsesDecryptedPartyKeyAndDisclosesAI(t *testing.T) {
+func TestWeatherAudioUsesDecryptedPartyKeyWithoutRepeatedNotice(t *testing.T) {
 	cipher, err := secure.NewCipher(make([]byte, 32))
 	if err != nil {
 		t.Fatal(err)
@@ -473,11 +431,11 @@ func TestWeatherAudioUsesDecryptedPartyKeyAndDisclosesAI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if path != "/voice/weather-v2-mem_voice" || speech.key != "party-runtime-key" {
+	if path != "/voice/weather-v3-mem_voice" || speech.key != "party-runtime-key" {
 		t.Fatalf("unexpected output path or key: %q %q", path, speech.key)
 	}
-	if !strings.Contains(speech.input, "AI-generated voice") || !strings.Contains(speech.input, "Open-Meteo") {
-		t.Fatalf("weather phrase lacked disclosures: %q", speech.input)
+	if strings.Contains(speech.input, "AI-generated voice") || !strings.Contains(speech.input, "Open-Meteo") {
+		t.Fatalf("weather phrase retained a repeated AI notice or lost its data source: %q", speech.input)
 	}
 }
 
@@ -487,7 +445,7 @@ func TestSpendLimitReconciliationDoesNotUseCachedWeatherAudio(t *testing.T) {
 		t.Fatal(err)
 	}
 	temporary := t.TempDir()
-	if err := os.WriteFile(temporary+"/weather-v2-mem_voice.wav", []byte("cached"), 0o640); err != nil {
+	if err := os.WriteFile(temporary+"/weather-v3-mem_voice.wav", []byte("cached"), 0o640); err != nil {
 		t.Fatal(err)
 	}
 	server := &Server{
@@ -529,13 +487,15 @@ func TestWeatherFastAGICollectsAndSavesFirstZIPThenReadsForecast(t *testing.T) {
 		}}, Speech: speech, AudioDir: t.TempDir(), PlaybackDir: "/voice",
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Metrics: observability.New(), Now: func() time.Time { return now },
 	}
-	reader := scriptedAGI("02138", "0")
+	reader := scriptedAGI("0", "02138", "0", "0")
 	var commands bytes.Buffer
 	server.handleWeather(reader, bufio.NewWriter(&commands), map[string]string{
 		"agi_arg_1": "pty_weather", "agi_arg_2": "123456",
 	})
-	want := "GET DATA \"/voice/weather-setup-v1-initial-pty_weather\" 12000 5\n" +
-		"STREAM FILE \"/voice/weather-v2-mem_weather\" \"\"\n"
+	want := "STREAM FILE \"ringring-here\" \"\"\n" +
+		"GET DATA \"/voice/weather-setup-v2-initial-pty_weather\" 12000 5\n" +
+		"STREAM FILE \"ringring-here\" \"\"\n" +
+		"STREAM FILE \"/voice/weather-v3-mem_weather\" \"\"\n"
 	if commands.String() != want {
 		t.Fatalf("unexpected weather setup exchange:\n%s", commands.String())
 	}
@@ -545,7 +505,7 @@ func TestWeatherFastAGICollectsAndSavesFirstZIPThenReadsForecast(t *testing.T) {
 	if locations.value.Label != "Cambridge, Massachusetts" || locations.value.MemberID != "mem_weather" {
 		t.Fatalf("weather location was not saved for the member: %#v", locations.value)
 	}
-	if len(speech.inputs) != 2 || !strings.Contains(speech.inputs[0], "AI-generated voice") || !strings.Contains(speech.inputs[0], "five digit U.S. ZIP code") ||
+	if len(speech.inputs) != 2 || strings.Contains(strings.Join(speech.inputs, " "), "AI-generated voice") || !strings.Contains(speech.inputs[0], "five digit U.S. ZIP code") ||
 		!strings.Contains(speech.inputs[1], "Cambridge, Massachusetts") || !strings.Contains(speech.inputs[1], "Open-Meteo") {
 		t.Fatalf("unexpected weather setup and forecast prompts: %#v", speech.inputs)
 	}
@@ -569,11 +529,11 @@ func TestWeatherFastAGIRetriesInvalidZIPWithoutRecordingSpeech(t *testing.T) {
 		Weather: fakeWeather{conditions: weather.Conditions{}}, Speech: &fakeSpeech{}, AudioDir: t.TempDir(), PlaybackDir: "/voice",
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Metrics: observability.New(), Now: time.Now,
 	}
-	reader := scriptedAGI("12", "02138", "0")
+	reader := scriptedAGI("0", "12", "02138", "0", "0")
 	var commands bytes.Buffer
 	server.handleWeather(reader, bufio.NewWriter(&commands), map[string]string{"agi_arg_1": "pty_weather", "agi_arg_2": "123456"})
 	output := commands.String()
-	if strings.Count(output, "GET DATA ") != 2 || !strings.Contains(output, "weather-setup-v1-initial") || !strings.Contains(output, "weather-setup-v1-retry") || len(locations.calls) != 1 {
+	if strings.Count(output, "GET DATA ") != 2 || !strings.Contains(output, "weather-setup-v2-initial") || !strings.Contains(output, "weather-setup-v2-retry") || len(locations.calls) != 1 {
 		t.Fatalf("invalid ZIP did not retry safely:\n%s\n%#v", output, locations.calls)
 	}
 	for _, forbidden := range []string{"RECORD FILE", "speech-to-text", "transcript"} {
@@ -614,7 +574,7 @@ func TestOperatorFailureKeepsPartyAndReasonOutOfObservability(t *testing.T) {
 		Logger:  slog.New(slog.NewTextHandler(&logs, nil)),
 		Metrics: metrics,
 	}
-	reader := scriptedAGI("0")
+	reader := scriptedAGI("0", "0")
 	var commands bytes.Buffer
 	server.handleOperator(reader, bufio.NewWriter(&commands), map[string]string{
 		"agi_arg_1": "private-party-value", "agi_arg_2": "private-reason-value",

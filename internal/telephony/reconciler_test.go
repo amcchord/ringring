@@ -20,14 +20,14 @@ func (childSafetyRoutingSource) RoutingDevices(context.Context) ([]model.Routing
 }
 
 func (childSafetyRoutingSource) RoutingServices(context.Context) ([]model.RoutingServices, error) {
-	return []model.RoutingServices{{PartyID: "pty_safe", TimeEnabled: true, AIEnabled: true}}, nil
+	return []model.RoutingServices{{PartyID: "pty_safe", TimeEnabled: true}}, nil
 }
 
 type adultOnlyDecryptor struct{}
 
 func (adultOnlyDecryptor) Decrypt(string, []byte) (string, error) { return "secret", nil }
 
-func TestReconcilerFiltersAIWhenAdultOnlyGateIsClosed(t *testing.T) {
+func TestReconcilerAlwaysOmitsRemovedAIConversationRoute(t *testing.T) {
 	directory := t.TempDir()
 	reconciler := &Reconciler{
 		Source: childSafetyRoutingSource{}, Cipher: adultOnlyDecryptor{}, ConfigDir: directory,
@@ -35,23 +35,11 @@ func TestReconcilerFiltersAIWhenAdultOnlyGateIsClosed(t *testing.T) {
 	if err := reconciler.Reconcile(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	closed, err := os.ReadFile(filepath.Join(directory, "extensions.conf"))
+	generated, err := os.ReadFile(filepath.Join(directory, "extensions.conf"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(closed), "exten => *14") || strings.Contains(string(closed), "AudioSocket") || !strings.Contains(string(closed), "exten => *11") {
-		t.Fatalf("closed gate generated an AI route or removed an ordinary route:\n%s", closed)
-	}
-
-	reconciler.AIAdultOnlyEnabled = true
-	if err := reconciler.Reconcile(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	approved, err := os.ReadFile(filepath.Join(directory, "extensions.conf"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(approved), "exten => *14") || !strings.Contains(string(approved), "AudioSocket") {
-		t.Fatalf("approved gate did not generate the AI route:\n%s", approved)
+	if strings.Contains(string(generated), "exten => *14") || strings.Contains(string(generated), "AudioSocket") || !strings.Contains(string(generated), "exten => *11") {
+		t.Fatalf("removed AI route was generated or an ordinary route disappeared:\n%s", generated)
 	}
 }

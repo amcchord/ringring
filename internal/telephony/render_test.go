@@ -16,7 +16,7 @@ func TestRenderIsolatesPartyDialplans(t *testing.T) {
 		{PartyID: "pty_blue", DeviceID: "dev_b", Extension: "102", SIPUsername: "rrd_blue_b", SIPSecret: "secret-b"},
 		{PartyID: "pty_gold", DeviceID: "dev_c", Extension: "101", SIPUsername: "rrd_gold_c", SIPSecret: "secret-c"},
 	}, []model.RoutingServices{
-		{PartyID: "pty_blue", TimeEnabled: true, WeatherEnabled: true, AIEnabled: true},
+		{PartyID: "pty_blue", TimeEnabled: true, WeatherEnabled: true},
 		{PartyID: "pty_gold", TimeEnabled: true, RadioEnabled: true, RadioStation: "drone-zone"},
 	})
 	if err != nil {
@@ -55,8 +55,8 @@ func TestRenderIsolatesPartyDialplans(t *testing.T) {
 	if !strings.Contains(blue, "exten => *11") {
 		t.Fatal("time service should be present in each party")
 	}
-	if !strings.Contains(blue, "exten => *14") || !strings.Contains(blue, "ai-authorize,pty_blue") || !strings.Contains(blue, "Dial(AudioSocket/app:4574/${RINGRING_AI_CALL_ID}/c(slin))") {
-		t.Fatalf("blue party missing isolated AI bridge:\n%s", blue)
+	if strings.Contains(dialplan, "exten => *14") || strings.Contains(dialplan, "ai-authorize") || strings.Contains(dialplan, "AudioSocket") {
+		t.Fatalf("removed AI conversation route remained in generated dialplan:\n%s", dialplan)
 	}
 	if !strings.Contains(blue, "exten => *12") || strings.Contains(blue, "exten => *13") {
 		t.Fatal("blue party should contain only its enabled weather service")
@@ -71,8 +71,12 @@ func TestRenderIsolatesPartyDialplans(t *testing.T) {
 	if strings.Contains(blue, "pty_gold") || strings.Contains(gold, "pty_blue") {
 		t.Fatalf("service party ID leaked across contexts:\n%s", dialplan)
 	}
-	if !strings.Contains(blue, "exten => 101,1,NoOp(RingRing party call)\n same => n,Set(__RINGRING_CONFERENCE=rrc-pty_blue-101)\n same => n,Set(RINGRING_CALL_ID=${UUID()})\n same => n,Set(RINGRING_PUSH_SENT=0)\n same => n,AGI(agi://app:4573/incoming-call,pty_blue,${CHANNEL(endpoint)},101,${RINGRING_CALL_ID})\n same => n,ExecIf($[\"${RINGRING_PUSH_SENT}\"=\"1\"]?Wait(3))\n same => n,Dial(PJSIP/rrd_blue_a&PJSIP/rrd_blue_a_tablet,30,G(rr-party-bridge^s^1))") {
+	if !strings.Contains(blue, "exten => 101,1,NoOp(RingRing party call)\n same => n,Set(__RINGRING_CONFERENCE=rrc-pty_blue-101)\n same => n,GotoIf($[${CONFBRIDGE_INFO(parties,${RINGRING_CONFERENCE})} >= 2]?rr-join-announce:rr-ring-new)") ||
+		!strings.Contains(blue, "same => n(rr-ring-new),Set(RINGRING_CALL_ID=${UUID()})\n same => n,Set(RINGRING_PUSH_SENT=0)\n same => n,AGI(agi://app:4573/incoming-call,pty_blue,${CHANNEL(endpoint)},101,${RINGRING_CALL_ID})\n same => n,ExecIf($[\"${RINGRING_PUSH_SENT}\"=\"1\"]?Wait(3))\n same => n,Dial(PJSIP/rrd_blue_a&PJSIP/rrd_blue_a_tablet,30,G(rr-party-bridge^s^1))") {
 		t.Fatalf("same-extension phones must ring together with explicit party endpoints:\n%s", blue)
+	}
+	if strings.Count(blue, "AGI(agi://app:4573/join-party,pty_blue,${CHANNEL(endpoint)},${RINGRING_CONFERENCE})") < 2 {
+		t.Fatalf("dialing an occupied extension and its join code must both enter the active call:\n%s", blue)
 	}
 	if !strings.Contains(blue, "exten => *16101,1,Answer()\n same => n,Set(CDR_PROP(disable)=1)\n same => n,Set(RINGRING_CONFERENCE=rrc-pty_blue-101)") ||
 		!strings.Contains(blue, "CONFBRIDGE_INFO(parties,${RINGRING_CONFERENCE})") ||
@@ -165,7 +169,7 @@ func TestRenderHasNoPSTNOrCrossContextDialPrimitive(t *testing.T) {
 	config, err := Render([]DialDevice{
 		{PartyID: "pty_one", DeviceID: "dev_one", Extension: "101", SIPUsername: "rrd_one", SIPSecret: "secret-a"},
 		{PartyID: "pty_one", DeviceID: "dev_two", Extension: "102", SIPUsername: "rrd_two", SIPSecret: "secret-b"},
-	}, []model.RoutingServices{{PartyID: "pty_one", AIEnabled: true}})
+	}, []model.RoutingServices{{PartyID: "pty_one"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +180,7 @@ func TestRenderHasNoPSTNOrCrossContextDialPrimitive(t *testing.T) {
 		if !strings.Contains(line, "Dial(") {
 			continue
 		}
-		if allowedPartyDial.MatchString(line) || strings.Contains(line, "Dial(AudioSocket/app:4574/") {
+		if allowedPartyDial.MatchString(line) {
 			continue
 		}
 		t.Fatalf("generated dialplan contains a non-party destination: %q", line)
@@ -280,7 +284,7 @@ func TestRenderAnswersInvalidAndUnavailableCallsWithFriendlyPrompts(t *testing.T
 		t.Fatal("an Asterisk comment delimiter truncated the operator fallback application")
 	}
 	if strings.Contains(dialplan, "operator,pty_one,misdial,${CALLERID") {
-		t.Fatal("operator disclosure state must use the authenticated endpoint, not caller ID")
+		t.Fatal("operator authorization must use the authenticated endpoint, not caller ID")
 	}
 	if strings.Count(dialplan, "exten => _X!,1,Answer()") != 2 || strings.Count(dialplan, "exten => _*X!,1,Answer()") != 2 {
 		t.Fatalf("each party must own its numeric and star-code fallbacks:\n%s", dialplan)

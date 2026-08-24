@@ -202,11 +202,10 @@ private struct ScannerScreen: View {
 private struct InvitationSetupView: View {
     @ObservedObject var model: AppModel
     let invitation: PendingInvitation
-    @Environment(\.dismiss) private var dismiss
-    @State private var displayName = ""
-    @State private var extensionValue: String
-    @State private var adultExtension = false
-    @FocusState private var focusedField: Field?
+	@Environment(\.dismiss) private var dismiss
+	@State private var displayName = ""
+	@State private var extensionValue: String
+	@FocusState private var focusedField: Field?
 
     private enum Field {
         case name
@@ -298,19 +297,7 @@ private struct InvitationSetupView: View {
                                         .font(.footnote)
                                         .foregroundStyle(.secondary)
                                 }
-
-                                Toggle(isOn: $adultExtension) {
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text("Adult extension (18+)")
-                                            .font(.headline.weight(.black))
-                                        Text("Allows any adult-only voice service your host has enabled. It does not enable public calls.")
-                                            .font(.footnote)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                .tint(RingRingTheme.purple)
-                                .frame(minHeight: 58)
-                            }
+							}
                         }
 
                         if let error = model.invitationErrorMessage {
@@ -323,7 +310,7 @@ private struct InvitationSetupView: View {
 
                         Button {
                             focusedField = nil
-                            model.claimInvitation(displayName: displayName, extension: extensionValue, adultExtension: adultExtension)
+							model.claimInvitation(displayName: displayName, extension: extensionValue)
                         } label: {
                             if model.isProvisioning {
                                 ProgressView()
@@ -429,7 +416,7 @@ private struct DialerView: View {
                 }
 
                 if !services.isEmpty {
-                    CallMenuSection(title: "More to call", destinations: services, enabled: phone.registration == .ready) {
+                    ServiceMenuSection(destinations: services, enabled: phone.registration == .ready) {
                         requestMicrophoneThenCall($0)
                     }
                 }
@@ -562,7 +549,7 @@ private struct CallMenuSection: View {
                 .buttonStyle(.plain)
                 .disabled(!enabled)
                 .opacity(enabled ? 1 : 0.52)
-                .accessibilityLabel(destination.kind == .call ? destination.label : "Call \(destination.label)")
+                .accessibilityLabel(destination.kind == .call ? "Join the call with \(destination.label)" : "Call \(destination.label)")
                 .accessibilityHint(destination.detail ?? "Starts a private party call")
             }
         }
@@ -576,7 +563,91 @@ private struct CallMenuSection: View {
         case "*11": "clock.fill"
         case "*12": "cloud.sun.fill"
         case "*13": "radio.fill"
-        case "*14": "sparkles"
+        case "*15": "number.circle.fill"
+        default: "star.fill"
+        }
+    }
+}
+
+private struct ServiceMenuSection: View {
+    let destinations: [DialDestination]
+    let enabled: Bool
+    let call: (DialDestination) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider()
+                .overlay(RingRingTheme.ink.opacity(0.15))
+                .padding(.bottom, 12)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("MORE TO CALL")
+                    .font(.caption2.weight(.black))
+                    .tracking(1.5)
+                    .foregroundStyle(.secondary)
+                Text("Optional tools and fun numbers")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.leading, 6)
+
+            ForEach(destinations) { destination in
+                Button {
+                    call(destination)
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: symbol(for: destination.dial))
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(RingRingTheme.purple.opacity(0.78))
+                            .frame(width: 42, height: 42)
+                            .background(.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                            .accessibilityHidden(true)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(destination.label)
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(RingRingTheme.ink.opacity(0.86))
+                            if let detail = destination.detail, !detail.isEmpty {
+                                Text(detail)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                        }
+
+                        Spacer(minLength: 8)
+
+                        Image(systemName: "phone.fill")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(RingRingTheme.purple.opacity(0.68))
+                            .frame(width: 44, height: 44)
+                            .accessibilityHidden(true)
+                    }
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, minHeight: 64)
+                    .background(.white.opacity(0.58), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(RingRingTheme.ink.opacity(0.08), lineWidth: 1)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(!enabled)
+                .opacity(enabled ? 1 : 0.5)
+                .accessibilityLabel("Call \(destination.label)")
+                .accessibilityHint(destination.detail ?? "Starts a private party service")
+            }
+        }
+        .padding(.top, 24)
+    }
+
+    private func symbol(for dial: String) -> String {
+        switch dial {
+        case "*10": "waveform"
+        case "*11": "clock.fill"
+        case "*12": "cloud.sun.fill"
+        case "*13": "radio.fill"
         case "*15": "number.circle.fill"
         default: "star.fill"
         }

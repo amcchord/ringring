@@ -80,128 +80,7 @@ func TestInvitationCanOnlyBeClaimedOnce(t *testing.T) {
 	}
 }
 
-func TestAdultExtensionAuthorizesOnlyItsActiveAuthenticatedDevices(t *testing.T) {
-	ctx := t.Context()
-	s, err := Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
-	now := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
-	host, _ := s.UpsertGoogleUser(ctx, GoogleProfile{Subject: "adult-access-host", Email: "host@example.test", Name: "Host"}, now, "usr_adult_access")
-	party, _ := s.CreateParty(ctx, NewParty{ID: "pty_adult_access", Name: "Party", Slug: "adult-access", HostUserID: host.ID, CreatedAt: now})
-	otherParty, _ := s.CreateParty(ctx, NewParty{ID: "pty_adult_access_other", Name: "Other", Slug: "adult-access-other", HostUserID: host.ID, CreatedAt: now})
-	claim := func(invitationID, token, memberID, deviceID, username, extension, partyID string, adult bool) {
-		t.Helper()
-		if err := s.CreateInvitation(ctx, NewInvitation{
-			ID: invitationID, PartyID: partyID, CreatedByUserID: host.ID, TokenHash: secure.Hash(token),
-			ExpiresAt: now.Add(time.Hour), CreatedAt: now,
-		}); err != nil {
-			t.Fatal(err)
-		}
-		if _, _, _, err := s.ClaimInvitation(ctx, NewClaim{
-			TokenHash: secure.Hash(token), MemberID: memberID, DisplayName: "Phone", Extension: extension, AdultExtension: adult,
-			DeviceID: deviceID, DeviceLabel: "ATA", SIPUsername: username, SIPSecretCiphertext: "cipher-" + deviceID,
-			Provisioning: testProvisioning("provision-"+deviceID, now), Now: now,
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	claim("inv_adult_access", "adult-access", "mem_adult_access", "dev_adult_access", "123456", "101", party.ID, true)
-	claim("inv_child_access", "child-access", "mem_child_access", "dev_child_access", "234567", "102", party.ID, false)
-	claim("inv_other_access", "other-access", "mem_other_access", "dev_other_access", "345678", "101", otherParty.ID, true)
-
-	for _, test := range []struct {
-		partyID  string
-		username string
-		want     bool
-	}{
-		{party.ID, "123456", true},
-		{party.ID, "234567", false},
-		{party.ID, "345678", false},
-		{otherParty.ID, "345678", true},
-		{party.ID, "456789", false},
-	} {
-		got, err := s.AIAdultAccessForDevice(ctx, test.partyID, test.username)
-		if err != nil || got != test.want {
-			t.Fatalf("adult access party=%q username=%q = %t, %v; want %t", test.partyID, test.username, got, err, test.want)
-		}
-	}
-	members, err := s.ListMembers(ctx, party.ID)
-	if err != nil || len(members) != 2 || !members[0].AdultExtension || members[1].AdultExtension {
-		t.Fatalf("adult extension classification was not preserved: %#v error=%v", members, err)
-	}
-	if err := s.RevokeDevice(ctx, party.ID, host.ID, "dev_adult_access", now.Add(time.Minute)); err != nil {
-		t.Fatal(err)
-	}
-	if allowed, err := s.AIAdultAccessForDevice(ctx, party.ID, "123456"); err != nil || allowed {
-		t.Fatalf("revoked adult device retained access: allowed=%t error=%v", allowed, err)
-	}
-}
-
-func TestOperatorDisclosureIsSharedOnlyByActiveDevicesOnOneExtension(t *testing.T) {
-	ctx := t.Context()
-	s, err := Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
-
-	now := time.Date(2026, 8, 23, 18, 0, 0, 0, time.UTC)
-	host, err := s.UpsertGoogleUser(ctx, GoogleProfile{Subject: "operator-host", Email: "host@example.test", Name: "Host"}, now, "usr_operator")
-	if err != nil {
-		t.Fatal(err)
-	}
-	party, err := s.CreateParty(ctx, NewParty{ID: "pty_operator", Name: "Party", Slug: "operator", HostUserID: host.ID, CreatedAt: now})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.CreateInvitation(ctx, NewInvitation{
-		ID: "inv_operator", PartyID: party.ID, CreatedByUserID: host.ID, TokenHash: secure.Hash("operator-token"),
-		ExpiresAt: now.Add(time.Hour), CreatedAt: now,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, _, err := s.ClaimInvitation(ctx, NewClaim{
-		TokenHash: secure.Hash("operator-token"), MemberID: "mem_operator", DisplayName: "Phone", Extension: "101",
-		DeviceID: "dev_operator_one", DeviceLabel: "ATA", SIPUsername: "123456", SIPSecretCiphertext: "cipher-one",
-		Provisioning: testProvisioning("provision-operator", now), Now: now,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO devices (id, member_id, label, sip_username, sip_secret_ciphertext, created_at)
-		VALUES ('dev_operator_two', 'mem_operator', 'Second phone', '234567', 'cipher-two', ?)`, unix(now)); err != nil {
-		t.Fatal(err)
-	}
-
-	if disclosed, err := s.OperatorDisclosureForDevice(ctx, party.ID, "123456"); err != nil || disclosed {
-		t.Fatalf("new extension disclosure = %t, %v", disclosed, err)
-	}
-	if err := s.MarkOperatorDisclosureForDevice(ctx, party.ID, "123456", now.Add(time.Minute)); err != nil {
-		t.Fatal(err)
-	}
-	for _, username := range []string{"123456", "234567"} {
-		if disclosed, err := s.OperatorDisclosureForDevice(ctx, party.ID, username); err != nil || !disclosed {
-			t.Fatalf("shared extension disclosure for %q = %t, %v", username, disclosed, err)
-		}
-	}
-	if err := s.MarkOperatorDisclosureForDevice(ctx, "pty_other", "123456", now); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("cross-party disclosure mark error = %v", err)
-	}
-	if err := s.RevokeDevice(ctx, party.ID, host.ID, "dev_operator_two", now.Add(2*time.Minute)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.OperatorDisclosureForDevice(ctx, party.ID, "234567"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("revoked device disclosure error = %v", err)
-	}
-	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM operator_disclosures`).Scan(&count); err != nil || count != 1 {
-		t.Fatalf("operator disclosure rows = %d, %v", count, err)
-	}
-}
-
-func TestExistingMembersMigrateToNonAdultExtensions(t *testing.T) {
+func TestLegacyConversationColumnsRemainDisabledAfterMigration(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.db")
 	legacy, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -232,14 +111,14 @@ func TestExistingMembersMigrateToNonAdultExtensions(t *testing.T) {
 		t.Fatal(err)
 	}
 	if adult != 0 {
-		t.Fatalf("legacy extension defaulted to adult: %d", adult)
+		t.Fatalf("legacy adult-extension column did not default off: %d", adult)
 	}
 	var disclosureTable int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'operator_disclosures'`).Scan(&disclosureTable); err != nil {
 		t.Fatal(err)
 	}
-	if disclosureTable != 1 {
-		t.Fatalf("operator disclosure migration table count = %d", disclosureTable)
+	if disclosureTable != 0 {
+		t.Fatalf("retired operator-disclosure table was created in a fresh migration: %d", disclosureTable)
 	}
 }
 
@@ -913,18 +792,13 @@ func TestPartyServiceSettingsAreHostScopedAndDefaultToTime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !defaults.TimeEnabled || defaults.WeatherEnabled || !defaults.WeatherSetupAllowed || defaults.RadioEnabled || defaults.RadioStation != "groove-salad" || defaults.AIEnabled {
+	if !defaults.TimeEnabled || defaults.WeatherEnabled || !defaults.WeatherSetupAllowed || defaults.RadioEnabled || defaults.RadioStation != "groove-salad" {
 		t.Fatalf("unexpected service defaults: %#v", defaults)
 	}
 	input := ServiceSettingsInput{
 		TimeEnabled: false, WeatherEnabled: true, WeatherSetupAllowed: true, WeatherQuery: "Portland, Maine",
 		WeatherLabel: "Portland, Maine", WeatherLatitude: 43.66, WeatherLongitude: -70.25,
-		RadioEnabled: true, RadioStation: "drone-zone", AIEnabled: true, AIAdultOnlyEnabled: true, UpdatedAt: now.Add(time.Minute),
-	}
-	closedInput := input
-	closedInput.AIAdultOnlyEnabled = false
-	if _, err := s.UpdatePartyServices(ctx, party.ID, host.ID, closedInput); !errors.Is(err, ErrAIAdultOnly) {
-		t.Fatalf("closed adult-only gate error = %v", err)
+		RadioEnabled: true, RadioStation: "drone-zone", UpdatedAt: now.Add(time.Minute),
 	}
 	if _, err := s.UpdatePartyServices(ctx, party.ID, other.ID, input); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("non-host update error = %v", err)
@@ -933,7 +807,7 @@ func TestPartyServiceSettingsAreHostScopedAndDefaultToTime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.TimeEnabled || !updated.WeatherEnabled || !updated.RadioEnabled || updated.RadioStation != "drone-zone" || !updated.AIEnabled || updated.WeatherLabel != "Portland, Maine" {
+	if updated.TimeEnabled || !updated.WeatherEnabled || !updated.RadioEnabled || updated.RadioStation != "drone-zone" || updated.WeatherLabel != "Portland, Maine" {
 		t.Fatalf("unexpected updated settings: %#v", updated)
 	}
 	if _, err := s.UpdatePartyServices(ctx, party.ID, host.ID, ServiceSettingsInput{RadioEnabled: true, RadioStation: "http://example.test/live", UpdatedAt: now}); !errors.Is(err, ErrInvalidRadio) {
@@ -946,22 +820,18 @@ func TestPartyServiceSettingsAreHostScopedAndDefaultToTime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(routing) != 1 || routing[0].TimeEnabled || !routing[0].WeatherEnabled || !routing[0].RadioEnabled || routing[0].RadioStation != "drone-zone" || !routing[0].AIEnabled {
+	if len(routing) != 1 || routing[0].TimeEnabled || !routing[0].WeatherEnabled || !routing[0].RadioEnabled || routing[0].RadioStation != "drone-zone" {
 		t.Fatalf("unexpected routing services: %#v", routing)
 	}
-	if err := s.EnforceAIAdultOnlyGate(ctx, true, now.Add(2*time.Minute)); err != nil {
+	if _, err := s.db.Exec(`UPDATE party_services SET ai_enabled = 1 WHERE party_id = ?`, party.ID); err != nil {
 		t.Fatal(err)
 	}
-	stillApproved, err := s.PartyServices(ctx, party.ID)
-	if err != nil || !stillApproved.AIEnabled {
-		t.Fatalf("open gate mutated the AI preference: %#v error=%v", stillApproved, err)
-	}
-	if err := s.EnforceAIAdultOnlyGate(ctx, false, now.Add(3*time.Minute)); err != nil {
+	if err := s.DisableLegacyAIConversation(ctx, now.Add(3*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	closed, err := s.PartyServices(ctx, party.ID)
-	if err != nil || closed.AIEnabled || !closed.WeatherEnabled || !closed.RadioEnabled {
-		t.Fatalf("closed gate did not clear only the conversation preference: %#v error=%v", closed, err)
+	var legacyAIEnabled int
+	if err := s.db.QueryRow(`SELECT ai_enabled FROM party_services WHERE party_id = ?`, party.ID).Scan(&legacyAIEnabled); err != nil || legacyAIEnabled != 0 {
+		t.Fatalf("legacy conversation preference remained enabled: value=%d error=%v", legacyAIEnabled, err)
 	}
 	if _, err := s.db.Exec(`UPDATE party_services SET radio_station = '' WHERE party_id = ?`, party.ID); err != nil {
 		t.Fatal(err)
@@ -1143,7 +1013,7 @@ func TestPartyOpenAIKeyRotationIsHostScopedAndCompareAndSwap(t *testing.T) {
 	if err := s.UpdatePartyOpenAI(ctx, party.ID, "proj_rotation", "svc_rotation", "key_old", "cipher_old", "ready", 1000); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpdatePartyServices(ctx, party.ID, host.ID, ServiceSettingsInput{TimeEnabled: true, WeatherEnabled: true, WeatherQuery: "Portland", WeatherLabel: "Portland", AIEnabled: true, AIAdultOnlyEnabled: true, UpdatedAt: now}); err != nil {
+	if _, err := s.UpdatePartyServices(ctx, party.ID, host.ID, ServiceSettingsInput{TimeEnabled: true, WeatherEnabled: true, WeatherQuery: "Portland", WeatherLabel: "Portland", UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.StartPartyOpenAIKeyRotation(ctx, party.ID, other.ID, "key_old", "key_outsider", "cipher_outsider"); !errors.Is(err, ErrOpenAIRotation) {
@@ -1162,8 +1032,8 @@ func TestPartyOpenAIKeyRotationIsHostScopedAndCompareAndSwap(t *testing.T) {
 	if rotating.OpenAIAPIKeyID != "key_fresh" || rotating.OpenAIKeyCiphertext != "cipher_fresh" || rotating.OpenAIStatus != "rotating" {
 		t.Fatalf("unexpected rotating state: %#v", rotating)
 	}
-	if routing, err := s.RoutingServices(ctx); err != nil || len(routing) != 1 || routing[0].AIEnabled || routing[0].WeatherEnabled {
-		t.Fatalf("AI routes were not paused during rotation: %#v, %v", routing, err)
+	if routing, err := s.RoutingServices(ctx); err != nil || len(routing) != 1 || routing[0].WeatherEnabled {
+		t.Fatalf("provider-backed routes were not paused during rotation: %#v, %v", routing, err)
 	}
 	if err := s.StartPartyOpenAIKeyRotation(ctx, party.ID, host.ID, "key_old", "key_second", "cipher_second"); !errors.Is(err, ErrOpenAIRotation) {
 		t.Fatalf("concurrent rotation error = %v", err)
@@ -1200,7 +1070,7 @@ func TestPartyOpenAISpendLimitUpdateIsHostScopedRetryableAndPausesRoutes(t *test
 	if err := s.UpdatePartyOpenAI(ctx, party.ID, "proj_spend", "svc_spend", "key_spend", "cipher_spend", "ready", 1000); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpdatePartyServices(ctx, party.ID, host.ID, ServiceSettingsInput{TimeEnabled: true, WeatherEnabled: true, WeatherQuery: "Portland", WeatherLabel: "Portland", AIEnabled: true, AIAdultOnlyEnabled: true, UpdatedAt: now}); err != nil {
+	if _, err := s.UpdatePartyServices(ctx, party.ID, host.ID, ServiceSettingsInput{TimeEnabled: true, WeatherEnabled: true, WeatherQuery: "Portland", WeatherLabel: "Portland", UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.StartPartyOpenAISpendLimitUpdate(ctx, party.ID, other.ID, "proj_spend", 725); !errors.Is(err, ErrOpenAISpendLimit) {
@@ -1219,8 +1089,8 @@ func TestPartyOpenAISpendLimitUpdateIsHostScopedRetryableAndPausesRoutes(t *test
 	if updating.OpenAIStatus != "spend-updating" || updating.OpenAISpendLimitCents != 1000 || updating.OpenAISpendPendingCents != 725 || updating.OpenAISpendLimitStatus != "updating" {
 		t.Fatalf("unexpected pending spend state: %#v", updating)
 	}
-	if routing, err := s.RoutingServices(ctx); err != nil || len(routing) != 1 || routing[0].AIEnabled || routing[0].WeatherEnabled {
-		t.Fatalf("AI routes were not paused during spend update: %#v, %v", routing, err)
+	if routing, err := s.RoutingServices(ctx); err != nil || len(routing) != 1 || routing[0].WeatherEnabled {
+		t.Fatalf("provider-backed routes were not paused during spend update: %#v, %v", routing, err)
 	}
 	if err := s.StartPartyOpenAISpendLimitUpdate(ctx, party.ID, host.ID, "proj_spend", 500); !errors.Is(err, ErrOpenAISpendLimit) {
 		t.Fatalf("concurrent amount error = %v", err)
@@ -1245,8 +1115,8 @@ func TestPartyOpenAISpendLimitUpdateIsHostScopedRetryableAndPausesRoutes(t *test
 	if ready.OpenAIStatus != "ready" || ready.OpenAISpendLimitCents != 725 || ready.OpenAISpendPendingCents != 0 || ready.OpenAISpendLimitStatus != "ready" {
 		t.Fatalf("unexpected confirmed spend state: %#v", ready)
 	}
-	if routing, err := s.RoutingServices(ctx); err != nil || len(routing) != 1 || !routing[0].AIEnabled || !routing[0].WeatherEnabled {
-		t.Fatalf("AI routes did not resume after spend update: %#v, %v", routing, err)
+	if routing, err := s.RoutingServices(ctx); err != nil || len(routing) != 1 || !routing[0].WeatherEnabled {
+		t.Fatalf("provider-backed routes did not resume after spend update: %#v, %v", routing, err)
 	}
 }
 

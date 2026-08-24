@@ -14,7 +14,7 @@ The camera is used only to scan the setup QR. The microphone and audio output ar
 
 Calls are carried through the RingRing server and are not end-to-end encrypted. The iOS app does not record calls, create transcripts, keep a call history, or connect to the public telephone network. RingRing cannot place emergency calls.
 
-A party host may enable optional server-side voice services. Those services can contact their identified providers from the RingRing server; for example, the adults-only AI preview gives a spoken provider disclosure before sending call audio to that provider. The iOS app does not contain or receive the party's provider credentials.
+A party host may enable optional server-side voice services. Those services can contact their identified providers from the RingRing server for fixed operator text, weather text, or a joining member's display label; they do not send call audio. The iOS app does not contain or receive the party's provider credentials.
 
 To receive a call while backgrounded or locked, the app gives its RingRing server an Apple PushKit VoIP token for this iPhone. The server stores it encrypted and sends Apple only an opaque call identifier to wake the app; the notification does not contain party names, member names, extensions, SIP credentials, call audio, or a transcript. The later private SIP call supplies the caller identity. Disconnecting or revoking the phone removes the server registration, and Apple may process delivery metadata under Apple's own terms.
 

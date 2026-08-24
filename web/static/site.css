@@ -129,10 +129,6 @@ h1 em, h2 em { color: var(--coral); font-style: normal; }
 .stack-form { display: flex; flex-direction: column; gap: 10px; }.stack-form label { margin-top: 8px; font-weight: 850; }.stack-form label small { color: var(--muted); font-weight: 600; }
 .field-hint, .form-guidance { color: var(--muted); font-size: .78rem; line-height: 1.45; }
 .field-hint { margin: -4px 3px 0; }.form-guidance { margin: 0 0 4px; }
-.stack-form .adult-extension-choice { min-height: 44px; margin: 8px 0 2px; padding: 12px 13px; display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; align-items: start; color: var(--ink); background: #fff2bd; border: 1.5px solid #a87810; border-radius: 12px; cursor: pointer; }
-.adult-extension-choice input { width: 21px; min-height: 21px; margin: 1px 0 0; accent-color: var(--purple); }
-.adult-extension-choice strong, .adult-extension-choice small { display: block; }.adult-extension-choice small { margin-top: 3px; color: #5c4511 !important; font-size: .76rem; line-height: 1.45; }
-.adult-extension-choice:has(input:focus-visible) { border-color: var(--purple); box-shadow: 0 0 0 3px rgba(108,76,255,.15); }
 input { width: 100%; min-height: 52px; padding: 12px 14px; color: var(--ink); background: var(--paper); border: 2px solid var(--line); border-radius: 12px; outline: none; }
 input:focus { border-color: var(--purple); box-shadow: 0 0 0 4px rgba(108,76,255,.15); }.stack-form .button { margin-top: 13px; }
 .list-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; margin-bottom: 12px; }.list-heading span { color: var(--muted); font-size: .85rem; }.list-heading h2 { margin-top: 0; }

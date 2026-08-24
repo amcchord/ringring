@@ -48,6 +48,10 @@ type fakePhonePushNotifier struct {
 	err    error
 }
 
+type fakeDecryptor struct{}
+
+func (*fakeDecryptor) Decrypt(string, []byte) (string, error) { return "", nil }
+
 func (notifier *fakePhonePushNotifier) SendVoIP(_ context.Context, token, callID string) (apns.SendResult, error) {
 	notifier.token = token
 	notifier.callID = callID

@@ -2,6 +2,32 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-24 — Quieter voice help and simpler party-call joining
+
+### Shipped
+
+- Removed the repeated AI-voice notices from the RingRing operator and weather speech. Removed the open-ended conversation line end to end: no `*14` route, AudioSocket/Realtime listener, host switch, setup-card promotion, invitation adult-extension choice, iOS control, runtime configuration, or conversation-specific dependency remains. Startup clears an older saved enablement, new claims force the legacy adult flag off, and released iOS payloads may still include that now-ignored field while upgrading.
+- Added a bundled 0.68-second mono 8 kHz PCM “Ring ring! RingRing here!” recording to the Asterisk image. Operator, weather setup, and forecast work now begins concurrently and the local greeting plays immediately while cached or generated text-to-speech becomes ready; the generated remainder no longer repeats the introduction.
+- Made dialing an extension that already owns an active party conference enter the same authenticated join path as its hidden `*16…` action. The operator announces the joining member resolved from the authenticated endpoint, ConfBridge recording and CDR stay disabled, and a new call still rings normally when no conference exists.
+- Kept active calls at the top of the iPhone call menu with participant names, phone count, and one-tap joining. People retain the large primary cards; **More to call** now sits below a divider with explicit optional copy, smaller muted rows, and reduced visual weight. The debug preview no longer contacts the live phone API, keeping visual and App Store captures deterministic.
+
+### Decisions
+
+- Keep provider speech one-way and code-controlled for operator help, weather, and join announcements; remove the interactive model surface rather than merely hide it in the UI. Current model calls receive no caller audio.
+- Use the ordinary called extension as the natural join action while retaining the hidden join destination used by configured phone-app buttons. Both paths remain generated inside the authenticated caller's exact party context.
+- Retain only inert legacy SQLite columns so forward-only migrations and intentional rollback remain safe. Current models, store inputs, APIs, and routing no longer expose adult/conversation state, and fresh databases no longer create the retired disclosure table.
+
+### Verification
+
+- `make check`, `make security`, and `make admin-test` pass. This includes formatting, shell and administrative lifecycle checks, `go vet`, the complete race-enabled Go suite, executable security contracts, and `govulncheck` with no called vulnerability.
+- The iPhone 17 Pro simulator passes all 16 Swift tests. A clean configured-phone preview confirms a prominent **Happening now** join card, primary **People** cards, and the separated muted **More to call** section without an alert or horizontal overflow.
+- The bundled greeting is verified as 16-bit mono PCM at 8 kHz and 0.6835 seconds. Voice tests pin pre-roll-before-generated-audio ordering, cache behavior, fixed prompt privacy, and the absence of the removed notices.
+- `make sip-smoke` passes with verified TLS 1.2 and UDP phones, live three-phone joining by dialing the already-active extension, announcement authorization, original-owner teardown, zero residual channels/CDR, mixed-transport media, operator fallbacks, `*10`, and authenticated `*15`.
+
+### Remaining
+
+- Listen to the bundled greeting and measure perceived first-word latency on physical family handsets. Complete one TestFlight one-tap join and one three-phone direct-extension join before treating the interaction as hardware-verified.
+
 ## 2026-08-24 — Refresh the contributor contract and project tour
 
 ### Shipped
