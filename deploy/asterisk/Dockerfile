@@ -40,7 +40,11 @@ COPY config/ /etc/asterisk/
 COPY sounds/ /var/lib/asterisk/sounds/
 COPY entrypoint.sh /usr/local/bin/ringring-asterisk-entrypoint
 COPY refresh-tls.sh /usr/local/bin/ringring-asterisk-refresh-tls
-RUN find /etc/asterisk -maxdepth 1 -type f -exec chown asterisk:ringring {} + \
+# Asterisk normally prefixes the channel language, but a real production phone
+# attempted unprefixed prompt lookup despite the generated endpoint default.
+# Keep the English-only product prompts available through both lookup paths.
+RUN cp -a /var/lib/asterisk/sounds/en/. /var/lib/asterisk/sounds/ \
+	&& find /etc/asterisk -maxdepth 1 -type f -exec chown asterisk:ringring {} + \
 	&& find /etc/asterisk -maxdepth 1 -type f -exec chmod 0640 {} + \
 	&& find /var/lib/asterisk/sounds -type f -name 'ringring-*.wav' -exec chown asterisk:ringring {} + \
 	&& find /var/lib/asterisk/sounds -type f -name 'ringring-*.wav' -exec chmod 0644 {} + \

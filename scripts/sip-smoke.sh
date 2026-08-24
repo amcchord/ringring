@@ -308,10 +308,20 @@ for prompt in hello your extension is auth-thankyou ringring-here; do
   fi
   docker exec ringring-sip-smoke-asterisk \
     test -s "/var/lib/asterisk/sounds/en/$prompt.$extension"
+  docker exec ringring-sip-smoke-asterisk \
+    test -s "/var/lib/asterisk/sounds/$prompt.$extension"
 done
 for prompt in sorry number-not-answering please-try-call-later cannot-complete-as-dialed please-try-again; do
   docker exec ringring-sip-smoke-asterisk \
     test -s "/var/lib/asterisk/sounds/en/$prompt.gsm"
+  docker exec ringring-sip-smoke-asterisk \
+    test -s "/var/lib/asterisk/sounds/$prompt.gsm"
+done
+for prompt in day-1 at; do
+  docker exec ringring-sip-smoke-asterisk \
+    test -s "/var/lib/asterisk/sounds/en/digits/$prompt.gsm"
+  docker exec ringring-sip-smoke-asterisk \
+    test -s "/var/lib/asterisk/sounds/digits/$prompt.gsm"
 done
 invalid_number=$(docker exec ringring-sip-smoke-asterisk \
   asterisk -rx 'dialplan show 222@rr-party-pty_smoke')
@@ -521,8 +531,8 @@ fi
 docker rm ringring-sip-smoke-phone-a >/dev/null
 docker rm ringring-sip-smoke-register-generated >/dev/null
 find "$work_directory/logs/ringring-sip-smoke-phone-a" -type f -delete
-for destination in 222 '*12' 0; do
-  echo "Calling unavailable destination $destination and checking for an answered spoken response..."
+for destination in '*11' 222 '*12' 0; do
+  echo "Calling spoken destination $destination and checking for an answered response..."
   failure_started=$(date +%s)
   run_and_wait ringring-sip-smoke-phone-a 20 \
     --network "$network" --ip 172.31.89.40 --volume "$scenario_mount" \
@@ -544,6 +554,13 @@ for destination in 222 '*12' 0; do
   docker rm ringring-sip-smoke-phone-a >/dev/null
   find "$work_directory/logs/ringring-sip-smoke-phone-a" -type f -delete
 done
+
+if docker logs ringring-sip-smoke-asterisk 2>&1 | \
+  grep -Eq 'does not exist in any format|Unable to open .*sound'; then
+  echo "A spoken call attempted to play a missing sound file." >&2
+  docker logs ringring-sip-smoke-asterisk >&2 || true
+  exit 1
+fi
 
 echo "Calling *10 and checking the single-phone RTP echo..."
 run_and_wait ringring-sip-smoke-phone-a 30 \
