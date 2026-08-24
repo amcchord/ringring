@@ -163,6 +163,58 @@ func TestProvision(t *testing.T) {
 	}
 }
 
+func TestProvisionArchivesIncompleteProject(t *testing.T) {
+	tests := []struct {
+		name              string
+		failurePath       string
+		omitServiceAPIKey bool
+	}{
+		{name: "spend limit failure", failurePath: "/organization/projects/proj_partial/spend_limit"},
+		{name: "service account failure", failurePath: "/organization/projects/proj_partial/service_accounts"},
+		{name: "service account credentials omitted", omitServiceAPIKey: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			archived := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method + " " + r.URL.Path {
+				case "POST /organization/projects":
+					_, _ = w.Write([]byte(`{"id":"proj_partial"}`))
+				case "POST /organization/projects/proj_partial/spend_limit":
+					if r.URL.Path == test.failurePath {
+						http.Error(w, `{"error":{"message":"temporary provider failure"}}`, http.StatusBadGateway)
+						return
+					}
+					_, _ = w.Write([]byte(`{"object":"project.spend_limit","threshold_amount":1000,"currency":"USD","interval":"month","enforcement":{"status":"enforcing"}}`))
+				case "POST /organization/projects/proj_partial/service_accounts":
+					if test.omitServiceAPIKey {
+						_, _ = w.Write([]byte(`{"id":"svc_partial"}`))
+						return
+					}
+					http.Error(w, `{"error":{"message":"temporary provider failure"}}`, http.StatusBadGateway)
+				case "GET /organization/projects/proj_partial":
+					_, _ = w.Write([]byte(`{"id":"proj_partial","status":"active"}`))
+				case "POST /organization/projects/proj_partial/archive":
+					archived++
+					_, _ = w.Write([]byte(`{"id":"proj_partial","status":"archived"}`))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+
+			client := New("sk-admin-test", 1000, server.Client())
+			client.baseURL = server.URL
+			if _, err := client.Provision(t.Context(), "pty_partial", "Partial party"); err == nil {
+				t.Fatal("partial provisioning unexpectedly succeeded")
+			}
+			if archived != 1 {
+				t.Fatalf("archive requests = %d, want 1", archived)
+			}
+		})
+	}
+}
+
 func TestUpdateProjectSpendLimitRequiresExactActiveConfirmation(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -331,5 +383,32 @@ func TestArchiveProjectIsRetrySafe(t *testing.T) {
 	}
 	if archives != 1 {
 		t.Fatalf("archive requests = %d, want 1", archives)
+	}
+}
+
+func TestArchiveProjectConfirmsAmbiguousResponse(t *testing.T) {
+	status := "active"
+	gets := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /organization/projects/proj_test":
+			gets++
+			_, _ = w.Write([]byte(`{"id":"proj_test","status":"` + status + `"}`))
+		case "POST /organization/projects/proj_test/archive":
+			status = "archived"
+			_, _ = w.Write([]byte(`{"id":"proj_test"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := New("sk-admin-test", 1000, server.Client())
+	client.baseURL = server.URL
+	if err := client.ArchiveProject(t.Context(), "proj_test"); err != nil {
+		t.Fatal(err)
+	}
+	if gets != 2 {
+		t.Fatalf("project lookups = %d, want 2", gets)
 	}
 }

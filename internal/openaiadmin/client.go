@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 const defaultBaseURL = "https://api.openai.com/v1"
@@ -127,7 +128,7 @@ func (c *Client) VerifyProjectZeroDataRetention(ctx context.Context, projectID s
 	}
 }
 
-func (c *Client) Provision(ctx context.Context, partyID, partyName string) (ProvisionedProject, error) {
+func (c *Client) Provision(ctx context.Context, partyID, partyName string) (provisioned ProvisionedProject, err error) {
 	if c.adminKey == "" {
 		return ProvisionedProject{}, errors.New("OpenAI admin key is not configured")
 	}
@@ -144,6 +145,17 @@ func (c *Client) Provision(ctx context.Context, partyID, partyName string) (Prov
 	if project.ID == "" {
 		return ProvisionedProject{}, errors.New("create OpenAI project: response had no project ID")
 	}
+	complete := false
+	defer func() {
+		if complete {
+			return
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
+		defer cancel()
+		if cleanupErr := c.ArchiveProject(cleanupCtx, project.ID); cleanupErr != nil {
+			err = errors.Join(err, fmt.Errorf("archive incomplete OpenAI project: %w", cleanupErr))
+		}
+	}()
 
 	limit, err := c.UpdateProjectSpendLimit(ctx, project.ID, c.spendLimit)
 	if err != nil {
@@ -165,13 +177,15 @@ func (c *Client) Provision(ctx context.Context, partyID, partyName string) (Prov
 		return ProvisionedProject{}, errors.New("create OpenAI service account: response omitted credentials")
 	}
 
-	return ProvisionedProject{
+	provisioned = ProvisionedProject{
 		ProjectID:        project.ID,
 		ServiceAccountID: serviceAccount.ID,
 		APIKeyID:         serviceAccount.APIKey.ID,
 		APIKey:           serviceAccount.APIKey.Value,
 		SpendLimitCents:  limit.ThresholdAmount,
-	}, nil
+	}
+	complete = true
+	return provisioned, nil
 }
 
 // UpdateProjectSpendLimit creates or replaces a project's hard monthly limit.
@@ -353,8 +367,15 @@ func (c *Client) ArchiveProject(ctx context.Context, projectID string) error {
 	if err := c.post(ctx, path+"/archive", map[string]any{}, &archived); err != nil {
 		return fmt.Errorf("archive OpenAI project: %w", err)
 	}
-	if archived.Status != "archived" {
-		return errors.New("archive OpenAI project: response did not confirm archived status")
+	if archived.Status == "archived" {
+		return nil
+	}
+	var confirmed projectResponse
+	if err := c.get(ctx, path, &confirmed); err != nil {
+		return fmt.Errorf("confirm archived OpenAI project: %w", err)
+	}
+	if confirmed.Status != "archived" {
+		return errors.New("archive OpenAI project: follow-up did not confirm archived status")
 	}
 	return nil
 }

@@ -8,16 +8,19 @@ This is the durable, chronological project record. Add new entries at the top. C
 
 - The first production fix reached `*11`, but the next physical calls still ended at pickup. Privacy-safe voice metrics recorded a time-service error, while Asterisk reported that `ringring-here`, `digits/day-1`, and other bundled English prompts did not exist even though the exact files were present, readable, and valid under `sounds/en` and the loaded endpoint declared `language=en`.
 - The failure occurred before the friendly OpenAI time audio could be selected. FastAGI deliberately stops when its immediate greeting cannot play, after which the local `SayUnixTime` fallback also failed on the same unprefixed English lookup.
+- Creating an isolated production acceptance party exposed a separate provider failure between successful project/spend-limit creation and service-account creation. RingRing marked the local party unavailable but did not archive the partially created external project. The exact disposable project was identified by its test-only name, later service-account creation succeeded, and the project was archived; no test project remains active.
 
 ### Shipped
 
 - Mirrored the complete English sound set into the Asterisk sound root at image build time while retaining the canonical `sounds/en` tree. This supports both Asterisk's ordinary language-prefixed lookup and the unprefixed path observed from the real production phone without changing a family endpoint or generated party route.
 - Strengthened the isolated SIP acceptance gate to require the root and language-prefixed greeting, recovery prompts, and date/time words. It now places an authenticated `*11` call, requires an answered spoken-duration response, and rejects any Asterisk trace that attempted a missing sound.
+- Made OpenAI party provisioning transactional across external steps: once a project exists, any spend-limit, service-account, credential-response, cancellation, or timeout failure attempts a bounded archive using a context independent of the canceled request. Archive responses that do not immediately echo status now receive a provider read-back before RingRing decides whether cleanup succeeded.
 
 ### Verification
 
 - The production Asterisk image builds with byte-identical root and `en` greeting copies and contains the root `digits/day-1` and fallback prompts. The complete SIP smoke gate passes with authenticated `*11`, verified TLS 1.2 and UDP registration, spoken fallbacks, RTP, extension selection, direct active-call joining, and zero residual channels.
 - `make check`, `make security`, and `make admin-test` pass, including formatting and shell checks, the guarded deployment workflow tests, `go vet`, the race-enabled Go suite, and `govulncheck` with no called vulnerability.
+- Focused provider tests prove both spend-limit and service-account failures archive their partial project, while an ambiguous archive response succeeds only after an authenticated follow-up reports `archived`. Current official OpenAI documentation still specifies project creation, hard monthly USD limits in cents, default service-account API-key issuance, and irreversible project archiving through the endpoints RingRing uses.
 
 ## 2026-08-24 — Restore special-line audio and add the friendly time voice
 
