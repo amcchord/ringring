@@ -68,9 +68,20 @@ type fakeActiveConferences struct {
 	count int
 }
 
+type fakePhoneActivities struct {
+	activities []telephony.PhoneActivity
+	err        error
+	count      int
+}
+
 func (f *fakeActiveConferences) ActiveConferenceCalls(context.Context) ([]telephony.ActiveConference, error) {
 	f.count++
 	return f.calls, f.err
+}
+
+func (f *fakePhoneActivities) PhoneActivities(context.Context) ([]telephony.PhoneActivity, error) {
+	f.count++
+	return f.activities, f.err
 }
 
 func (f fakeContactPresence) ContactStatuses(context.Context) (map[string]telephony.ContactState, error) {
@@ -472,26 +483,54 @@ func TestPhoneCallDestinationsHideOwnNumberAndIncludeOnlyRoutableChoices(t *test
 
 func TestActivePartyCallsExposeOnlyKnownSamePartyPhones(t *testing.T) {
 	calls := &fakeActiveConferences{calls: []telephony.ActiveConference{
-		{Name: "rrc-pty_family-102", PartyID: "pty_family", JoinExtension: "102", Endpoints: []string{"111111", "222222"}},
+		{Name: "rrc-pty_family-102", PartyID: "pty_family", JoinExtension: "102", Endpoints: []string{"111111", "222222"}, ElapsedSeconds: 83},
 		{Name: "rrc-pty_other-102", PartyID: "pty_other", JoinExtension: "102", Endpoints: []string{"111111", "222222"}},
 		{Name: "rrc-pty_family-103", PartyID: "pty_family", JoinExtension: "103", Endpoints: []string{"111111", "unknown"}},
 	}}
-	app := &App{calls: calls, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	activities := &fakePhoneActivities{activities: []telephony.PhoneActivity{
+		{Endpoint: "111111", State: telephony.PhoneInCall, ElapsedSeconds: 80},
+		{Endpoint: "222222", State: telephony.PhoneInCall, ElapsedSeconds: 79},
+		{Endpoint: "333333", State: telephony.PhoneCalling, ElapsedSeconds: 6},
+		{Endpoint: "foreign", State: telephony.PhoneInCall, ElapsedSeconds: 999},
+	}}
+	app := &App{calls: calls, activity: activities, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	members := []model.Member{
 		{ID: "mem_a", PartyID: "pty_family", DisplayName: "Austin", Extension: "101", Devices: []model.Device{{ID: "dev_a", SIPUsername: "111111"}}},
 		{ID: "mem_b", PartyID: "pty_family", DisplayName: "Bea", Extension: "102", Devices: []model.Device{{ID: "dev_b", SIPUsername: "222222"}}},
 		{ID: "mem_c", PartyID: "pty_family", DisplayName: "Casey", Extension: "103", Devices: []model.Device{{ID: "dev_c", SIPUsername: "333333"}}},
 	}
 
-	active, memberStatus, notice := app.activePartyCalls(t.Context(), "pty_family", members)
+	active, memberStatus, deviceActivity, notice := app.activePartyCalls(t.Context(), "pty_family", members, true)
 	if notice != "" || len(active) != 1 {
 		t.Fatalf("same-party active calls = %#v notice=%q", active, notice)
 	}
-	if got := active[0]; got.JoinNumber != "*16102" || got.JoinExtension != "102" || got.PhoneCount != 2 || strings.Join(got.Participants, ",") != "Austin,Bea" {
+	if got := active[0]; got.JoinNumber != "*16102" || got.JoinExtension != "102" || got.PhoneCount != 2 ||
+		strings.Join(got.Participants, ",") != "Austin,Bea" || got.ElapsedSeconds != 83 || got.ElapsedLabel != "1:23" {
 		t.Fatalf("active call view = %#v", got)
 	}
-	if memberStatus["mem_a"] != "On a call with Bea" || memberStatus["mem_b"] != "On a call with Austin" || memberStatus["mem_c"] != "" {
+	if memberStatus["mem_a"].Label != "On a call with Bea" || memberStatus["mem_a"].ElapsedLabel != "1:23" ||
+		memberStatus["mem_b"].Label != "On a call with Austin" || memberStatus["mem_c"].Label != "Calling" ||
+		deviceActivity["dev_c"].CSSClass != "activity-calling" || deviceActivity["dev_c"].ElapsedLabel != "0:06" {
 		t.Fatalf("member call status = %#v", memberStatus)
+	}
+	activityQueries := activities.count
+	_, conferenceOnlyStatus, conferenceOnlyDevices, _ := app.activePartyCalls(t.Context(), "pty_family", members, false)
+	if activities.count != activityQueries || conferenceOnlyStatus["mem_c"].Active || conferenceOnlyDevices["dev_c"].Active {
+		t.Fatalf("conference-only caller queried or exposed per-phone activity: queries=%d status=%#v devices=%#v", activities.count, conferenceOnlyStatus, conferenceOnlyDevices)
+	}
+}
+
+func TestCallDurationLabel(t *testing.T) {
+	for seconds, want := range map[int]string{
+		-1:   "0:00",
+		0:    "0:00",
+		7:    "0:07",
+		83:   "1:23",
+		3723: "1:02:03",
+	} {
+		if got := callDurationLabel(seconds); got != want {
+			t.Errorf("callDurationLabel(%d) = %q, want %q", seconds, got, want)
+		}
 	}
 }
 
@@ -1102,19 +1141,31 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 	}
 	_ = readBody(t, outsiderParty)
 	callCounter := &fakeActiveConferences{}
+	activityCounter := &fakePhoneActivities{}
 	app.calls = callCounter
+	app.activity = activityCounter
 	hostLive := get(t, client, server.URL+"/parties/"+partyID+"/live")
 	hostLiveBody := readBody(t, hostLive)
 	if hostLive.StatusCode != http.StatusOK || !strings.HasPrefix(hostLive.Header.Get("Content-Type"), "text/html") ||
 		!strings.Contains(hostLive.Header.Get("Cache-Control"), "no-store") || !strings.Contains(hostLiveBody, `id="phonebook-live"`) ||
-		!strings.Contains(hostLiveBody, "Blue phone") || !strings.Contains(hostLiveBody, "No party calls right now") || strings.Contains(hostLiveBody, "site-header") || callCounter.count != 1 {
-		t.Fatalf("authenticated live phonebook response was wrong: status=%d calls=%d\n%s", hostLive.StatusCode, callCounter.count, hostLiveBody)
+		!strings.Contains(hostLiveBody, "Blue phone") || !strings.Contains(hostLiveBody, "No party calls right now") || strings.Contains(hostLiveBody, "site-header") ||
+		callCounter.count != 1 || activityCounter.count != 1 {
+		t.Fatalf("authenticated live phonebook response was wrong: status=%d calls=%d activities=%d\n%s", hostLive.StatusCode, callCounter.count, activityCounter.count, hostLiveBody)
 	}
 	outsiderLive := get(t, outsiderClient, server.URL+"/parties/"+partyID+"/live")
-	if outsiderLive.StatusCode != http.StatusNotFound || callCounter.count != 1 {
-		t.Fatalf("another host reached live call state: status=%d calls=%d", outsiderLive.StatusCode, callCounter.count)
+	if outsiderLive.StatusCode != http.StatusNotFound || callCounter.count != 1 || activityCounter.count != 1 {
+		t.Fatalf("another host reached live call state: status=%d calls=%d activities=%d", outsiderLive.StatusCode, callCounter.count, activityCounter.count)
 	}
 	_ = readBody(t, outsiderLive)
+	activityCounter.activities = []telephony.PhoneActivity{{Endpoint: oldUsername, State: telephony.PhoneCalling, ElapsedSeconds: 7}}
+	callingLive := get(t, client, server.URL+"/parties/"+partyID+"/live")
+	callingBody := readBody(t, callingLive)
+	if callingLive.StatusCode != http.StatusOK || !strings.Contains(callingBody, `class="member-status-pill activity-calling"`) ||
+		!strings.Contains(callingBody, `class="phone-chip activity-calling"`) || !strings.Contains(callingBody, "Calling") ||
+		!strings.Contains(callingBody, `data-call-seconds="7"`) || !strings.Contains(callingBody, `datetime="PT7S">0:07</time>`) {
+		t.Fatalf("outgoing phone activity did not render with its live timer:\n%s", callingBody)
+	}
+	activityCounter.activities = nil
 	outsiderSettings := get(t, outsiderClient, server.URL+"/parties/"+partyID+"/settings")
 	if outsiderSettings.StatusCode != http.StatusNotFound {
 		t.Fatalf("another host reached party settings: status=%d", outsiderSettings.StatusCode)
@@ -1235,14 +1286,15 @@ func TestPartyInvitationAndClaimFlow(t *testing.T) {
 		t.Fatalf("same-extension phones did not share one explicit Dial line:\n%s", configuration.Dialplan)
 	}
 	callCounter.calls = []telephony.ActiveConference{{
-		Name: "rrc-" + partyID + "-101", PartyID: partyID, JoinExtension: "101", Endpoints: []string{oldUsername, secondUsername},
+		Name: "rrc-" + partyID + "-101", PartyID: partyID, JoinExtension: "101", Endpoints: []string{oldUsername, secondUsername}, ElapsedSeconds: 73,
 	}}
 	liveCallPhonebook := get(t, client, server.URL+"/parties/"+partyID+"/live")
 	liveCallBody := readBody(t, liveCallPhonebook)
 	if liveCallPhonebook.StatusCode != http.StatusOK || !strings.Contains(liveCallBody, "Party calls") ||
 		!strings.Contains(liveCallBody, "Blue phone") || !strings.Contains(liveCallBody, "2 phones in this call") ||
 		!strings.Contains(liveCallBody, "*16101") || !strings.Contains(liveCallBody, "joining member’s display name—not the call") ||
-		!strings.Contains(liveCallBody, "No call audio, transcript, or call history is saved") {
+		!strings.Contains(liveCallBody, "No call audio, transcript, or call history is saved") ||
+		!strings.Contains(liveCallBody, `data-call-seconds="73"`) || !strings.Contains(liveCallBody, `datetime="PT73S">1:13</time>`) {
 		t.Fatalf("live conference was not rendered as a private joinable party call:\n%s", liveCallBody)
 	}
 	if again := get(t, client, addedPhone.Request.URL.String()); again.StatusCode != http.StatusGone {

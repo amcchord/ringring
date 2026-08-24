@@ -183,6 +183,8 @@ func TestCredentialCopyHelperIsIntegrityPinnedAndLocalOnly(t *testing.T) {
 		"fetch(liveURL", `method: "GET"`, `credentials: "same-origin"`, `cache: "no-store"`, `redirect: "error"`,
 		`headers: { Accept: "text/html" }`, `phonebook.contains(document.activeElement)`, `phonebook.querySelector("details[open]")`,
 		"nextPhonebook.dataset.partyLiveUrl !== liveURL", "phonebook.replaceWith(nextPhonebook)", "window.setInterval(refresh, 3000)",
+		`phonebook.querySelectorAll("[data-call-seconds]")`, "timer.textContent = formatDuration(elapsedSeconds)",
+		"window.setInterval(updateTimers, 1000)",
 	} {
 		if !strings.Contains(liveJavascript, required) {
 			t.Fatalf("the live phonebook helper is missing bounded behavior %q", required)
@@ -360,7 +362,8 @@ func TestPartyCallConferencesAreScopedEphemeralAndNeverRecorded(t *testing.T) {
 	ami := readRepositoryFile(t, "internal/telephony/ami.go")
 	for _, required := range []string{
 		"ParseConferenceName(conference)", `"Channel", "Local/s@rr-party-announcement/n"`, `"Application", "Playback"`,
-		`"Variable", "RINGRING_CONFERENCE="+conference`, "ConfbridgeListRooms", "pjsipEndpoint", "len(room.Endpoints) >= 2",
+		`"Variable", "RINGRING_CONFERENCE="+conference`, "ConfbridgeListRooms", "CoreShowChannels", "pjsipEndpoint",
+		"reducedPhoneActivity", "parseAMIDuration", "maxCallElapsedSeconds", "len(room.Endpoints) >= 2",
 	} {
 		if !strings.Contains(ami, required) {
 			t.Errorf("AMI conference boundary is missing %q", required)

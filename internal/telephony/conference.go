@@ -9,14 +9,33 @@ import (
 
 const conferencePrefix = "rrc-"
 
-// ActiveConference contains only the identifiers RingRing needs to render a
-// party-scoped live call. Asterisk channel IDs, caller ID, addresses, and call
-// timing never leave the private AMI boundary.
+// ActiveConference contains only the reduced values RingRing needs to render a
+// party-scoped live call. Asterisk channel IDs, caller ID, addresses, and exact
+// timestamps never leave the private AMI boundary.
 type ActiveConference struct {
-	Name          string
-	PartyID       string
-	JoinExtension string
-	Endpoints     []string
+	Name           string
+	PartyID        string
+	JoinExtension  string
+	Endpoints      []string
+	ElapsedSeconds int
+}
+
+type PhoneActivityState string
+
+const (
+	PhoneOffHook PhoneActivityState = "off_hook"
+	PhoneRinging PhoneActivityState = "ringing"
+	PhoneCalling PhoneActivityState = "calling"
+	PhoneInCall  PhoneActivityState = "in_call"
+)
+
+// PhoneActivity is the reduced live state for one authenticated PJSIP
+// endpoint. Exact start timestamps, channel IDs, dialed digits, caller ID,
+// addresses, and application data never leave the AMI boundary.
+type PhoneActivity struct {
+	Endpoint       string
+	State          PhoneActivityState
+	ElapsedSeconds int
 }
 
 func ConferenceName(partyID, joinExtension string) (string, error) {

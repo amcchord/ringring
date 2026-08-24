@@ -85,7 +85,7 @@ func (a *App) phoneStateAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	destinations := phoneCallDestinations(device.Extension, members, availableFirstCallLines(party, services, a.cfg.AIAdultOnlyEnabled, device.AdultExtension))
-	activeCalls, _, _ := a.activePartyCalls(r.Context(), device.PartyID, members)
+	activeCalls, _, _, _ := a.activePartyCalls(r.Context(), device.PartyID, members, false)
 	for _, call := range activeCalls {
 		participants := append([]string(nil), call.Participants...)
 		sort.Strings(participants)

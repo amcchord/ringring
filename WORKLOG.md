@@ -2,6 +2,26 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-23 — Show live phone activity and call timers
+
+### Shipped
+
+- Added current `Off hook`, `Calling`, `Ringing`, and `On a call` states to each active phone and its member card on the host-only party page. Validated party conferences continue to name same-party companions and now show an elapsed timer on both the call board and participant cards.
+- Reduced Asterisk's current-channel response at the private AMI boundary to the authenticated endpoint, one friendly state, and bounded elapsed seconds. Caller and connected-line values, dialed digits, application data, channel and bridge identifiers, addresses, exact timestamps, unknown endpoints, foreign parties, and non-PJSIP channels never enter the page view.
+- Kept the private server snapshot at three seconds while adding a one-second browser-only clock, so timers feel live without increasing Asterisk or web polling. The script has an integrity pin and no network, storage, cookie, logging, or history primitive beyond the existing same-origin fragment request.
+
+### Decisions
+
+- Treat these values as ephemeral host visibility, not call records. The database and metrics receive no state, start time, duration, peer, or history, and the response remains private and `no-store`.
+- Query per-phone activity only for the authenticated party page. The configured-phone menu continues to receive its narrower conference snapshot and cannot invoke this per-phone query.
+- Report only what Asterisk can authoritatively observe. An analog handset lift that an ATA keeps local before sending a SIP `INVITE` cannot appear as off hook; the state becomes visible as soon as the adapter opens a SIP channel.
+
+### Verification
+
+- Focused AMI, web, and executable security-contract tests cover all four state reductions, state priority, duplicate channels, bounded/malformed duration handling, an empty completed channel list, fail-closed denial, same-party endpoint mapping, foreign/revoked omission, conference companions, and exact rendered timer metadata.
+- In-app browser QA with three disposable members covered a two-phone live party call plus a third outgoing call, then separate off-hook, ringing, and calling states. The rendered clock advanced from `0:12` to `0:13` in one second between private refreshes. The desktop populated layout is clean; the browser's fixed viewport still leaves the existing CSS/accessibility contract responsible for the 850px and 520px breakpoints.
+- `make check`, `make security`, `make admin-test`, and the Docker-shareable `make sip-smoke` pass locally. This includes formatting, shell and lifecycle checks, `go vet`, the race-enabled suite, `govulncheck` with no called vulnerability, verified SIP TLS 1.2 and UDP registration, live three-phone conference joining, mixed-transport calls, operator fallbacks, RTP echo, and authenticated extension selection.
+
 ## 2026-08-23 — Auto-fill the WP826 phonebook
 
 ### Shipped

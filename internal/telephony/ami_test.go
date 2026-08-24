@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -255,8 +256,8 @@ func TestAMIActiveConferenceCallsReturnsOnlyRingRingPJSIPEndpoints(t *testing.T)
 		}
 		for index, participantFrames := range [][]string{
 			{
-				"Event: ConfbridgeList\r\nChannel: PJSIP/rrd_alpha-00000001\r\nCallerIDName: Private Alpha\r\n\r\n",
-				"Event: ConfbridgeList\r\nChannel: PJSIP/rrd_beta-00000002\r\nCallerIDName: Private Beta\r\n\r\n",
+				"Event: ConfbridgeList\r\nChannel: PJSIP/rrd_alpha-00000001\r\nCallerIDName: Private Alpha\r\nAnsweredTime: 71\r\n\r\n",
+				"Event: ConfbridgeList\r\nChannel: PJSIP/rrd_beta-00000002\r\nCallerIDName: Private Beta\r\nAnsweredTime: 68\r\n\r\n",
 				"Event: ConfbridgeList\r\nChannel: Local/s@rr-party-announcement-00000003;2\r\n\r\n",
 			},
 			{
@@ -294,8 +295,112 @@ func TestAMIActiveConferenceCallsReturnsOnlyRingRingPJSIPEndpoints(t *testing.T)
 	if err := <-finished; err != nil {
 		t.Fatal(err)
 	}
-	if len(calls) != 1 || calls[0].PartyID != "pty_alpha" || calls[0].JoinExtension != "102" || strings.Join(calls[0].Endpoints, ",") != "rrd_alpha,rrd_beta" {
+	if len(calls) != 1 || calls[0].PartyID != "pty_alpha" || calls[0].JoinExtension != "102" ||
+		strings.Join(calls[0].Endpoints, ",") != "rrd_alpha,rrd_beta" || calls[0].ElapsedSeconds != 71 {
 		t.Fatalf("active conference calls = %#v", calls)
+	}
+}
+
+func TestAMIPhoneActivitiesReducesChannelsToEndpointStateAndElapsedTime(t *testing.T) {
+	address, finished := serveAMI(t, func(connection net.Conn, reader *bufio.Reader) error {
+		if err := acceptTestLogin(connection, reader); err != nil {
+			return err
+		}
+		action, err := readAMIFrame(reader)
+		if err != nil {
+			return err
+		}
+		if action["action"] != "CoreShowChannels" || action["actionid"] != channelsActionID {
+			return fmt.Errorf("unexpected channel action: %#v", action)
+		}
+		_, err = io.WriteString(connection, strings.Join([]string{
+			"Response: Success\r\nActionID: ringring-channels\r\nEventList: start\r\n\r\n",
+			"Event: CoreShowChannel\r\nActionID: ringring-channels\r\nChannel: PJSIP/rrd_calling-00000001\r\nChannelStateDesc: Ring\r\nApplication: Dial\r\nApplicationData: private target\r\nDuration: 00:00:07\r\n\r\n",
+			"Event: CoreShowChannel\r\nActionID: ringring-channels\r\nChannel: PJSIP/rrd_ringing-00000002\r\nChannelStateDesc: Ringing\r\nApplication: AppDial\r\nDuration: 00:00:06\r\n\r\n",
+			"Event: CoreShowChannel\r\nActionID: ringring-channels\r\nChannel: PJSIP/rrd_live-00000003\r\nChannelStateDesc: Up\r\nApplication: ConfBridge\r\nDuration: 00:03:05\r\n\r\n",
+			"Event: CoreShowChannel\r\nActionID: ringring-channels\r\nChannel: PJSIP/rrd_live-00000004\r\nChannelStateDesc: OffHook\r\nApplication: WaitExten\r\nDuration: 00:00:01\r\n\r\n",
+			"Event: CoreShowChannel\r\nActionID: ringring-channels\r\nChannel: PJSIP/rrd_offhook-00000005\r\nChannelStateDesc: Down\r\nApplication: WaitExten\r\nDuration: 00:00:02\r\n\r\n",
+			"Event: CoreShowChannel\r\nActionID: ringring-channels\r\nChannel: Local/s@rr-party-announcement-00000006;2\r\nChannelStateDesc: Up\r\nApplication: ConfBridge\r\nDuration: 00:02:00\r\n\r\n",
+			"Event: CoreShowChannel\r\nActionID: ringring-channels\r\nChannel: PJSIP/invalid/endpoint-00000007\r\nChannelStateDesc: Up\r\nApplication: ConfBridge\r\nDuration: 00:04:00\r\n\r\n",
+			"Event: CoreShowChannelsComplete\r\nActionID: ringring-channels\r\nEventList: Complete\r\nListItems: 7\r\n\r\n",
+		}, ""))
+		return err
+	})
+
+	activities, err := (AMI{Address: address, Username: "ringring", Secret: "test-only-secret", Timeout: time.Second}).PhoneActivities(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := <-finished; err != nil {
+		t.Fatal(err)
+	}
+	want := []PhoneActivity{
+		{Endpoint: "rrd_calling", State: PhoneCalling, ElapsedSeconds: 7},
+		{Endpoint: "rrd_live", State: PhoneInCall, ElapsedSeconds: 185},
+		{Endpoint: "rrd_offhook", State: PhoneOffHook, ElapsedSeconds: 2},
+		{Endpoint: "rrd_ringing", State: PhoneRinging, ElapsedSeconds: 6},
+	}
+	if !reflect.DeepEqual(activities, want) {
+		t.Fatalf("phone activities = %#v, want %#v", activities, want)
+	}
+}
+
+func TestAMIDurationParsingIsBounded(t *testing.T) {
+	for value, want := range map[string]int{
+		"00:00:00":  0,
+		"01:02:03":  3723,
+		"744:00:00": maxCallElapsedSeconds,
+		"00:61:00":  0,
+		"private":   0,
+	} {
+		if got := parseAMIDuration(value); got != want {
+			t.Errorf("parseAMIDuration(%q) = %d, want %d", value, got, want)
+		}
+	}
+}
+
+func TestAMIPhoneActivitiesAcceptsEmptyCompletedList(t *testing.T) {
+	address, finished := serveAMI(t, func(connection net.Conn, reader *bufio.Reader) error {
+		if err := acceptTestLogin(connection, reader); err != nil {
+			return err
+		}
+		if _, err := readAMIFrame(reader); err != nil {
+			return err
+		}
+		_, err := io.WriteString(connection, strings.Join([]string{
+			"Response: Success\r\nActionID: ringring-channels\r\nEventList: start\r\n\r\n",
+			"Event: CoreShowChannelsComplete\r\nActionID: ringring-channels\r\nEventList: Complete\r\nListItems: 0\r\n\r\n",
+		}, ""))
+		return err
+	})
+
+	activities, err := (AMI{Address: address, Username: "ringring", Secret: "test-only-secret", Timeout: time.Second}).PhoneActivities(t.Context())
+	if err != nil || len(activities) != 0 {
+		t.Fatalf("empty phone activities = %#v, %v", activities, err)
+	}
+	if serverErr := <-finished; serverErr != nil {
+		t.Fatal(serverErr)
+	}
+}
+
+func TestAMIPhoneActivitiesFailsClosedOnDeniedQuery(t *testing.T) {
+	address, finished := serveAMI(t, func(connection net.Conn, reader *bufio.Reader) error {
+		if err := acceptTestLogin(connection, reader); err != nil {
+			return err
+		}
+		if _, err := readAMIFrame(reader); err != nil {
+			return err
+		}
+		_, err := io.WriteString(connection, "Response: Error\r\nActionID: ringring-channels\r\nMessage: Permission denied\r\n\r\n")
+		return err
+	})
+
+	_, err := (AMI{Address: address, Username: "ringring", Secret: "test-only-secret", Timeout: time.Second}).PhoneActivities(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "response was Error") || strings.Contains(err.Error(), "test-only-secret") {
+		t.Fatalf("PhoneActivities error = %v", err)
+	}
+	if serverErr := <-finished; serverErr != nil {
+		t.Fatal(serverErr)
 	}
 }
 

@@ -49,7 +49,7 @@ const (
 	provisioningTTL       = 30 * time.Minute
 	sipCredentialAttempts = 16
 	setupScriptSHA256     = "sha256-8gLmI9PKLpVAM0X5XeS4PN75VxjzYo+DvRFDZmr9IhE="
-	partyLiveScriptSHA256 = "sha256-s25OXyGOHUhirLwjoQpCh6jlM6+S0ttd68/ZpqW1p2o="
+	partyLiveScriptSHA256 = "sha256-uyoxrygzB5JlTivAgK1q0kc4VcUVvb2Dtv82lFjYOvk="
 )
 
 var (
@@ -66,6 +66,7 @@ type App struct {
 	telephony  *telephony.Reconciler
 	presence   contactPresenceSource
 	calls      activeConferenceSource
+	activity   phoneActivitySource
 	ringer     deviceRingSource
 	weather    weatherGeocoder
 	oauth      *oauth2.Config
@@ -106,17 +107,31 @@ type activeConferenceSource interface {
 	ActiveConferenceCalls(context.Context) ([]telephony.ActiveConference, error)
 }
 
+type phoneActivitySource interface {
+	PhoneActivities(context.Context) ([]telephony.PhoneActivity, error)
+}
+
 type PresenceView struct {
 	Label    string
 	CSSClass string
 }
 
 type ActiveCallView struct {
-	JoinExtension string
-	JoinNumber    string
-	Participants  []string
-	MemberIDs     []string
-	PhoneCount    int
+	JoinExtension  string
+	JoinNumber     string
+	Participants   []string
+	MemberIDs      []string
+	PhoneCount     int
+	ElapsedSeconds int
+	ElapsedLabel   string
+}
+
+type ActivityView struct {
+	Active         bool
+	Label          string
+	CSSClass       string
+	ElapsedSeconds int
+	ElapsedLabel   string
 }
 
 // callDirectoryEntry deliberately carries only the two values a newly joined
@@ -147,7 +162,8 @@ type PageData struct {
 	MemberPresence           map[string]PresenceView
 	PresenceNotice           string
 	ActiveCalls              []ActiveCallView
-	MemberCallStatus         map[string]string
+	DeviceActivity           map[string]ActivityView
+	MemberCallStatus         map[string]ActivityView
 	ActiveCallNotice         string
 	PartyLiveURL             string
 	Services                 model.PartyServices
@@ -307,6 +323,7 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 		app.presence = ami
 		app.ringer = ami
 		app.calls = ami
+		app.activity = ami
 	}
 	if cfg.AsteriskConfigDir != "" {
 		app.telephony = &telephony.Reconciler{
@@ -983,7 +1000,7 @@ func (a *App) party(w http.ResponseWriter, r *http.Request, session authSession)
 	data.Party = party
 	data.Members = members
 	data.DevicePresence, data.MemberPresence, data.PresenceNotice = a.phonePresence(r.Context(), members)
-	data.ActiveCalls, data.MemberCallStatus, data.ActiveCallNotice = a.activePartyCalls(r.Context(), party.ID, members)
+	data.ActiveCalls, data.MemberCallStatus, data.DeviceActivity, data.ActiveCallNotice = a.activePartyCalls(r.Context(), party.ID, members, true)
 	data.PartyLiveURL = "/parties/" + url.PathEscape(party.ID) + "/live"
 	data.InviteURL = a.readInviteFlash(w, r, party.ID)
 	if data.InviteURL != "" {
@@ -1041,7 +1058,7 @@ func (a *App) partyLive(w http.ResponseWriter, r *http.Request, session authSess
 	data.Party = party
 	data.Members = members
 	data.DevicePresence, data.MemberPresence, data.PresenceNotice = a.phonePresence(r.Context(), members)
-	data.ActiveCalls, data.MemberCallStatus, data.ActiveCallNotice = a.activePartyCalls(r.Context(), party.ID, members)
+	data.ActiveCalls, data.MemberCallStatus, data.DeviceActivity, data.ActiveCallNotice = a.activePartyCalls(r.Context(), party.ID, members, true)
 	data.PartyLiveURL = "/parties/" + url.PathEscape(party.ID) + "/live"
 	w.Header().Set("Cache-Control", "no-store")
 	a.renderFragment(w, "party", "phonebook-live", data)
@@ -1359,28 +1376,70 @@ func (a *App) phonePresence(ctx context.Context, members []model.Member) (map[st
 	return deviceViews, memberViews, notice
 }
 
-func (a *App) activePartyCalls(ctx context.Context, partyID string, members []model.Member) ([]ActiveCallView, map[string]string, string) {
+func (a *App) activePartyCalls(ctx context.Context, partyID string, members []model.Member, includePhoneActivity bool) ([]ActiveCallView, map[string]ActivityView, map[string]ActivityView, string) {
+	var conferences []telephony.ActiveConference
+	callNotice := ""
 	if a.calls == nil {
-		return nil, nil, "Live call activity is temporarily unavailable. Calls still work normally."
+		callNotice = "Live call activity is temporarily unavailable. Calls still work normally."
+	} else {
+		queryContext, cancel := context.WithTimeout(ctx, 2*time.Second)
+		var err error
+		conferences, err = a.calls.ActiveConferenceCalls(queryContext)
+		cancel()
+		if err != nil {
+			a.logger.Warn("load live party calls", "error_class", observability.ErrorClass(err))
+			callNotice = "Live call activity is temporarily unavailable. Calls still work normally."
+		}
 	}
-	queryContext, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	conferences, err := a.calls.ActiveConferenceCalls(queryContext)
-	if err != nil {
-		a.logger.Warn("load live party calls", "error_class", observability.ErrorClass(err))
-		return nil, nil, "Live call activity is temporarily unavailable. Calls still work normally."
+
+	var phoneActivities []telephony.PhoneActivity
+	if includePhoneActivity && a.activity != nil {
+		queryContext, cancel := context.WithTimeout(ctx, 2*time.Second)
+		var err error
+		phoneActivities, err = a.activity.PhoneActivities(queryContext)
+		cancel()
+		if err != nil {
+			a.logger.Warn("load live phone activity", "error_class", observability.ErrorClass(err))
+		}
 	}
 
 	membersByEndpoint := make(map[string]model.Member)
+	devicesByEndpoint := make(map[string]model.Device)
 	extensions := make(map[string]struct{})
+	memberNames := make(map[string]string, len(members))
 	for _, member := range members {
 		extensions[member.Extension] = struct{}{}
+		memberNames[member.ID] = member.DisplayName
 		for _, device := range member.Devices {
 			if device.RevokedAt == nil {
 				membersByEndpoint[device.SIPUsername] = member
+				devicesByEndpoint[device.SIPUsername] = device
 			}
 		}
 	}
+
+	activityByEndpoint := make(map[string]telephony.PhoneActivity, len(phoneActivities))
+	deviceActivity := make(map[string]ActivityView)
+	memberStatus := make(map[string]ActivityView)
+	memberStatusRank := make(map[string]int)
+	for _, activity := range phoneActivities {
+		member, memberExists := membersByEndpoint[activity.Endpoint]
+		device, deviceExists := devicesByEndpoint[activity.Endpoint]
+		if !memberExists || !deviceExists {
+			continue
+		}
+		activityByEndpoint[activity.Endpoint] = activity
+		view, rank := phoneActivityView(activity.State, activity.ElapsedSeconds)
+		if !view.Active {
+			continue
+		}
+		deviceActivity[device.ID] = view
+		if rank > memberStatusRank[member.ID] {
+			memberStatus[member.ID] = view
+			memberStatusRank[member.ID] = rank
+		}
+	}
+
 	active := make([]ActiveCallView, 0, len(conferences))
 	for _, conference := range conferences {
 		if conference.PartyID != partyID || len(conference.Endpoints) < 2 {
@@ -1392,13 +1451,20 @@ func (a *App) activePartyCalls(ctx context.Context, partyID string, members []mo
 		seenMembers := make(map[string]struct{})
 		participants := make([]string, 0, len(conference.Endpoints))
 		memberIDs := make([]string, 0, len(conference.Endpoints))
+		deviceIDs := make([]string, 0, len(conference.Endpoints))
 		knownPhones := 0
+		elapsedSeconds := conference.ElapsedSeconds
 		for _, endpoint := range conference.Endpoints {
-			member, exists := membersByEndpoint[endpoint]
-			if !exists {
+			member, memberExists := membersByEndpoint[endpoint]
+			device, deviceExists := devicesByEndpoint[endpoint]
+			if !memberExists || !deviceExists {
 				continue
 			}
 			knownPhones++
+			if activity := activityByEndpoint[endpoint]; activity.ElapsedSeconds > elapsedSeconds {
+				elapsedSeconds = activity.ElapsedSeconds
+			}
+			deviceIDs = append(deviceIDs, device.ID)
 			if _, exists := seenMembers[member.ID]; exists {
 				continue
 			}
@@ -1409,21 +1475,21 @@ func (a *App) activePartyCalls(ctx context.Context, partyID string, members []mo
 		if knownPhones < 2 {
 			continue
 		}
+		for _, deviceID := range deviceIDs {
+			deviceActivity[deviceID] = activityView("On a call", "activity-live", elapsedSeconds)
+		}
 		sort.Strings(participants)
 		active = append(active, ActiveCallView{
-			JoinExtension: conference.JoinExtension,
-			JoinNumber:    telephony.JoinNumber(conference.JoinExtension),
-			Participants:  participants,
-			MemberIDs:     memberIDs,
-			PhoneCount:    knownPhones,
+			JoinExtension:  conference.JoinExtension,
+			JoinNumber:     telephony.JoinNumber(conference.JoinExtension),
+			Participants:   participants,
+			MemberIDs:      memberIDs,
+			PhoneCount:     knownPhones,
+			ElapsedSeconds: elapsedSeconds,
+			ElapsedLabel:   callDurationLabel(elapsedSeconds),
 		})
 	}
 	sort.Slice(active, func(i, j int) bool { return active[i].JoinExtension < active[j].JoinExtension })
-	memberStatus := make(map[string]string)
-	memberNames := make(map[string]string, len(members))
-	for _, member := range members {
-		memberNames[member.ID] = member.DisplayName
-	}
 	for _, call := range active {
 		for _, memberID := range call.MemberIDs {
 			others := make([]string, 0, len(call.MemberIDs)-1)
@@ -1432,14 +1498,52 @@ func (a *App) activePartyCalls(ctx context.Context, partyID string, members []mo
 					others = append(others, memberNames[otherID])
 				}
 			}
-			if len(others) == 0 {
-				memberStatus[memberID] = "On a party call"
-			} else {
-				memberStatus[memberID] = "On a call with " + strings.Join(others, ", ")
+			label := "On a party call"
+			if len(others) > 0 {
+				label = "On a call with " + strings.Join(others, ", ")
 			}
+			memberStatus[memberID] = activityView(label, "activity-live", call.ElapsedSeconds)
 		}
 	}
-	return active, memberStatus, ""
+	return active, memberStatus, deviceActivity, callNotice
+}
+
+func phoneActivityView(state telephony.PhoneActivityState, elapsedSeconds int) (ActivityView, int) {
+	switch state {
+	case telephony.PhoneInCall:
+		return activityView("On a call", "activity-live", elapsedSeconds), 4
+	case telephony.PhoneCalling:
+		return activityView("Calling", "activity-calling", elapsedSeconds), 3
+	case telephony.PhoneRinging:
+		return activityView("Ringing", "activity-ringing", elapsedSeconds), 2
+	case telephony.PhoneOffHook:
+		return activityView("Off hook", "activity-off-hook", elapsedSeconds), 1
+	default:
+		return ActivityView{}, 0
+	}
+}
+
+func activityView(label, cssClass string, elapsedSeconds int) ActivityView {
+	if elapsedSeconds < 0 {
+		elapsedSeconds = 0
+	}
+	return ActivityView{
+		Active: true, Label: label, CSSClass: cssClass,
+		ElapsedSeconds: elapsedSeconds, ElapsedLabel: callDurationLabel(elapsedSeconds),
+	}
+}
+
+func callDurationLabel(elapsedSeconds int) string {
+	if elapsedSeconds < 0 {
+		elapsedSeconds = 0
+	}
+	hours := elapsedSeconds / 3600
+	minutes := (elapsedSeconds % 3600) / 60
+	seconds := elapsedSeconds % 60
+	if hours > 0 {
+		return fmt.Sprintf("%d:%02d:%02d", hours, minutes, seconds)
+	}
+	return fmt.Sprintf("%d:%02d", minutes, seconds)
 }
 
 func devicePresenceView(device model.Device, statuses map[string]telephony.ContactState, available bool) (PresenceView, int) {

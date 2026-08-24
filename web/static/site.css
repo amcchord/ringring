@@ -387,8 +387,17 @@ input:focus { border-color: var(--purple); box-shadow: 0 0 0 4px rgba(108,76,255
 .text-link { min-height: 44px; display: inline-flex; align-items: center; color: var(--purple-dark); font-weight: 900; }
 .compact-member-card { overflow: hidden; }
 .compact-member-heading { grid-template-columns: 82px minmax(0, 1fr) auto; }
-.member-on-call { color: #17492f; background: var(--mint); border-color: #2f7e58; }
-.member-on-call .presence-indicator { background: #20b77a; box-shadow: 0 0 0 3px rgba(32,183,122,.18); }
+.activity-live { color: #17492f; background: var(--mint); border-color: #2f7e58; }
+.activity-live .presence-indicator { background: #20b77a; box-shadow: 0 0 0 3px rgba(32,183,122,.18); }
+.activity-calling { color: #5f4000; background: var(--yellow); border-color: #a17200; }
+.activity-calling .presence-indicator { background: #ffae1a; box-shadow: 0 0 0 3px rgba(255,174,26,.2); }
+.activity-ringing { color: #84213c; background: var(--pink); border-color: #bd5977; }
+.activity-ringing .presence-indicator { background: #ff5f84; box-shadow: 0 0 0 3px rgba(255,95,132,.18); }
+.activity-off-hook { color: #155677; background: var(--blue); border-color: #5798bd; }
+.activity-off-hook .presence-indicator { background: #55b7e8; box-shadow: 0 0 0 3px rgba(85,183,232,.18); }
+.call-duration { display: inline; color: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; font-variant-numeric: tabular-nums; font-weight: 950; letter-spacing: .01em; white-space: nowrap; }
+.member-status-pill .call-duration, .device-status-pill .call-duration, .phone-chip .call-duration { margin-left: 2px; padding-left: 6px; border-left: 1px solid currentColor; }
+.active-call-people .call-duration { color: #17492f; }
 .member-settings { min-width: 52px; }
 .member-settings > summary { width: 52px; min-height: 52px; display: grid; place-items: center; color: var(--ink); background: var(--white); border: 2px solid var(--ink); border-radius: 15px; box-shadow: 3px 3px 0 var(--ink); cursor: pointer; list-style: none; }
 .member-settings > summary::-webkit-details-marker { display: none; }

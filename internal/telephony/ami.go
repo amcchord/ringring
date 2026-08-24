@@ -8,6 +8,8 @@ import (
 	"io"
 	"net"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,14 +17,16 @@ import (
 )
 
 const (
-	defaultAMITimeout    = 5 * time.Second
-	contactsActionID     = "ringring-contacts"
-	conferenceActionID   = "ringring-conferences"
-	ringActionID         = "ringring-phone-check"
-	announcementActionID = "ringring-join-announcement"
-	maxAMIFrames         = 10_000
-	maxAMIFrameBytes     = 64 * 1024
-	maxActiveConferences = 128
+	defaultAMITimeout     = 5 * time.Second
+	contactsActionID      = "ringring-contacts"
+	conferenceActionID    = "ringring-conferences"
+	channelsActionID      = "ringring-channels"
+	ringActionID          = "ringring-phone-check"
+	announcementActionID  = "ringring-join-announcement"
+	maxAMIFrames          = 10_000
+	maxAMIFrameBytes      = 64 * 1024
+	maxActiveConferences  = 128
+	maxCallElapsedSeconds = 31 * 24 * 60 * 60
 )
 
 var (
@@ -199,9 +203,10 @@ func (a AMI) ContactStatuses(ctx context.Context) (map[string]ContactState, erro
 	return nil, errors.New("AMI contact query exceeded its frame limit")
 }
 
-// ActiveConferenceCalls returns active RingRing conferences and authenticated
-// PJSIP endpoint names only. It deliberately drops caller ID, channel IDs,
-// connected-line data, addresses, call timing, and non-RingRing conferences.
+// ActiveConferenceCalls returns active RingRing conferences, authenticated
+// PJSIP endpoint names, and bounded elapsed seconds only. It deliberately drops
+// caller ID, channel IDs, connected-line data, addresses, exact timestamps, and
+// non-RingRing conferences.
 func (a AMI) ActiveConferenceCalls(ctx context.Context) ([]ActiveConference, error) {
 	if a.Address == "" || a.Secret == "" {
 		return nil, errors.New("AMI is not configured")
@@ -246,11 +251,12 @@ func (a AMI) ActiveConferenceCalls(ctx context.Context) ([]ActiveConference, err
 				return nil, errors.New("AMI conference query completed before its response")
 			}
 			for index := range rooms {
-				endpoints, err := listConferenceEndpoints(connection, reader, rooms[index].Name, index)
+				endpoints, elapsedSeconds, err := listConferenceEndpoints(connection, reader, rooms[index].Name, index)
 				if err != nil {
 					return nil, err
 				}
 				rooms[index].Endpoints = endpoints
+				rooms[index].ElapsedSeconds = elapsedSeconds
 			}
 			active := rooms[:0]
 			for _, room := range rooms {
@@ -265,28 +271,158 @@ func (a AMI) ActiveConferenceCalls(ctx context.Context) ([]ActiveConference, err
 	return nil, errors.New("AMI conference query exceeded its frame limit")
 }
 
-func listConferenceEndpoints(connection net.Conn, reader *bufio.Reader, conference string, index int) ([]string, error) {
+// PhoneActivities returns only a PJSIP endpoint, a normalized live state, and
+// bounded elapsed seconds. It deliberately drops channel/bridge IDs, caller
+// and connected-line values, dialed digits, application data, and exact start
+// timestamps.
+func (a AMI) PhoneActivities(ctx context.Context) ([]PhoneActivity, error) {
+	if a.Address == "" || a.Secret == "" {
+		return nil, errors.New("AMI is not configured")
+	}
+	connection, reader, err := a.connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer connection.Close()
+
+	if err := writeAMIAction(connection, "CoreShowChannels", "ActionID", channelsActionID); err != nil {
+		return nil, fmt.Errorf("write AMI channel query: %w", err)
+	}
+	activities := make(map[string]PhoneActivity)
+	started := false
+	for frameNumber := 0; frameNumber < maxAMIFrames; frameNumber++ {
+		frame, err := readAMIFrame(reader)
+		if err != nil {
+			return nil, fmt.Errorf("read AMI channel query: %w", err)
+		}
+		if actionID := frame["actionid"]; actionID != "" && actionID != channelsActionID {
+			continue
+		}
+		if response := frame["response"]; response != "" {
+			if !strings.EqualFold(response, "Success") {
+				return nil, fmt.Errorf("AMI channel query response was %s", response)
+			}
+			started = true
+		}
+		switch {
+		case strings.EqualFold(frame["event"], "CoreShowChannel"):
+			activity, ok := reducedPhoneActivity(frame)
+			if !ok {
+				continue
+			}
+			current, exists := activities[activity.Endpoint]
+			if !exists || phoneActivityRank(activity.State) > phoneActivityRank(current.State) ||
+				(activity.State == current.State && activity.ElapsedSeconds > current.ElapsedSeconds) {
+				activities[activity.Endpoint] = activity
+			}
+		case strings.EqualFold(frame["event"], "CoreShowChannelsComplete"):
+			if !started {
+				return nil, errors.New("AMI channel query completed before its response")
+			}
+			result := make([]PhoneActivity, 0, len(activities))
+			for _, activity := range activities {
+				result = append(result, activity)
+			}
+			sort.Slice(result, func(i, j int) bool { return result[i].Endpoint < result[j].Endpoint })
+			_ = writeAMIAction(connection, "Logoff")
+			return result, nil
+		}
+	}
+	return nil, errors.New("AMI channel query exceeded its frame limit")
+}
+
+func reducedPhoneActivity(frame map[string]string) (PhoneActivity, bool) {
+	endpoint, ok := pjsipEndpoint(frame["channel"])
+	if !ok {
+		return PhoneActivity{}, false
+	}
+	application := strings.ToLower(strings.TrimSpace(frame["application"]))
+	channelState := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(frame["channelstatedesc"]), " ", ""))
+	state := PhoneOffHook
+	switch {
+	case application == "confbridge":
+		state = PhoneInCall
+	case application == "dial":
+		state = PhoneCalling
+	case channelState == "ring" || channelState == "ringing" || application == "appdial":
+		state = PhoneRinging
+	case channelState == "up":
+		state = PhoneInCall
+	case strings.Contains(channelState, "dial"):
+		state = PhoneCalling
+	}
+	return PhoneActivity{Endpoint: endpoint, State: state, ElapsedSeconds: parseAMIDuration(frame["duration"])}, true
+}
+
+func phoneActivityRank(state PhoneActivityState) int {
+	switch state {
+	case PhoneInCall:
+		return 4
+	case PhoneCalling:
+		return 3
+	case PhoneRinging:
+		return 2
+	case PhoneOffHook:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func parseAMIDuration(value string) int {
+	parts := strings.Split(strings.TrimSpace(value), ":")
+	if len(parts) != 3 {
+		return 0
+	}
+	values := make([]int, 3)
+	for index, part := range parts {
+		parsed, err := strconv.Atoi(part)
+		if err != nil || parsed < 0 || (index > 0 && parsed > 59) {
+			return 0
+		}
+		values[index] = parsed
+	}
+	seconds := values[0]*60*60 + values[1]*60 + values[2]
+	if seconds > maxCallElapsedSeconds {
+		return maxCallElapsedSeconds
+	}
+	return seconds
+}
+
+func parseAMISeconds(value string) int {
+	seconds, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || seconds < 0 {
+		return 0
+	}
+	if seconds > maxCallElapsedSeconds {
+		return maxCallElapsedSeconds
+	}
+	return seconds
+}
+
+func listConferenceEndpoints(connection net.Conn, reader *bufio.Reader, conference string, index int) ([]string, int, error) {
 	actionID := fmt.Sprintf("ringring-conference-%d", index)
 	if err := writeAMIAction(connection, "ConfbridgeList", "ActionID", actionID, "Conference", conference); err != nil {
-		return nil, fmt.Errorf("write AMI conference participant query: %w", err)
+		return nil, 0, fmt.Errorf("write AMI conference participant query: %w", err)
 	}
 	started := false
 	seen := make(map[string]struct{})
 	var endpoints []string
+	elapsedSeconds := 0
 	for frameNumber := 0; frameNumber < maxAMIFrames; frameNumber++ {
 		frame, err := readAMIFrame(reader)
 		if err != nil {
-			return nil, fmt.Errorf("read AMI conference participant query: %w", err)
+			return nil, 0, fmt.Errorf("read AMI conference participant query: %w", err)
 		}
 		if id := frame["actionid"]; id != "" && id != actionID {
 			continue
 		}
 		if response := frame["response"]; response != "" {
 			if strings.EqualFold(response, "Error") {
-				return []string{}, nil
+				return []string{}, 0, nil
 			}
 			if !strings.EqualFold(response, "Success") {
-				return nil, fmt.Errorf("AMI conference participant query response was %s", response)
+				return nil, 0, fmt.Errorf("AMI conference participant query response was %s", response)
 			}
 			started = true
 		}
@@ -294,6 +430,9 @@ func listConferenceEndpoints(connection net.Conn, reader *bufio.Reader, conferen
 		case strings.EqualFold(frame["event"], "ConfbridgeList"):
 			endpoint, ok := pjsipEndpoint(frame["channel"])
 			if ok {
+				if answered := parseAMISeconds(frame["answeredtime"]); answered > elapsedSeconds {
+					elapsedSeconds = answered
+				}
 				if _, exists := seen[endpoint]; !exists {
 					seen[endpoint] = struct{}{}
 					endpoints = append(endpoints, endpoint)
@@ -301,12 +440,12 @@ func listConferenceEndpoints(connection net.Conn, reader *bufio.Reader, conferen
 			}
 		case strings.EqualFold(frame["event"], "ConfbridgeListComplete"):
 			if !started {
-				return nil, errors.New("AMI conference participant query completed before its response")
+				return nil, 0, errors.New("AMI conference participant query completed before its response")
 			}
-			return endpoints, nil
+			return endpoints, elapsedSeconds, nil
 		}
 	}
-	return nil, errors.New("AMI conference participant query exceeded its frame limit")
+	return nil, 0, errors.New("AMI conference participant query exceeded its frame limit")
 }
 
 func pjsipEndpoint(channel string) (string, bool) {
