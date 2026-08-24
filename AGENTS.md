@@ -8,6 +8,17 @@ RingRing is a self-hosted, private VoIP playground for families. A host creates 
 
 The experience should feel friendly enough for a child to use and safe enough for a parent to trust.
 
+## Current product contract
+
+- Hosts create an account with a RingRing username, password, shared family access code, and one-time recovery codes. Google sign-in may be optional, but the product must never require an organization account or email confirmation.
+- A single-use, expiring invitation creates one member and its first phone. A member owns one party-local 2–5 digit extension and may have several independently revocable phones that ring together.
+- New and rotated phones receive a globally unique 6-digit SIP username and a 12-digit SIP password. Both are digits only; visual grouping must never become part of the copied or provisioned value. Use the SIP username for both User ID and Authentication ID when a device exposes both fields.
+- SIP TLS on `5061` is preferred. UDP `5060` remains the explicit compatibility path for older adapters; never imply that it is as private as verified TLS.
+- The host phone book is the high-frequency surface: people, per-phone presence/activity, current same-party calls, join codes, and elapsed time. Credentials, phone lifecycle, per-member weather, optional lines, AI controls/spend, and destructive actions belong in focused settings surfaces.
+- Weather location is member-scoped. Phones sharing an extension share that member's location; other members remain independent.
+- `0` and `*0` reach the RingRing operator. `*10` is echo, `*11` time, `*12` weather, `*13` host-selected radio, `*14` the gated adult AI preview, `*15` extension selection, and `*16<extension>` joins a current party call. Optional lines must disappear safely when disabled or unavailable.
+- Open-ended AI is enabled only for an extension deliberately marked adult at member creation and while the server-operator gate is open. Do not add recurring adult checkboxes to ordinary call flows or expose `*14` to child/shared phones.
+
 ## Product principles
 
 1. **A phone should feel like a phone.** Pick it up, dial a short extension, and talk.
@@ -34,8 +45,12 @@ The experience should feel friendly enough for a child to use and safe enough fo
 - Asterisk owns SIP registration, RTP media, and dialing. Its configuration is generated from application state; hand-edited generated files are never a source of truth.
 - Dialplan contexts must be party-scoped. Never route a user-supplied extension through a global context.
 - SIP auth usernames must be globally unique and unrelated to a child's real name. Extensions only need to be unique inside a party.
+- Credential rotation takes effect immediately. Every setup surface and runbook must explain that the physical phone must be updated with the newly issued username and password; an old device may still claim locally that it is registered.
 - SIP and RTP should remain server-mediated (`direct_media=no`) so party boundaries and NAT behavior are predictable.
 - Optional voice services must be explicit dialplan destinations that a host can disable.
+- The RingRing operator uses fixed, code-controlled one-way TTS and discloses that it is an AI voice the first time each extension encounters it. Do not send caller audio, names, extensions, dialed digits, or credentials to TTS.
+- Active-call joining uses party-scoped ConfBridge rooms and a fixed `*16` destination. Joining must announce the validated member display name to everyone already in the call; recording stays disabled.
+- The host-only live phone book may reduce current AMI state to `off hook`, `calling`, `ringing`, or `on a call`, same-party companion labels, and bounded elapsed seconds. It must never persist call state/history or expose caller ID, dialed digits, channel/bridge IDs, addresses, or exact timestamps.
 - SQLite in WAL mode is the initial supported database. Keep migrations forward-only and portable enough for a later PostgreSQL adapter.
 - Server-rendered HTML and small, progressive-enhancement JavaScript are preferred. The core join and admin flows must work without a large client bundle.
 
@@ -53,6 +68,17 @@ The experience should feel friendly enough for a child to use and safe enough fo
 - Add spend limits and model allowlists to automatically provisioned OpenAI projects when the Admin API supports them.
 - Authentication and invite endpoints require CSRF protection, rate limiting, expiration, and safe error messages.
 - Do not expose Asterisk AMI, app debug ports, databases, or Docker sockets to the public network.
+- Authenticated party and setup responses are `no-store`. Keep small browser enhancements integrity-pinned and free of analytics, storage, cookies, cross-origin requests, logging, or secret-bearing URLs unless the feature explicitly requires and documents them.
+
+## SIP hardware and call acceptance
+
+- Never infer which physical phone owns an extension from a member name, device label, screenshot, or remembered setup. Before changing hardware, match its configured SIP identity to the active RingRing device record and state the mapping being used.
+- Treat Asterisk's current contact list as authoritative for incoming reachability. A phone can authenticate an outgoing `INVITE` without leaving a usable registration, and some adapters keep displaying `Registered` for a stale account.
+- Verify registration from both ends after a credential or transport change: the device must report registered, and Asterisk must have the exact current endpoint contact as available. Do not expose the endpoint identity or contact address in logs or screenshots.
+- The existence of an Asterisk channel alone does not prove a phone rang. For an incoming test, require a `Ringing`/answer response or physical confirmation, then clear the bounded diagnostic call.
+- An analog handset lift is invisible when an ATA keeps it local. Report `off hook` only after the adapter opens a SIP channel; never fabricate state from contact presence.
+- Grandstream-style adapters commonly need the same issued value in SIP User ID and Authenticate ID. Keep Account Active and registration enabled; document exact field names per tested model rather than relying on generic SIP jargon.
+- Before calling hardware support complete, test `*10`, outgoing and incoming extension calls, two-way audio, DTMF, an invalid destination/operator fallback, registration renewal, reboot recovery, and remote NAT. Software smoke tests do not replace this physical matrix.
 
 ## Coding conventions
 
@@ -95,6 +121,15 @@ Before handing off a change:
 7. Run `make nat-smoke` when NAT-sensitive endpoint behavior changes.
 8. Run `make sip-tls-smoke` when SIP transport, certificates, or Linphone provisioning changes.
 9. Update `WORKLOG.md` with what changed, decisions, verification, and remaining work.
+10. For documentation screenshots, use neutral fictional labels, hide credentials/tokens/addresses, and verify the checked-in image at its rendered README size.
+
+## Production operations
+
+- Use the guarded `ringringctl upgrade` workflow; do not replace it with an undocumented pull/restart sequence. It binds an exact fast-forward target to drilled pre/post backups and complete health verification.
+- Before any action that recreates Asterisk, check for active channels and avoid interrupting a family call. A documentation-only commit does not justify a PBX restart.
+- After deployment, verify the exact runtime commit, `ringringctl doctor`, public `/healthz` and `/readyz`, Compose health, database/credential integrity, relevant AMI/dialplan behavior, and recent application logs.
+- The app can become healthy before Asterisk's service name exists and log one initial reconciliation warning. Once Asterisk is healthy and no operator action is pending, recreate only the app, then rerun the doctor; do not restart the PBX merely to clear that race.
+- Do not make an undocumented production database, generated Asterisk, or container edit. Authorized test-device settings may be adjusted when necessary, but first verify the device identity, keep credentials out of output, record the operational change in `WORKLOG.md`, and restore any temporary diagnostic state.
 
 ## Git and change hygiene
 

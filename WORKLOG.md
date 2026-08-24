@@ -2,6 +2,26 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-24 — Refresh the contributor contract and project tour
+
+### Shipped
+
+- Expanded `AGENTS.md` with the current authentication, invitation, short SIP credential, multi-phone, weather, special-line, adult-AI, live-call, operator-disclosure, and call-joining product contract.
+- Added explicit hardware diagnosis rules learned from the HT801 V2 work: prove the physical-device identity before changing it, treat Asterisk contacts as the incoming-call authority, verify registration from both ends, distinguish a channel from confirmed ringing, and retain the complete physical acceptance matrix.
+- Documented the current privacy boundary for live AMI state and fixed TTS, credential-rotation behavior, safe screenshot rules, the guarded production workflow, and the app-before-Asterisk reconciliation race.
+- Added a visual README tour with the public landing page and a populated party dashboard showing live call joining, friendly companion labels, timers, and phone controls. Corrected the README's weather description from party-scoped to member-scoped and added the ephemeral live-call privacy contract.
+
+### Decisions
+
+- Keep the durable agent contract focused on invariants and hard-won operational lessons rather than a transcript of individual incidents. Historical detail stays in this worklog.
+- Build documentation screenshots from rendered RingRing pages, not hand-drawn mockups. The party screenshot uses a disposable local database, a private mock AMI, and neutral fictional location/phone labels; no family name, credential, token, address, or production party data enters either image.
+- A documentation-only release does not justify restarting Asterisk or interrupting calls. Publishing these files requires no reference-server deployment.
+
+### Verification
+
+- Inspected both checked-in 1265×712 PNG files at original size and their intended README composition. The landing image contains only public content; the party image contains only the fictional `Demo Party` state and exposes no setup values or invitation link.
+- `git diff --check`, `make check`, `make security`, and `make admin-test` pass locally. The release gate includes shell and lifecycle tests, SIP TLS synchronization, `go vet`, the race-enabled Go suite, and `govulncheck` with no called vulnerability.
+
 ## 2026-08-23 — Investigate asymmetric extension calls
 
 ### Findings
