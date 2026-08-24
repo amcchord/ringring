@@ -314,7 +314,7 @@ func normalizeStatus(status int) string {
 
 func normalizeVoiceService(value string) string {
 	switch value {
-	case "weather", "operator", "extension", "conference_join":
+	case "time", "weather", "operator", "extension", "conference_join":
 		return value
 	default:
 		return "other"

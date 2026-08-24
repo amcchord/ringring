@@ -163,6 +163,7 @@ if test "$app_ready" -ne 1; then
 fi
 grep -q '^direct_media=no$' "$work_directory/state/pjsip.conf"
 grep -q '^context=rr-party-pty_smoke$' "$work_directory/state/pjsip.conf"
+test "$(grep -c '^language=en$' "$work_directory/state/pjsip.conf")" -eq 2
 grep -Fq 'exten => *10,1,Answer()' "$work_directory/state/extensions.conf"
 grep -Fq ' same => n,Echo()' "$work_directory/state/extensions.conf"
 grep -Fq 'exten => *15,1,Answer()' "$work_directory/state/extensions.conf"
@@ -209,6 +210,14 @@ docker exec ringring-sip-smoke-asterisk sh -eu -c '
 '
 docker exec ringring-sip-smoke-asterisk \
   asterisk -rx 'pjsip show transport transport-tls' | grep -q 'transport-tls'
+docker exec ringring-sip-smoke-asterisk \
+  asterisk -rx 'core show application SayUnixTime' | grep -q "Application 'SayUnixTime'"
+docker exec ringring-sip-smoke-asterisk \
+  asterisk -rx 'dialplan show *11@rr-party-pty_smoke' | grep -Fq 'AGI(agi://app:4573/time,pty_smoke)'
+docker exec ringring-sip-smoke-asterisk \
+  asterisk -rx 'dialplan show *11@rr-party-pty_smoke' | grep -Fq 'SayUnixTime(${EPOCH}'
+docker exec ringring-sip-smoke-asterisk \
+  asterisk -rx 'pjsip show endpoint rr_smoke_a' | grep -Eq 'language[[:space:]]*:[[:space:]]*en'
 tls_report=$(docker exec ringring-sip-smoke-asterisk sh -c \
   "openssl s_client -brief -tls1_2 -verify_return_error \
     -verify_hostname ringring-sip-smoke.test -servername ringring-sip-smoke.test \
@@ -292,9 +301,13 @@ if printf '%s\n' "$dialplan" | grep -q 'Dial('; then
   echo "Phone-check context unexpectedly contains a Dial application" >&2
   exit 1
 fi
-for prompt in hello your extension is auth-thankyou; do
+for prompt in hello your extension is auth-thankyou ringring-here; do
+  extension=gsm
+  if test "$prompt" = ringring-here; then
+    extension=wav
+  fi
   docker exec ringring-sip-smoke-asterisk \
-    test -s "/var/lib/asterisk/sounds/en/$prompt.gsm"
+    test -s "/var/lib/asterisk/sounds/en/$prompt.$extension"
 done
 for prompt in sorry number-not-answering please-try-call-later cannot-complete-as-dialed please-try-again; do
   docker exec ringring-sip-smoke-asterisk \

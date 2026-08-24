@@ -30,6 +30,9 @@ func TestRenderIsolatesPartyDialplans(t *testing.T) {
 	if !strings.Contains(pjsip, "[rrd_blue_a]\ntype=aor") || !strings.Contains(pjsip, "aors=rrd_blue_a\n") || strings.Contains(pjsip, "[rrd_blue_a-aor]") {
 		t.Fatalf("registrar AOR must match the SIP username:\n%s", pjsip)
 	}
+	if strings.Count(pjsip, "language=en\n") != 4 {
+		t.Fatalf("every endpoint must select the bundled English sound set:\n%s", pjsip)
+	}
 	blueStart := strings.Index(dialplan, "[rr-party-pty_blue]")
 	goldStart := strings.Index(dialplan, "[rr-party-pty_gold]")
 	if blueStart < 0 || goldStart < 0 {
@@ -52,7 +55,8 @@ func TestRenderIsolatesPartyDialplans(t *testing.T) {
 	if strings.Contains(dialplan, "choose-extension,pty_blue,${CALLERID") {
 		t.Fatal("extension chooser must not trust caller ID")
 	}
-	if !strings.Contains(blue, "exten => *11") {
+	if !strings.Contains(blue, "exten => *11,1,Answer()\n same => n,Wait(0.5)\n same => n,Set(RINGRING_TIME_READY=0)\n same => n,Set(AGIEXITONHANGUP=yes)\n same => n,AGI(agi://app:4573/time,pty_blue)") ||
+		!strings.Contains(blue, "rr-time-fallback),SayUnixTime(${EPOCH},,ABdY 'digits/at' IMp)") || strings.Contains(dialplan, "SayUnix(") {
 		t.Fatal("time service should be present in each party")
 	}
 	if strings.Contains(dialplan, "exten => *14") || strings.Contains(dialplan, "ai-authorize") || strings.Contains(dialplan, "AudioSocket") {

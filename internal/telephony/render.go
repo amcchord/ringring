@@ -79,7 +79,7 @@ func Render(devices []DialDevice, services []model.RoutingServices) (Configurati
 		pjsip.WriteString("type=aor\nmax_contacts=1\nremove_existing=yes\nqualify_frequency=60\n\n")
 
 		fmt.Fprintf(&pjsip, "[%s]\n", device.SIPUsername)
-		pjsip.WriteString("type=endpoint\ndisallow=all\nallow=ulaw,alaw,g722\ndirect_media=no\n")
+		pjsip.WriteString("type=endpoint\ndisallow=all\nallow=ulaw,alaw,g722\ndirect_media=no\nlanguage=en\n")
 		pjsip.WriteString("rtp_symmetric=yes\nforce_rport=yes\nrewrite_contact=yes\n")
 		fmt.Fprintf(&pjsip, "context=%s\nauth=%s-auth\naors=%s\ncallerid=RingRing %s <%s>\n\n",
 			contextName, device.SIPUsername, device.SIPUsername, device.Extension, device.Extension)
@@ -121,9 +121,14 @@ func Render(devices []DialDevice, services []model.RoutingServices) (Configurati
 		service := serviceByParty[partyIDs[contextName]]
 		if service.TimeEnabled {
 			dialplan.WriteString("exten => *11,1,Answer()\n")
-			dialplan.WriteString(" same => n,Wait(1)\n")
-			dialplan.WriteString(" same => n,SayUnix(${EPOCH},,ABdY 'digits/at' IMp)\n")
+			dialplan.WriteString(" same => n,Wait(0.5)\n")
+			dialplan.WriteString(" same => n,Set(RINGRING_TIME_READY=0)\n")
+			dialplan.WriteString(" same => n,Set(AGIEXITONHANGUP=yes)\n")
+			fmt.Fprintf(&dialplan, " same => n,AGI(agi://app:4573/time,%s)\n", partyIDs[contextName])
+			dialplan.WriteString(" same => n,GotoIf($[\"${RINGRING_TIME_READY}\"=\"1\"]?rr-time-done:rr-time-fallback)\n")
+			dialplan.WriteString(" same => n(rr-time-fallback),SayUnixTime(${EPOCH},,ABdY 'digits/at' IMp)\n")
 			dialplan.WriteString(" same => n,Hangup()\n")
+			dialplan.WriteString(" same => n(rr-time-done),Hangup()\n")
 		}
 		if service.WeatherEnabled || service.WeatherSetupEnabled {
 			dialplan.WriteString("exten => *12,1,Answer()\n")

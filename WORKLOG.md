@@ -2,6 +2,36 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-24 — Restore special-line audio and add the friendly time voice
+
+### Findings
+
+- Production call traces explained both immediate hangups without exposing caller or party identities. Physical-phone channels could not resolve the prerecorded greeting or bundled fallback prompts under `sounds/en`, because generated PJSIP endpoints left their language unset. The time route separately invoked nonexistent `SayUnix`; the production Asterisk image provides `SayUnixTime`.
+- The checked-in and production greeting is a valid mono 8 kHz PCM WAV, the base English prompt files are present, the WAV format module is loaded, the default deployment language is English, and `SayUnixTime` is loaded. The faults were generated endpoint/dialplan contracts rather than missing production assets.
+
+### Shipped
+
+- Made `language=en` explicit on every generated endpoint so arbitrary physical-phone signaling cannot strand RingRing's English prompt lookup. Replaced the broken local time application with the loaded `SayUnixTime` name.
+- Routed `*11` through private FastAGI and the same friendly, party-scoped OpenAI speech voice used by other fixed RingRing lines. The bundled “Ring ring! RingRing here!” recording starts while a fixed current-time-and-date sentence is generated in the deployment timezone; one derived WAV is replaced per party and reused only for the exact spoken minute.
+- Kept `SayUnixTime` as the provider-independent fallback whenever the party voice is missing, paused, slow, or unavailable. The FastAGI ready flag selects exactly one completed path, and canceled greeting playback now drains concurrent speech work instead of leaving a background request or file write behind.
+- Excluded the unrelated iOS tree from the server Docker context. This reduced the release build context by roughly 1.9 GB and prevents simulator-derived files from exhausting the Docker VM during telephony gates or deployment.
+
+### Decisions
+
+- Time speech sends only a code-controlled sentence containing the deployment's current local time and date through that party's existing runtime key. It sends no caller audio, identity, extension, credential, dialed input, party label, or transcript.
+- Keep the no-network Asterisk time path behind the friendly voice rather than removing it. A special line should still speak when OpenAI or private FastAGI is unavailable.
+- Treat endpoint language as generated production state, not a handset assumption. Every RingRing endpoint is currently English, and every checked-in/bundled prompt set is under that language.
+
+### Verification
+
+- Focused telephony, FastAGI, cache, phrase, fallback, cleanup, and metrics tests pass. `make check`, `make security`, and `make admin-test` pass, including formatting, shell/lifecycle checks, `go vet`, the race-enabled suite, and `govulncheck` with no called vulnerability.
+- The production-image `make sip-smoke` gate passes when rooted in Docker Desktop's shared workspace. It now asserts the loaded `SayUnixTime` application, exact friendly-time FastAGI route plus local fallback, `language=en` on rendered and loaded endpoints, and the checked-in greeting before completing TLS/UDP registration, spoken fallback, RTP, extension selection, and three-phone join scenarios.
+- The first local smoke attempt exposed Docker VM exhaustion from a 2.09 GB context; only dangling intermediate images were pruned, reclaiming 15.46 GB without removing tagged images, volumes, or source files. A second `/tmp`-rooted run hit the documented Docker Desktop bind-share limitation; the workspace-rooted gate passed and removed its disposable state.
+
+### Production
+
+- Pending guarded publication and deployment after confirming zero active calls.
+
 ## 2026-08-24 — Quieter voice help and simpler party-call joining
 
 ### Shipped

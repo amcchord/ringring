@@ -35,6 +35,7 @@ const (
 	operatorReasonPhoneUnavailable   = "phone-unavailable"
 	operatorReasonServiceUnavailable = "service-unavailable"
 	operatorCacheVersion             = "v4"
+	timeCacheVersion                 = "v1"
 	weatherSetupCacheVersion         = "v2"
 	weatherCacheVersion              = "v3"
 )
@@ -135,6 +136,8 @@ func (s *Server) handle(connection net.Conn) {
 		return
 	}
 	switch environment["agi_network_script"] {
+	case "time":
+		s.handleTime(reader, writer, environment)
 	case "weather":
 		s.handleWeather(reader, writer, environment)
 	case "operator":
@@ -149,6 +152,42 @@ func (s *Server) handle(connection net.Conn) {
 		_ = agiCommand(reader, writer, "EXEC Playback ss-noservice")
 	}
 	return
+}
+
+func (s *Server) handleTime(reader *bufio.Reader, writer *bufio.Writer, environment map[string]string) {
+	result := "error"
+	defer func() { s.Metrics.ObserveVoice("time", result) }()
+	_ = agiCommand(reader, writer, "SET VARIABLE RINGRING_TIME_READY 0")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	partyID := environment["agi_arg_1"]
+	type audioResult struct {
+		path string
+		err  error
+	}
+	generated := make(chan audioResult, 1)
+	go func() {
+		path, err := s.timeAudio(ctx, partyID)
+		generated <- audioResult{path: path, err: err}
+	}()
+	if err := agiCommand(reader, writer, `STREAM FILE "ringring-here" ""`); err != nil {
+		cancel()
+		<-generated
+		return
+	}
+	audio := <-generated
+	if audio.err != nil {
+		s.logger().Warn("prepare time line", "error_class", observability.ErrorClass(audio.err))
+		return
+	}
+	if err := agiCommand(reader, writer, `STREAM FILE "`+audio.path+`" ""`); err != nil {
+		return
+	}
+	if err := agiCommand(reader, writer, "SET VARIABLE RINGRING_TIME_READY 1"); err != nil {
+		return
+	}
+	result = "ready"
 }
 
 func (s *Server) handleOperator(reader *bufio.Reader, writer *bufio.Writer, environment map[string]string) {
@@ -169,6 +208,8 @@ func (s *Server) handleOperator(reader *bufio.Reader, writer *bufio.Writer, envi
 		generated <- audioResult{path: path, err: err}
 	}()
 	if err := agiCommand(reader, writer, `STREAM FILE "ringring-here" ""`); err != nil {
+		cancel()
+		<-generated
 		return
 	}
 	audio := <-generated
@@ -320,6 +361,8 @@ func (s *Server) handleWeather(reader *bufio.Reader, writer *bufio.Writer, envir
 		generated <- audioResult{path: path, err: err}
 	}()
 	if err := agiCommand(reader, writer, `STREAM FILE "ringring-here" ""`); err != nil {
+		cancel()
+		<-generated
 		return
 	}
 	audio := <-generated
@@ -353,6 +396,7 @@ func (s *Server) collectWeatherLocation(ctx context.Context, reader *bufio.Reade
 		}()
 		if attempt == 0 {
 			if err := agiCommand(reader, writer, `STREAM FILE "ringring-here" ""`); err != nil {
+				<-generated
 				return err
 			}
 		}
@@ -440,6 +484,68 @@ func (s *Server) operatorAudio(ctx context.Context, partyID, reason string) (str
 		return "", err
 	}
 	return filepath.Join(s.PlaybackDir, strings.TrimSuffix(filename, ".wav")), nil
+}
+
+func (s *Server) timeAudio(ctx context.Context, partyID string) (string, error) {
+	if s.Source == nil || s.Cipher == nil || s.Speech == nil || s.AudioDir == "" || s.PlaybackDir == "" {
+		return "", errors.New("time voice service is not fully configured")
+	}
+	if !safePartyID.MatchString(partyID) {
+		return "", errors.New("invalid time party ID")
+	}
+	party, services, err := s.Source.PartyVoiceSettings(ctx, partyID)
+	if err != nil {
+		return "", err
+	}
+	if !services.TimeEnabled || party.OpenAIStatus != "ready" || party.OpenAIUsagePausedForSpendLimit() || party.OpenAIKeyCiphertext == "" {
+		return "", errors.New("party time voice is unavailable")
+	}
+	now := time.Now()
+	if s.Now != nil {
+		now = s.Now()
+	}
+	filename := "time-" + timeCacheVersion + "-" + partyID + ".wav"
+	localPath := filepath.Join(s.AudioDir, filename)
+	if info, statErr := os.Stat(localPath); statErr == nil && info.Size() > 44 &&
+		info.ModTime().In(now.Location()).Format("200601021504") == now.Format("200601021504") {
+		return filepath.Join(s.PlaybackDir, strings.TrimSuffix(filename, ".wav")), nil
+	}
+	apiKey, err := s.Cipher.Decrypt(party.OpenAIKeyCiphertext, []byte(party.ID))
+	if err != nil {
+		return "", fmt.Errorf("decrypt party OpenAI key for time: %w", err)
+	}
+	pcm, err := s.Speech.SpeechPCM(ctx, apiKey, timePhrase(now))
+	if err != nil {
+		return "", err
+	}
+	wav, err := openairuntime.PCM24kToWAV8k(pcm)
+	if err != nil {
+		return "", fmt.Errorf("convert time speech: %w", err)
+	}
+	if err := os.MkdirAll(s.AudioDir, 0o750); err != nil {
+		return "", fmt.Errorf("create time audio directory: %w", err)
+	}
+	if err := atomicWrite(localPath, wav); err != nil {
+		return "", err
+	}
+	// The file's timestamp is the minute spoken, not the time the provider
+	// finished. A request that crosses a minute boundary must not reuse stale
+	// speech for the new minute.
+	if err := os.Chtimes(localPath, now, now); err != nil {
+		return "", fmt.Errorf("timestamp time audio: %w", err)
+	}
+	return filepath.Join(s.PlaybackDir, strings.TrimSuffix(filename, ".wav")), nil
+}
+
+func timePhrase(now time.Time) string {
+	hour := now.Hour() % 12
+	if hour == 0 {
+		hour = 12
+	}
+	if now.Minute() == 0 {
+		return fmt.Sprintf("It's %d o'clock %s on %s.", hour, strings.ToLower(now.Format("PM")), now.Format("Monday, January 2"))
+	}
+	return fmt.Sprintf("It's %d:%02d %s on %s.", hour, now.Minute(), strings.ToLower(now.Format("PM")), now.Format("Monday, January 2"))
 }
 
 func (s *Server) weatherSetupAudio(ctx context.Context, partyID, promptName string) (string, error) {

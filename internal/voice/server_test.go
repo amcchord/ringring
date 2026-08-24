@@ -123,6 +123,79 @@ func (f *fakeSpeech) SpeechPCM(_ context.Context, key, input string) ([]byte, er
 	return pcm, nil
 }
 
+func TestTimeFastAGIUsesFriendlyPartyVoiceAndMinuteCache(t *testing.T) {
+	cipher, err := secure.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ciphertext, err := cipher.Encrypt("party-time-key", []byte("pty_time"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 24, 19, 5, 0, 0, time.FixedZone("EDT", -4*60*60))
+	audioDir := t.TempDir()
+	speech := &fakeSpeech{}
+	metrics := observability.New()
+	server := &Server{
+		Source: fakePartySource{
+			party:    model.Party{ID: "pty_time", OpenAIStatus: "ready", OpenAIKeyCiphertext: ciphertext},
+			services: model.PartyServices{PartyID: "pty_time", TimeEnabled: true},
+		},
+		Cipher: cipher, Speech: speech, AudioDir: audioDir, PlaybackDir: "/voice",
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Metrics: metrics, Now: func() time.Time { return now },
+	}
+
+	var commands bytes.Buffer
+	server.handleTime(scriptedAGI("0", "0", "0", "0"), bufio.NewWriter(&commands), map[string]string{"agi_arg_1": "pty_time"})
+	want := "SET VARIABLE RINGRING_TIME_READY 0\n" +
+		`STREAM FILE "ringring-here" ""` + "\n" +
+		`STREAM FILE "/voice/time-v1-pty_time" ""` + "\n" +
+		"SET VARIABLE RINGRING_TIME_READY 1\n"
+	if commands.String() != want {
+		t.Fatalf("unexpected time FastAGI exchange:\n%s", commands.String())
+	}
+	if speech.key != "party-time-key" || speech.input != "It's 7:05 pm on Monday, August 24." {
+		t.Fatalf("unexpected friendly time request: key=%q input=%q", speech.key, speech.input)
+	}
+	localPath := filepath.Join(audioDir, "time-v1-pty_time.wav")
+	if info, err := os.Stat(localPath); err != nil || info.Size() <= 44 {
+		t.Fatalf("time voice was not written: %v", err)
+	}
+	if _, err := server.timeAudio(t.Context(), "pty_time"); err != nil {
+		t.Fatal(err)
+	}
+	if speech.calls != 1 {
+		t.Fatalf("same-minute time voice should be cached, got %d speech calls", speech.calls)
+	}
+
+	response := httptest.NewRecorder()
+	metrics.Handler(nil).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(response.Body.String(), `ringring_voice_service_requests_total{service="time",result="ready"} 1`) {
+		t.Fatalf("time voice success was not observable:\n%s", response.Body.String())
+	}
+}
+
+func TestTimeFastAGIFailureLeavesDialplanFallbackReady(t *testing.T) {
+	server := &Server{
+		Source: fakePartySource{services: model.PartyServices{PartyID: "pty_time", TimeEnabled: true}},
+		Speech: failingSpeech{}, AudioDir: t.TempDir(), PlaybackDir: "/voice",
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Metrics: observability.New(),
+	}
+	var commands bytes.Buffer
+	server.handleTime(scriptedAGI("0", "0"), bufio.NewWriter(&commands), map[string]string{"agi_arg_1": "pty_time"})
+	want := "SET VARIABLE RINGRING_TIME_READY 0\n" + `STREAM FILE "ringring-here" ""` + "\n"
+	if commands.String() != want {
+		t.Fatalf("failed time voice must leave the built-in dialplan fallback selected:\n%s", commands.String())
+	}
+}
+
+func TestTimePhraseHandlesMidnightAndWholeHour(t *testing.T) {
+	now := time.Date(2026, 8, 25, 0, 0, 0, 0, time.UTC)
+	if got := timePhrase(now); got != "It's 12 o'clock am on Tuesday, August 25." {
+		t.Fatalf("unexpected whole-hour phrase: %q", got)
+	}
+}
+
 func TestJoinPartyUsesAuthenticatedMemberNameAndEphemeralPartyVoice(t *testing.T) {
 	cipher, err := secure.NewCipher(make([]byte, 32))
 	if err != nil {

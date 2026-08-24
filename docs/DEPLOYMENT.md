@@ -346,6 +346,10 @@ This release removes the conversation route, private media listener, invitation 
 
 The voice extension chooser adds no schema, secret, environment variable, public port, or external service. Upgrading the app regenerates each party dialplan with `*15`; the private FastAGI listener already used by weather handles the interaction. Rollback regenerates the dialplan without `*15`. Any extension a member already selected remains an ordinary compatible `members.extension` value, while its SIP username and encrypted password remain unchanged.
 
+### Friendly time voice and English prompt routing upgrade and rollback
+
+The friendly `*11` line adds no schema, secret, environment variable, port, or provider credential. It reuses the existing party-scoped speech key and private FastAGI listener, writes one replaceable derived WAV per party, and uses the deployment `TZ` already shared by the app and Asterisk. Generated PJSIP endpoints now select `language=en` explicitly so physical phones cannot override resolution of the checked-in greeting or bundled fallback prompts. The dialplan keeps `SayUnixTime` behind the provider path; rolling back returns to the older local-time route and ignores the derived WAV. Validate the loaded `SayUnixTime` application, endpoint language, English sound files, and generated `*11` route before promotion.
+
 ### Radio-selection upgrade and rollback
 
 The curated selector adds `party_services.radio_station` with a forward-only startup migration and defaults every existing row to Groove Salad, preserving the prior route. Take and drill the normal app-state backup before upgrading. Older app builds ignore the additive column; rolling back regenerates any enabled `*13` route with their fixed Groove Salad setting, while the chosen catalog ID remains stored for a later return to this release. No secret, environment variable, public port, or new container is added.
