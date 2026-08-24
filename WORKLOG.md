@@ -2,6 +2,25 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-24 — Consolidate the production voice-acceptance lessons
+
+### Shipped
+
+- Added `docs/PRODUCTION_VOICE_ACCEPTANCE.md` as the canonical layered runbook for special-line hangups and production acceptance. It covers safe disposable-state creation, prompt access as the unprivileged Asterisk user, root versus language prompt lookup, the 60-second contact-qualification interval, UID-safe Linphone mounts, RTP and non-silent audio evidence, friendly speech versus local fallback metrics, direct external-project archive confirmation, cleanup, warning handling, SQLite recovery, Docker VM bind roots, and final handoff evidence.
+- Linked the runbook from `AGENTS.md`, the deployment guide, and the README so a future agent sees it before operating on production. Promoted the highest-risk facts directly into `AGENTS.md`: do not trust root prompt access, wait for authoritative `Avail`, keep OpenAI key issuance disabled while spend enforcement is `inactive`, and recreate only the app when clearing the known startup/test warning conditions.
+- Corrected the observability guide's fixed privacy-safe voice-service allowlist to include `time` alongside the existing service labels.
+
+### Incident closure recorded
+
+- Production runtime `45945441432819aa93b2087c23a4fb395e651fdf` passed the guarded orphan repair and upgrade. The root-only pre-repair quarantine was `ringring-quarantine-20260824T210835Z-561f04e.tar.gz`; drilled pre/post upgrade backups were `ringring-20260824T210855Z-561f04e.tar.gz` and `ringring-20260824T211044Z-4594544.tar.gz`.
+- A fresh disposable extension registered with verified TLS, remained online through the production qualification interval, became authoritatively available, dialed `*11`, negotiated PCMU, received 565 RTP packets, and captured 11.83 seconds of clearly non-silent audio at RMS 3719. Its new provider project remained safely `inactive`, so this call correctly exercised the local spoken fallback.
+- A separate private local call through the one existing ready party advanced the friendly-time `ready` metric with no `error`, produced readable derived OpenAI audio, rang no family phone, recorded nothing, and left zero channels. All ten matching disposable provider projects were retrieved individually and confirmed archived.
+- Final production checks passed exact commit/worktree, doctor, public HTTP health/readiness, Compose health, database/credential integrity, AMI, generated friendly audio, runtime prompt readability, recent missing-sound/error absence, zero channels, baseline data counts, and exact temporary-helper removal.
+
+### Verification and operations
+
+- `git diff --check`, Markdown link checks, and `make check` pass, including the executable documentation/security contracts, shell/lifecycle checks, `go vet`, and the race-enabled Go suite. This is a documentation-only follow-up; it requires no production service or PBX restart.
+
 ## 2026-08-24 — Repair disposable-test state before the physical time acceptance call
 
 ### Findings

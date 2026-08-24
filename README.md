@@ -28,7 +28,7 @@ The host phone book updates automatically. It shows registration and call activi
 - An always-available RingRing operator on `0`/`*0`, `*10` two-way phone testing, and `*15` voice-guided extension selection, plus optional time, weather, internet radio, and joinable in-progress party calls.
 - A reproducible, self-hosted Docker Compose deployment using Asterisk and Caddy.
 
-See [the architecture](docs/ARCHITECTURE.md), [the phone API](docs/PHONE_API.md), [the security model](docs/SECURITY.md), [privacy-preserving observability](docs/OBSERVABILITY.md), [SIP TLS compatibility](docs/SIP_TLS_COMPATIBILITY.md), [backup and recovery](docs/RECOVERY.md), and [the roadmap](docs/ROADMAP.md).
+See [the architecture](docs/ARCHITECTURE.md), [the phone API](docs/PHONE_API.md), [the security model](docs/SECURITY.md), [privacy-preserving observability](docs/OBSERVABILITY.md), [production voice acceptance](docs/PRODUCTION_VOICE_ACCEPTANCE.md), [SIP TLS compatibility](docs/SIP_TLS_COMPATIBILITY.md), [backup and recovery](docs/RECOVERY.md), and [the roadmap](docs/ROADMAP.md).
 
 iPhone users can also read the app's [privacy notice](docs/PRIVACY.md) and [support guide](docs/SUPPORT.md).
 

@@ -202,6 +202,8 @@ The Asterisk image and entrypoint normalize every static config—and especially
 
 To verify the Linphone path without touching a family phone, use a disposable party/invitation in an isolated development database. Confirm that the QR decodes to the setup page's provisioning URL, the first `GET` returns `application/xml` with `Cache-Control: no-store`, and the second returns `410`. Never print the URL, XML, or setup-screen credentials into deployment logs.
 
+For a real disposable production extension or any diagnosis of a special line that answers and hangs up, follow [Production voice acceptance](PRODUCTION_VOICE_ACCEPTANCE.md). It separates prompt access, authoritative contact qualification, RTP/audio proof, friendly provider speech, local fallback, external-project cleanup, and final return-to-baseline checks so one successful layer cannot hide failure in another.
+
 ## Backup and recovery
 
 Create a root-only, checksummed backup and exercise it without replacing live state:

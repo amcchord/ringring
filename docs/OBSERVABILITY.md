@@ -13,7 +13,7 @@ docker compose exec -T app curl --fail --silent http://127.0.0.1:9090/metrics
 
 The metrics registry is memory-only and resets when the app restarts. RingRing itself does not persist or remote-write a scrape. Labels come from fixed code allowlists and never include a party, host, member, device, SIP username, extension, invitation/provisioning token, address, user-agent, weather place, station, model prompt, caller input, transcript, or error text.
 
-HTTP activity is reduced to one of `health`, `static`, `authentication`, `host`, `invitation`, `provisioning`, `public`, or `other`, plus `GET`/`POST`/`HEAD`/`OTHER` and a status class such as `2xx`. Voice operations use only the bounded service names `weather`, `operator`, `extension`, and `conference_join`, with a small result vocabulary. There is no per-call series, call start timestamp, destination, caller identity, call duration, audio, or transcript.
+HTTP activity is reduced to one of `health`, `static`, `authentication`, `host`, `invitation`, `provisioning`, `public`, or `other`, plus `GET`/`POST`/`HEAD`/`OTHER` and a status class such as `2xx`. Voice operations use only the bounded service names `time`, `weather`, `operator`, `extension`, and `conference_join`, with a small result vocabulary. There is no per-call series, call start timestamp, destination, caller identity, call duration, audio, or transcript.
 
 The current aggregate metrics are:
 

@@ -72,6 +72,7 @@ The experience should feel friendly enough for a child to use and safe enough fo
 
 ## SIP hardware and call acceptance
 
+- Before diagnosing or accepting a production special-line call, read `docs/PRODUCTION_VOICE_ACCEPTANCE.md`. It is the canonical layered checklist for runtime prompt permissions, disposable TLS registration, the 60-second AOR qualification interval, RTP/audio proof, friendly-voice versus fallback evidence, provider-project cleanup, and return-to-baseline verification.
 - Never infer which physical phone owns an extension from a member name, device label, screenshot, or remembered setup. Before changing hardware, match its configured SIP identity to the active RingRing device record and state the mapping being used.
 - Treat Asterisk's current contact list as authoritative for incoming reachability. A phone can authenticate an outgoing `INVITE` without leaving a usable registration, and some adapters keep displaying `Registered` for a stale account.
 - Verify registration from both ends after a credential or transport change: the device must report registered, and Asterisk must have the exact current endpoint contact as available. Do not expose the endpoint identity or contact address in logs or screenshots.
@@ -123,12 +124,16 @@ Before handing off a change:
 9. Update `WORKLOG.md` with what changed, decisions, verification, and remaining work.
 10. For documentation screenshots, use neutral fictional labels, hide credentials/tokens/addresses, and verify the checked-in image at its rendered README size.
 
+On Docker Desktop and other VM-backed runtimes, do not assume host `/tmp` is bind-mounted into the Docker VM. If a SIP/NAT/Linphone gate cannot see or write its disposable SQLite or generated state, rerun with its documented temporary-root override pointed at the Docker-shared workspace; do not weaken container ownership checks to accommodate the VM artifact.
+
 ## Production operations
 
 - Use the guarded `ringringctl upgrade` workflow; do not replace it with an undocumented pull/restart sequence. It binds an exact fast-forward target to drilled pre/post backups and complete health verification.
 - Before any action that recreates Asterisk, check for active channels and avoid interrupting a family call. A documentation-only commit does not justify a PBX restart.
 - After deployment, verify the exact runtime commit, `ringringctl doctor`, public `/healthz` and `/readyz`, Compose health, database/credential integrity, relevant AMI/dialplan behavior, and recent application logs.
 - The app can become healthy before Asterisk's service name exists and log one initial reconciliation warning. Once Asterisk is healthy and no operator action is pending, recreate only the app, then rerun the doctor; do not restart the PBX merely to clear that race.
+- For a disposable production phone, keep the client registered through Asterisk's full 60-second AOR qualification interval and require the current contact to become `Avail` before placing the acceptance call. A helper program mounted into an unprivileged test container must itself be readable there; keep credential-bearing provisioning files separately private and UID-scoped.
+- A newly created OpenAI project is not ready merely because the spend-limit write returned success. Require the provider to report enforcement as `enforcing`; while it remains `inactive`, keep runtime key issuance disabled, accept only the local voice fallback for that disposable party, and directly confirm the partial project is archived after cleanup.
 - Do not make an undocumented production database, generated Asterisk, or container edit. Authorized test-device settings may be adjusted when necessary, but first verify the device identity, keep credentials out of output, record the operational change in `WORKLOG.md`, and restore any temporary diagnostic state.
 
 ## Git and change hygiene
