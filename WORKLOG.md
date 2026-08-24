@@ -20,6 +20,13 @@ This is the durable, chronological project record. Add new entries at the top. C
 
 - Focused provisioning, web, and security-contract tests cover exact WP826 aliases, URL validation, XML escaping, Basic authentication, privacy headers, same-party people/services, self/secret omission, duplicate rejection, and removal of a revoked contact on the next fetch.
 - `make check`, `make security`, and `make admin-test` pass locally; `go vet`, the race-enabled suite, installer lifecycle checks, TLS synchronization tests, and `govulncheck` are clean.
+- The physical WP826 accepted a phonebook-only alias XML without changing its existing SIP or Memphis-theme settings. Its web UI confirms HTTPS download, the authenticated RingRing path, a five-minute interval, replace mode, and stale/manual-entry removal. The first download populated both other active party extensions plus every currently enabled `*10`–`*15` service while omitting its own extension.
+
+### Production
+
+- Published and deployed runtime commit `5242c681e4ce7e09e52f71a03835a50c2f609722` through the guarded fast-forward upgrader. Pre/post archives `ringring-20260824T015233Z-f8fd69a.tar.gz` and `ringring-20260824T015419Z-5242c68.tar.gz` passed checksum, safe-extraction, SQLite, credential, isolated-readiness, and telephony restore drills.
+- Public health/readiness and `ringringctl doctor` pass at the deployed commit. The unauthenticated phonebook endpoint returns a generic `401` with Basic challenge, no-store/no-referrer/noindex protections, same-origin resource policy, and `Vary: Authorization`; the authenticated handset fetched and displayed the live directory immediately.
+- A user-authorized long-running test `*10` echo channel was ended before the Compose restart, avoiding an in-call deployment. The phonebook-only XML was generated from encrypted server state without printing or rotating the credential, stored locally as mode `0600`, uploaded over the explicitly authorized local admin connection, and deleted immediately after acceptance; its temporary server-side renderer was also removed.
 
 ## 2026-08-23 — Clip compact member cards to their rounded corners
 
