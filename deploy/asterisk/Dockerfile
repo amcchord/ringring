@@ -46,8 +46,9 @@ COPY refresh-tls.sh /usr/local/bin/ringring-asterisk-refresh-tls
 RUN cp -a /var/lib/asterisk/sounds/en/. /var/lib/asterisk/sounds/ \
 	&& find /etc/asterisk -maxdepth 1 -type f -exec chown asterisk:ringring {} + \
 	&& find /etc/asterisk -maxdepth 1 -type f -exec chmod 0640 {} + \
+	&& find /var/lib/asterisk/sounds -type d -exec chmod 0755 {} + \
+	&& find /var/lib/asterisk/sounds -type f -exec chmod 0644 {} + \
 	&& find /var/lib/asterisk/sounds -type f -name 'ringring-*.wav' -exec chown asterisk:ringring {} + \
-	&& find /var/lib/asterisk/sounds -type f -name 'ringring-*.wav' -exec chmod 0644 {} + \
 	&& chmod 0755 /usr/local/bin/ringring-asterisk-entrypoint /usr/local/bin/ringring-asterisk-refresh-tls
 
 EXPOSE 5060/udp 5061/tcp 5038/tcp 10000-10199/udp

@@ -306,23 +306,28 @@ for prompt in hello your extension is auth-thankyou ringring-here; do
   if test "$prompt" = ringring-here; then
     extension=wav
   fi
-  docker exec ringring-sip-smoke-asterisk \
+  docker exec --user asterisk:ringring ringring-sip-smoke-asterisk \
     test -s "/var/lib/asterisk/sounds/en/$prompt.$extension"
-  docker exec ringring-sip-smoke-asterisk \
+  docker exec --user asterisk:ringring ringring-sip-smoke-asterisk \
     test -s "/var/lib/asterisk/sounds/$prompt.$extension"
 done
 for prompt in sorry number-not-answering please-try-call-later cannot-complete-as-dialed please-try-again; do
-  docker exec ringring-sip-smoke-asterisk \
+  docker exec --user asterisk:ringring ringring-sip-smoke-asterisk \
     test -s "/var/lib/asterisk/sounds/en/$prompt.gsm"
-  docker exec ringring-sip-smoke-asterisk \
+  docker exec --user asterisk:ringring ringring-sip-smoke-asterisk \
     test -s "/var/lib/asterisk/sounds/$prompt.gsm"
 done
 for prompt in day-1 at; do
-  docker exec ringring-sip-smoke-asterisk \
+  docker exec --user asterisk:ringring ringring-sip-smoke-asterisk \
     test -s "/var/lib/asterisk/sounds/en/digits/$prompt.gsm"
-  docker exec ringring-sip-smoke-asterisk \
+  docker exec --user asterisk:ringring ringring-sip-smoke-asterisk \
     test -s "/var/lib/asterisk/sounds/digits/$prompt.gsm"
 done
+docker exec ringring-sip-smoke-asterisk sh -eu -c '
+  test "$(stat -c %a /var/lib/asterisk/sounds)" = 755
+  test "$(stat -c %a /var/lib/asterisk/sounds/en)" = 755
+  test "$(stat -c %a /var/lib/asterisk/sounds/digits)" = 755
+'
 invalid_number=$(docker exec ringring-sip-smoke-asterisk \
   asterisk -rx 'dialplan show 222@rr-party-pty_smoke')
 printf '%s\n' "$invalid_number" | grep -Fq "'_X!'"
