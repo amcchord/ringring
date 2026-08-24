@@ -30,7 +30,9 @@ This is the durable, chronological project record. Add new entries at the top. C
 
 ### Production
 
-- Pending guarded publication and deployment after confirming zero active calls.
+- Published runtime `4bc2c427552e2bc69efea73e12f9d933029202d3` and deployed it through the guarded fast-forward upgrader after confirming a clean production checkout and zero active Asterisk channels. Pre/post archives `ringring-20260824T193505Z-28f5bec.tar.gz` and `ringring-20260824T193651Z-4bc2c42.tar.gz` both pass checksum, safe-extraction, SQLite, foreign-key, credential-decryption, isolated-readiness, and telephony-regeneration drills.
+- Production `ringringctl doctor`, database/credential integrity, private AMI, public `/healthz` and `/readyz`, and all three service checks pass. Every loaded endpoint definition has `language=en` (3/3), the single enabled party route contains both friendly-time FastAGI and `SayUnixTime` fallback, the checked-in greeting plus English fallback files are present, and Asterisk reports zero active channels.
+- Fresh app logs contain no error/fatal line, and fresh Asterisk logs contain none of the earlier missing-greeting, missing-fallback, or invalid-time-application failures. No production party or caller identifier was retained in the incident record, and no automated family-phone call was placed as a deployment probe; physical `*11` and `*12` listening remain the acceptance check.
 
 ## 2026-08-24 — Quieter voice help and simpler party-call joining
 
