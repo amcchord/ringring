@@ -32,6 +32,40 @@ type phonePushRequest struct {
 	Environment string `json:"environment"`
 }
 
+func (a *App) grandstreamPhonebookAPI(w http.ResponseWriter, r *http.Request) {
+	phoneMobileHeaders(w)
+	device, ok := a.authenticatePhoneAPI(w, r)
+	if !ok {
+		return
+	}
+	members, err := a.store.ListMembers(r.Context(), device.PartyID)
+	if err != nil {
+		a.logger.Error("load Grandstream phonebook members", "error_class", observability.ErrorClass(err))
+		writeAPIProblem(w, http.StatusInternalServerError, "Phonebook unavailable", "RingRing could not safely refresh this phonebook. Please try again.")
+		return
+	}
+	party, services, err := a.store.PartyVoiceSettings(r.Context(), device.PartyID)
+	if err != nil {
+		a.logger.Error("load Grandstream phonebook services", "error_class", observability.ErrorClass(err))
+		writeAPIProblem(w, http.StatusInternalServerError, "Phonebook unavailable", "RingRing could not safely refresh this phonebook. Please try again.")
+		return
+	}
+	document, err := provisioning.GrandstreamPhonebookXML(phoneCallDestinations(
+		device.Extension,
+		members,
+		availableFirstCallLines(party, services, a.cfg.AIAdultOnlyEnabled, device.AdultExtension),
+	))
+	if err != nil {
+		a.logger.Error("encode Grandstream phonebook", "error_class", observability.ErrorClass(err))
+		writeAPIProblem(w, http.StatusInternalServerError, "Phonebook unavailable", "RingRing could not safely refresh this phonebook. Please try again.")
+		return
+	}
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	if _, err := w.Write(document); err != nil {
+		a.logger.Error("write Grandstream phonebook", "error_class", observability.ErrorClass(err))
+	}
+}
+
 func (a *App) phoneStateAPI(w http.ResponseWriter, r *http.Request) {
 	phoneMobileHeaders(w)
 	device, ok := a.authenticatePhoneAPI(w, r)

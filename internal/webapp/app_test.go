@@ -309,6 +309,8 @@ func TestWP826ProvisioningDownloadIsOneTimeAndPrivate(t *testing.T) {
 		`<config version="2">`, `<item name="account.1.sip.server.1">`, `<part name="address">ringring.live:5061</part>`,
 		`<part name="userid">654321</part>`, `<part name="password">` + password + `</part>`,
 		`https://ringring.live/static/wp826/wallpapers/ringring-memphis-day.png`, `ringring.live/static/wp826/ringtones`,
+		`<item name="phonebook.download">`, `<part name="interval">5</part>`, `<part name="mode">Enabled Use HTTPS</part>`,
+		`<part name="server">ringring.live/api/v1/phone/grandstream-phonebook.xml</part>`,
 	} {
 		if !strings.Contains(body, required) {
 			t.Errorf("WP826 download omitted %q", required)

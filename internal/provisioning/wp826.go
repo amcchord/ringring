@@ -14,6 +14,7 @@ type WP826Config struct {
 	Password     string
 	Extension    string
 	AssetBaseURL string
+	PhonebookURL string
 }
 
 type grandstreamDocument struct {
@@ -58,6 +59,10 @@ func WP826XML(input WP826Config) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	phonebookMode, phonebookServer, err := wp826PhonebookLocation(input.PhonebookURL)
+	if err != nil {
+		return nil, err
+	}
 	displayName := "RingRing " + input.Extension
 	document := grandstreamDocument{Config: grandstreamConfig{
 		Version: 2,
@@ -88,6 +93,14 @@ func WP826XML(input WP826Config) ([]byte, error) {
 				part("serverPath", assetBase+"/wallpapers/ringring-memphis-day.png"),
 				part("source", "Download"),
 			),
+			item("phonebook.download",
+				part("interval", "5"),
+				part("mode", phonebookMode),
+				part("password", input.Password),
+				part("removeEditedEntries", "Yes"),
+				part("server", phonebookServer),
+				part("username", input.Username),
+			),
 			item("provisioning", part("validateHostnameInCertificate", "Yes")),
 			item("provisioning.auto", part("mode", "No")),
 			item("provisioning.firmware",
@@ -104,6 +117,22 @@ func WP826XML(input WP826Config) ([]byte, error) {
 		return nil, fmt.Errorf("encode WP826 provisioning: %w", err)
 	}
 	return append([]byte(xml.Header), encoded...), nil
+}
+
+func wp826PhonebookLocation(value string) (mode, server string, err error) {
+	parsed, parseErr := url.Parse(value)
+	if parseErr != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Path == "" {
+		return "", "", errors.New("invalid WP826 phonebook URL")
+	}
+	switch parsed.Scheme {
+	case "https":
+		mode = "Enabled Use HTTPS"
+	case "http":
+		mode = "Enabled Use HTTP"
+	default:
+		return "", "", errors.New("invalid WP826 phonebook URL")
+	}
+	return mode, parsed.Host + parsed.EscapedPath(), nil
 }
 
 func wp826AssetLocation(value string) (base, protocol, firmwarePath string, err error) {

@@ -2,6 +2,7 @@ package webapp
 
 import (
 	"encoding/json"
+	"encoding/xml"
 	"io"
 	"log/slog"
 	"net/http"
@@ -11,13 +12,14 @@ import (
 	"time"
 
 	"github.com/amcchord/ringring/internal/config"
+	"github.com/amcchord/ringring/internal/provisioning"
 	"github.com/amcchord/ringring/internal/secure"
 	"github.com/amcchord/ringring/internal/store"
 	"github.com/amcchord/ringring/internal/telephony"
 )
 
 func TestAuthenticatedPhoneStateIncludesFreshDirectoryAndLiveCallButtons(t *testing.T) {
-	app, database, username, password := newPhoneMobileTestApp(t)
+	app, database, username, password, _ := newPhoneMobileTestApp(t)
 	app.calls = &fakeActiveConferences{calls: []telephony.ActiveConference{{
 		Name: "rrc-pty_mobile-102", PartyID: "pty_mobile", JoinExtension: "102",
 		Endpoints: []string{"sip_mobile", "sip_friend"},
@@ -68,8 +70,62 @@ func TestAuthenticatedPhoneStateIncludesFreshDirectoryAndLiveCallButtons(t *test
 	_ = database
 }
 
+func TestGrandstreamPhonebookIncludesFreshPartyDirectoryAndServices(t *testing.T) {
+	app, database, username, password, hostUserID := newPhoneMobileTestApp(t)
+	server := httptest.NewServer(app)
+	defer server.Close()
+
+	fetch := func(secret string) (*http.Response, string) {
+		t.Helper()
+		request, _ := http.NewRequest(http.MethodGet, server.URL+"/api/v1/phone/grandstream-phonebook.xml", nil)
+		request.SetBasicAuth(username, secret)
+		response, err := server.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response, readBody(t, response)
+	}
+
+	response, body := fetch(password)
+	if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "application/xml; charset=utf-8" || response.Header.Get("Cache-Control") != "no-store, max-age=0" || response.Header.Get("Vary") != "Authorization" {
+		t.Fatalf("phonebook response status=%d headers=%v body=%s", response.StatusCode, response.Header, body)
+	}
+	var document provisioning.GrandstreamPhonebook
+	if err := xml.Unmarshal([]byte(body), &document); err != nil {
+		t.Fatal(err)
+	}
+	contacts := make(map[string]string, len(document.Contacts))
+	for _, contact := range document.Contacts {
+		if len(contact.Phones) != 1 {
+			t.Fatalf("phonebook contact has unexpected numbers: %#v", contact)
+		}
+		contacts[contact.Phones[0].Number] = contact.FirstName
+	}
+	if contacts["102"] != "Friend phone" || contacts["*10"] != "Echo test" || contacts["*15"] != "Pick another extension" {
+		t.Fatalf("phonebook contacts = %#v", contacts)
+	}
+	for _, privateValue := range []string{"101", "Mobile", "iPhone", username, password} {
+		if strings.Contains(body, privateValue) {
+			t.Errorf("phonebook exposed private or self value %q", privateValue)
+		}
+	}
+
+	if err := database.RevokeDevice(t.Context(), "pty_mobile", hostUserID, "dev_friend", app.now()); err != nil {
+		t.Fatal(err)
+	}
+	refreshed, refreshedBody := fetch(password)
+	if refreshed.StatusCode != http.StatusOK || strings.Contains(refreshedBody, "Friend phone") || strings.Contains(refreshedBody, ">102<") {
+		t.Fatalf("refreshed phonebook retained revoked contact: status=%d body=%s", refreshed.StatusCode, refreshedBody)
+	}
+
+	bad, badBody := fetch("wrong-password")
+	if bad.StatusCode != http.StatusUnauthorized || bad.Header.Get("WWW-Authenticate") == "" || strings.Contains(badBody, "Friend phone") {
+		t.Fatalf("bad credential response = %d %v %s", bad.StatusCode, bad.Header, badBody)
+	}
+}
+
 func TestPhoneCanRegisterReplaceAndDeleteItsOwnVoIPToken(t *testing.T) {
-	app, database, username, password := newPhoneMobileTestApp(t)
+	app, database, username, password, _ := newPhoneMobileTestApp(t)
 	server := httptest.NewServer(app)
 	defer server.Close()
 
@@ -111,7 +167,7 @@ func TestPhoneCanRegisterReplaceAndDeleteItsOwnVoIPToken(t *testing.T) {
 	}
 }
 
-func newPhoneMobileTestApp(t *testing.T) (*App, *store.Store, string, string) {
+func newPhoneMobileTestApp(t *testing.T) (*App, *store.Store, string, string, string) {
 	t.Helper()
 	database, err := store.Open(":memory:")
 	if err != nil {
@@ -162,5 +218,5 @@ func newPhoneMobileTestApp(t *testing.T) (*App, *store.Store, string, string) {
 		t.Fatal(err)
 	}
 	app.now = func() time.Time { return now }
-	return app, database, "sip_mobile", password
+	return app, database, "sip_mobile", password, host.ID
 }

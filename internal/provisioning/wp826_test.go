@@ -13,6 +13,7 @@ func TestWP826XMLContainsSIPAccountAndTheme(t *testing.T) {
 		Password:     `secret<&"value`,
 		Extension:    "103",
 		AssetBaseURL: "https://ringring.live/static/wp826/",
+		PhonebookURL: "https://ringring.live/api/v1/phone/grandstream-phonebook.xml",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -54,6 +55,12 @@ func TestWP826XMLContainsSIPAccountAndTheme(t *testing.T) {
 		"audio.ring/numberOfRingtone":                "4",
 		"lcd.wallpaper/serverPath":                   "https://ringring.live/static/wp826/wallpapers/ringring-memphis-day.png",
 		"lcd.wallpaper/source":                       "Download",
+		"phonebook.download/interval":                "5",
+		"phonebook.download/mode":                    "Enabled Use HTTPS",
+		"phonebook.download/password":                `secret<&"value`,
+		"phonebook.download/removeEditedEntries":     "Yes",
+		"phonebook.download/server":                  "ringring.live/api/v1/phone/grandstream-phonebook.xml",
+		"phonebook.download/username":                "654321",
 		"provisioning/validateHostnameInCertificate": "Yes",
 		"provisioning.auto/mode":                     "No",
 		"provisioning.firmware/protocol":             "HTTPS",
@@ -81,6 +88,7 @@ func TestWP826XMLRejectsUnsafeInputs(t *testing.T) {
 	valid := WP826Config{
 		Server: "ringring.live", Username: "654321", Password: "123456789012", Extension: "103",
 		AssetBaseURL: "https://ringring.live/static/wp826",
+		PhonebookURL: "https://ringring.live/api/v1/phone/grandstream-phonebook.xml",
 	}
 	tests := []WP826Config{
 		func() WP826Config { value := valid; value.Server = "ringring.live;transport=udp"; return value }(),
@@ -96,6 +104,17 @@ func TestWP826XMLRejectsUnsafeInputs(t *testing.T) {
 		func() WP826Config {
 			value := valid
 			value.AssetBaseURL = "https://ringring.live/assets?secret=1"
+			return value
+		}(),
+		func() WP826Config {
+			value := valid
+			value.PhonebookURL = "ftp://ringring.live/phonebook.xml"
+			return value
+		}(),
+		func() WP826Config { value := valid; value.PhonebookURL = "https://ringring.live"; return value }(),
+		func() WP826Config {
+			value := valid
+			value.PhonebookURL = "https://user@ringring.live/phonebook.xml"
 			return value
 		}(),
 	}

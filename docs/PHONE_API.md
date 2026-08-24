@@ -145,6 +145,15 @@ Authorization: Basic <device credential>
 
 A successful response contains `version: 1`, the phone's own `extension`, and a current `destinations` array. Person and service entries follow the setup invariants. A `kind: call` entry names one currently active, joinable conference inside this device's party and uses the fixed `*16<extension>` dial form. Active-call state comes from Asterisk, is not stored as call history, and never crosses the party boundary. Clients should refresh while foregrounded, retain the last fully validated response through transient failures, and stop using the credential after `401`.
 
+### Refresh a Grandstream phonebook
+
+```text
+GET /api/v1/phone/grandstream-phonebook.xml
+Authorization: Basic <device credential>
+```
+
+This compatibility endpoint returns Grandstream `AddressBook` XML rather than JSON. It includes other active members in the device's party and the `*` services currently enabled for that extension. It omits the phone's own extension and live-call buttons because Grandstream may retain a downloaded address book between refreshes. The WP826 setup file configures this endpoint over HTTPS, refreshes every five minutes, and lets RingRing remove stale managed entries; unrelated manual contacts therefore do not belong in the local address book of a RingRing-managed handset.
+
 ### Register an Apple VoIP token
 
 ```text

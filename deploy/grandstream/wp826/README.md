@@ -1,6 +1,6 @@
 # RingRing theme for Grandstream WP826
 
-This bundle gives the WP826 a RingRing-flavored idle screen, four original ringtones, friendlier idle softkeys, and an optional one-file SIP setup. The phone does not expose a replaceable system skin, so its built-in icons, menus, fonts, call screens, and boot animation remain Grandstream's.
+This bundle gives the WP826 a RingRing-flavored idle screen, four original ringtones, friendlier idle softkeys, an auto-updating private phonebook, and an optional one-file SIP setup. The phone does not expose a replaceable system skin, so its built-in icons, menus, fonts, call screens, and boot animation remain Grandstream's.
 
 For one or a few household phones, the recommended arrangement is:
 
@@ -47,7 +47,9 @@ All three requests should return `200`. These files contain no credential or per
 
 ## Fastest setup: download from RingRing
 
-On the one-time setup screen for a new or rotated phone, choose **Download WP826 setup file**. The attachment configures Account 1 with that device's RingRing SIP credential, verified TLS on port 5061, a five-minute registration interval, PCMU first, RFC2833 DTMF, the day wallpaper, all four ringtones, and Contacts/History/Menu idle keys.
+On the one-time setup screen for a new or rotated phone, choose **Download WP826 setup file**. The attachment configures Account 1 with that device's RingRing SIP credential, verified TLS on port 5061, a five-minute registration interval, PCMU first, RFC2833 DTMF, the day wallpaper, all four ringtones, Contacts/History/Menu idle keys, and a five-minute private-phonebook refresh.
+
+RingRing owns the handset's local Contacts list in this mode. Each refresh replaces it with other active phones in this party plus the `*` services currently enabled for this extension, so a revoked phone or disabled service disappears without another config upload. The endpoint uses the same device username and password over HTTPS; it reveals no credential, party/host metadata, presence, call history, or other party. Do not keep unrelated manual contacts on a dedicated RingRing WP826 because the managed refresh may remove them.
 
 The file is deliberately partial. It does not change Wi-Fi, addressing, administrator access, or Accounts 2–6, and it contains no party, member, host, or device label. It does contain the live Account 1 SIP password and consumes the same one-time token as the RingRing app, Linphone, and phone API links. Upload it directly to the handset and delete the local copy afterward; if it is lost or exposed, rotate that phone in RingRing instead of trying to retrieve the old password.
 
@@ -55,8 +57,9 @@ The file is deliberately partial. It does not change Wi-Fi, addressing, administ
 2. Open that address from a browser on the same network and sign in as the phone administrator.
 3. Open **Maintenance → Upgrade and Provisioning → Config File**.
 4. Beside **Upload Device Configuration**, choose **Upload** and select `ringring-wp826.xml`. Do not use **Restore from Backup Package**; `.uf` backups are device-specific and may contain unrelated private state.
-5. Let the phone apply the XML, then reboot once so it fetches `ring1.bin` through `ring4.bin`.
-6. Confirm Account 1 says **Registered**, dial `*10`, and test an incoming and outgoing same-party call.
+5. Let the phone apply the XML, then reboot once so it fetches `ring1.bin` through `ring4.bin` and the private address book.
+6. Open **Contacts** and confirm the other party phones and enabled `*` lines appear. The list refreshes automatically every five minutes.
+7. Confirm Account 1 says **Registered**, dial `*10`, and test an incoming and outgoing same-party call.
 
 The direct upload path and wallpaper alias were validated on a physical WP826 running firmware 1.0.1.61. The server-side renderer is tested against the alias names published by that handset. Firmware changes can alter a vendor template, so repeat the real-phone verification after a major Grandstream update.
 
@@ -69,7 +72,7 @@ The direct upload path and wallpaper alias were validated on a physical WP826 ru
 5. Choose **Apply All** or **Provision to Selected Devices** for existing handsets. A newly associated handset receives the model template automatically; editing a template does not automatically repush it to existing devices.
 6. Reboot once after the push. Grandstream loads new resource files after restart.
 
-The default theme selects the day wallpaper, `ring1.bin`, and the idle softkeys **Contacts · History · Menu**. To use another visual, change `P2917` to the twilight or party PNG URL. To use another tune, change `P104` to `2`, `3`, or `4`.
+The default theme selects the day wallpaper, `ring1.bin`, and the idle softkeys **Contacts · History · Menu**. To use another visual, change `P2917` to the twilight or party PNG URL. To use another tune, change `P104` to `2`, `3`, or `4`. The shared model template deliberately omits phonebook credentials; add those in the per-device account or use the MAC-specific renderer below.
 
 GDMS can also upload the PNG under **Resources → Other Resources** and select it in the WP826 model editor. Keeping the HTTPS URL in the template is easier to version and roll out from RingRing. The current GDMS guide limits its direct custom-ringtone resource picker to GXP/DP models, so this bundle uses the WP826's firmware-resource path and `P8509` to fetch `ring1.bin` through `ring4.bin` instead.
 
@@ -89,12 +92,18 @@ Keep per-phone credentials out of the shared theme:
    - **Password:** the generated SIP password
 3. Assign the account to the WP826 as **Account 1**.
 4. In its account parameters select **TLS/TCP**, the **sips** URI scheme, a five-minute registration expiration, PCMU first, RTP/RFC2833 DTMF, and certificate-chain/domain validation.
+5. In the device's **Phonebook → Phonebook Management** settings, enable phonebook download over HTTPS with:
+   - **Server Path:** `YOUR_RINGRING_HOST/api/v1/phone/grandstream-phonebook.xml`
+   - **Download Interval:** `5` minutes
+   - **HTTP/HTTPS Username:** the generated RingRing SIP username
+   - **HTTP/HTTPS Password:** the same generated SIP password
+   - **Remove Manually-edited Entries on Download:** Yes
 
 This keeps the theme reusable and makes password rotation a single GDMS account change.
 
 ### Optional: one MAC-specific XML
 
-The renderer writes the SIP account and theme into a GDMS **By CFG** file. It prompts for the password so the secret does not appear in shell history and creates the output with mode `0600`.
+The renderer writes the SIP account, theme, and authenticated five-minute phonebook refresh into a GDMS **By CFG** file. It prompts for the password so the secret does not appear in shell history and creates the output with mode `0600`.
 
 Create a temporary directory outside the checkout, then run:
 
@@ -119,9 +128,10 @@ The XML contains a live SIP password. Never commit it, email it, attach it to a 
 
 1. Confirm the idle wallpaper, softkey order, and chosen ringtone after restart.
 2. Confirm Account 1 reports **Registered** over TLS.
-3. Dial `*10` and verify audio in both directions.
-4. Call another member in the same party by extension and test incoming ringing.
-5. Confirm an extension in another party cannot be reached.
+3. Open Contacts and confirm other active party phones plus enabled `*` services appear. Revoke a disposable phone or toggle a service, wait five minutes, and confirm the stale entry disappears.
+4. Dial `*10` and verify audio in both directions.
+5. Call another member in the same party by extension and test incoming ringing.
+6. Confirm an extension in another party cannot be reached.
 
 The WP826 remains an unverified physical-device entry in RingRing's compatibility matrix until these checks pass on real hardware. Keep UDP disabled for this account unless TLS registration is shown to fail on the handset firmware and the compatibility fallback is deliberately accepted.
 
@@ -137,9 +147,10 @@ P8348 = Custom-Menu,Custom-History
 P8509 = 0
 P6767 = 1
 P192 = fm.grandstream.com/gs
+P330 = 0
 ```
 
-This restores the default wallpaper, system ringtone, standard idle layout, and Grandstream firmware-resource path. It does not remove or rotate the SIP account.
+This restores the default wallpaper, system ringtone, standard idle layout, Grandstream firmware-resource path, and disables managed phonebook downloads. It does not remove or rotate the SIP account.
 
 ## Rebuild the generated assets
 
@@ -167,5 +178,6 @@ When rebuilding either set, copy the final PNG or BIN files to the matching `web
 - [WP8x6 Administration Guide](https://documentation.grandstream.com/knowledge-base/wp8x6-administration-guide/)
 - [GDMS Unified Communications User Guide](https://documentation.grandstream.com/knowledge-base/gdms-user-guide/)
 - [SIP Device Provisioning Guide](https://documentation.grandstream.com/knowledge-base/sip-device-provisioning-guide/)
+- [Grandstream XML Phonebook Guide](https://www.grandstream.com/hubfs/Product_Documentation/WP820_XML_phonebook_guide.pdf)
 - [Grandstream configuration templates](https://www.grandstream.com/support/tools)
 - [Grandstream firmware](https://www.grandstream.com/support/firmware)

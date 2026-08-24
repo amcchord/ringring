@@ -2,6 +2,25 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-23 — Auto-fill the WP826 phonebook
+
+### Shipped
+
+- Added a private Grandstream `AddressBook` XML endpoint that returns other active phones in the authenticated device's party plus the `*` services currently enabled for that extension.
+- Extended the one-file WP826 setup and MAC-specific GDMS renderer to install the fixed HTTPS address-book path, reuse the device credential for HTTP Basic authentication, replace stale managed entries, and refresh every five minutes.
+- Updated the setup card, WP826 runbook, architecture, deployment, phone API, and security documentation with the managed-contact behavior and manual-contact tradeoff.
+
+### Decisions
+
+- Reuse each phone's existing revocable SIP credential rather than introduce another persistent token. Rotation, revocation, or deletion now invalidates both SIP registration and phonebook access.
+- Keep cached handset contacts deliberately smaller than the live iOS menu: no live-conference buttons, own extension, party/host/device metadata, presence, history, or timestamps enter the XML.
+- Let RingRing own Contacts on a dedicated WP826 so removed members and disabled services disappear automatically; unrelated manual contacts should be stored elsewhere.
+
+### Verification
+
+- Focused provisioning, web, and security-contract tests cover exact WP826 aliases, URL validation, XML escaping, Basic authentication, privacy headers, same-party people/services, self/secret omission, duplicate rejection, and removal of a revoked contact on the next fetch.
+- `make check`, `make security`, and `make admin-test` pass locally; `go vet`, the race-enabled suite, installer lifecycle checks, TLS synchronization tests, and `govulncheck` are clean.
+
 ## 2026-08-23 — Clip compact member cards to their rounded corners
 
 ### Shipped

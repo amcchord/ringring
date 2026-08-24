@@ -364,6 +364,7 @@ func New(cfg config.Config, database *store.Store, cipher *secure.Cipher, logger
 	mux.HandleFunc("GET /api/v1/phone-invitations/{token}", app.phoneInvitationAPI)
 	mux.HandleFunc("POST /api/v1/phone-invitations/{token}", app.phoneInvitationAPI)
 	mux.HandleFunc("GET /api/v1/phone/state", app.phoneStateAPI)
+	mux.HandleFunc("GET /api/v1/phone/grandstream-phonebook.xml", app.grandstreamPhonebookAPI)
 	mux.HandleFunc("PUT /api/v1/phone/push", app.phonePushAPI)
 	mux.HandleFunc("DELETE /api/v1/phone/push", app.phonePushAPI)
 	mux.HandleFunc("GET /", app.home)
@@ -2323,6 +2324,7 @@ func (a *App) wp826Provision(w http.ResponseWriter, r *http.Request) {
 		Password:     password,
 		Extension:    device.Extension,
 		AssetBaseURL: a.cfg.BaseURL + "/static/wp826",
+		PhonebookURL: a.cfg.BaseURL + "/api/v1/phone/grandstream-phonebook.xml",
 	})
 	if err != nil {
 		a.logger.Error("build one-time WP826 provisioning", "error_class", observability.ErrorClass(err))

@@ -259,20 +259,30 @@ func TestWP826DownloadKeepsTheOneTimeMinimalConfigBoundary(t *testing.T) {
 		"internal/webapp/app.go": {
 			`GET /provision/wp826/{token}`, "ConsumeProvisioningToken", "provisioning.WP826XML",
 			`attachment; filename="ringring-wp826.xml"`, `AssetBaseURL: a.cfg.BaseURL + "/static/wp826"`,
+			`PhonebookURL: a.cfg.BaseURL + "/api/v1/phone/grandstream-phonebook.xml"`,
 		},
 		"internal/provisioning/wp826.go": {
 			`Version: 2`, `item("account.1"`, `part("transport", "Tls Or Tcp")`,
 			`part("certificationChain", "Yes")`, `part("domainCertificates", "Yes")`,
 			`part("numberOfRingtone", "4")`, `ringring-memphis-day.png`,
-			`Custom-Contacts,Custom-History,Custom-Menu`,
+			`Custom-Contacts,Custom-History,Custom-Menu`, `item("phonebook.download"`,
+			`part("interval", "5")`, `part("removeEditedEntries", "Yes")`,
 		},
 		"web/templates/setup.html": {
 			`href="{{.WP826ProvisionURL}}"`, "Download WP826 setup file", "Use only one setup link.",
 			"The XML contains this phone’s SIP password", "then delete the file", "Upload Device Configuration",
+			"Contacts refreshes automatically every five minutes",
 		},
 		"docs/SECURITY.md": {
 			"downloadable WP826 XML", "cannot carry Wi-Fi, network, administrator", "delete it afterward",
 		},
+	}
+
+	phonebookAPI := readRepositoryFile(t, "internal/webapp/phone_mobile.go")
+	for _, required := range []string{"grandstreamPhonebookAPI", "authenticatePhoneAPI", "GrandstreamPhonebookXML", "phoneCallDestinations", "phoneMobileHeaders"} {
+		if !strings.Contains(phonebookAPI, required) {
+			t.Errorf("Grandstream phonebook API is missing security boundary %q", required)
+		}
 	}
 	for filename, markers := range required {
 		contents := readRepositoryFile(t, filename)

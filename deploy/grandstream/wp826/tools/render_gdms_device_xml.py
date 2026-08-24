@@ -72,6 +72,9 @@ def render(args: argparse.Namespace, mac: str, password: str) -> ET.ElementTree:
     base_url = args.asset_base_url.rstrip("/")
     parsed_asset_url = urlparse(base_url)
     firmware_path = parsed_asset_url.netloc + parsed_asset_url.path
+    phonebook_path = (
+        parsed_asset_url.netloc + "/api/v1/phone/grandstream-phonebook.xml"
+    )
     root = ET.Element("gs_provision", {"version": "1"})
     ET.SubElement(root, "mac").text = mac
     config = ET.SubElement(root, "config", {"version": "1"})
@@ -101,6 +104,11 @@ def render(args: argparse.Namespace, mac: str, password: str) -> ET.ElementTree:
         ("P104", args.ringtone),
         ("P2939", 1),
         ("P8348", "Custom-Contacts,Custom-History,Custom-Menu"),
+        ("P330", 3),
+        ("P331", phonebook_path),
+        ("P332", 5),
+        ("P6713", args.sip_user),
+        ("P6714", password),
         ("P8463", 1),
         ("P22030", 1),
         ("P194", 0),
