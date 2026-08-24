@@ -2,14 +2,15 @@
 
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const command = process.argv[2] ?? "inspect";
-if (!new Set(["inspect", "validate", "sync"]).has(command)) {
-  console.error("Usage: node scripts/appstore-connect.mjs [inspect|validate|sync]");
+if (!new Set(["inspect", "validate", "sync", "export", "upload"]).has(command)) {
+  console.error("Usage: node scripts/appstore-connect.mjs [inspect|validate|sync|export <archive> <output> <options-plist>|upload <ipa>]");
   process.exit(2);
 }
 
@@ -436,6 +437,72 @@ async function replaceScreenshots(token, localization, files) {
   console.log(`Screenshot set now contains ${uploaded.length} current images`);
 }
 
+async function uploadBuild(credentials, requestedPath) {
+  if (!requestedPath) throw new Error("upload requires the path to an exported IPA");
+  const ipaPath = path.resolve(requestedPath);
+  if (path.extname(ipaPath).toLowerCase() !== ".ipa" || !fs.statSync(ipaPath).isFile()) {
+    throw new Error("upload requires an existing .ipa file");
+  }
+  const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "ringring-appstore-"));
+  const privateKeyPath = path.join(temporaryDirectory, "AuthKey.p8");
+  try {
+    fs.writeFileSync(privateKeyPath, credentials.privateKey, { mode: 0o600 });
+    const authentication = [
+      "--api-key", credentials.keyID,
+      "--api-issuer", credentials.issuerID,
+      "--p8-file-path", privateKeyPath,
+    ];
+    try {
+      execFileSync("xcrun", ["altool", "--validate-app", ipaPath, ...authentication], { stdio: "inherit" });
+      execFileSync("xcrun", ["altool", "--upload-package", ipaPath, "--wait", ...authentication], { stdio: "inherit" });
+    } catch {
+      throw new Error("App Store validation or upload failed");
+    }
+  } finally {
+    fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+  console.log(`Validated and uploaded ${path.basename(ipaPath)}`);
+}
+
+async function exportBuild(credentials, requestedArchive, requestedOutput, requestedOptions) {
+  if (!requestedArchive || !requestedOutput || !requestedOptions) {
+    throw new Error("export requires archive, output-directory, and export-options paths");
+  }
+  const archivePath = path.resolve(requestedArchive);
+  const outputPath = path.resolve(requestedOutput);
+  const optionsPath = path.resolve(requestedOptions);
+  if (path.extname(archivePath).toLowerCase() !== ".xcarchive" || !fs.statSync(archivePath).isDirectory()) {
+    throw new Error("export requires an existing .xcarchive directory");
+  }
+  if (!fs.statSync(optionsPath).isFile()) throw new Error("export requires an existing options plist");
+  fs.mkdirSync(outputPath, { recursive: true });
+  const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "ringring-appstore-"));
+  const privateKeyPath = path.join(temporaryDirectory, "AuthKey.p8");
+  try {
+    fs.writeFileSync(privateKeyPath, credentials.privateKey, { mode: 0o600 });
+    try {
+      execFileSync("xcodebuild", [
+        "-exportArchive",
+        "-archivePath", archivePath,
+        "-exportPath", outputPath,
+        "-exportOptionsPlist", optionsPath,
+        "-allowProvisioningUpdates",
+        "-authenticationKeyPath", privateKeyPath,
+        "-authenticationKeyID", credentials.keyID,
+        "-authenticationKeyIssuerID", credentials.issuerID,
+      ], {
+        stdio: "inherit",
+        env: { ...process.env, PATH: `/usr/bin:/bin:/usr/sbin:/sbin:${process.env.PATH ?? ""}` },
+      });
+    } catch {
+      throw new Error("Xcode App Store export failed");
+    }
+  } finally {
+    fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+  console.log(`Exported ${path.basename(archivePath)} for App Store Connect`);
+}
+
 async function main() {
   if (command === "validate") {
     desiredMetadata();
@@ -448,6 +515,14 @@ async function main() {
     return;
   }
   const credentials = await appStoreCredentials();
+  if (command === "export") {
+    await exportBuild(credentials, process.argv[3], process.argv[4], process.argv[5]);
+    return;
+  }
+  if (command === "upload") {
+    await uploadBuild(credentials, process.argv[3]);
+    return;
+  }
   const token = makeToken(credentials);
   const app = await findApp(token);
   if (command === "inspect") {

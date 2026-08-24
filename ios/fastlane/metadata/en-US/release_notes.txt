@@ -1,5 +1,5 @@
-Please test incoming calls on a physical iPhone with RingRing open, backgrounded for at least one minute, and behind the lock screen. Answer from the system call screen and confirm two-way audio. If RingRing was force-quit, open it once before testing.
+Start a party call on two other phones. Confirm its Happening now card appears at the top, tap once to join, and verify everybody hears who joined. From a third hardware phone, dial the active call's ordinary extension and confirm it joins instead of ringing a new call.
 
-Choose and preview all four sounds in Phone settings, then confirm the selected ringtone is used for a background call. Start a party call on two other phones, tap its new Happening now button, and confirm the iPhone joins the shared call. Also recheck a person button, Echo test, manual dialing, mute, speaker, keypad tones, and disconnect.
+Confirm People remains the primary section and More to call is clearly separated below it with smaller optional-service rows. Also recheck foreground, background, and lock-screen incoming calls, two-way audio, a person button, Echo test, manual dialing, mute, speaker, keypad tones, and disconnect.
 
 RingRing makes private party calls only. It never connects to the public telephone network and cannot place emergency calls.

@@ -33,6 +33,21 @@ App Store Connect gets the app icon from the uploaded build's `AppIcon` asset. T
 
 The simulator can exercise onboarding and UI tests, but a physical iPhone is required to prove registration, two-way audio, route switching, incoming ringing, and CallKit behavior. After connecting, tap **Echo test** for RingRing's two-way audio check; the app keeps the underlying `*10` code out of the main call menu.
 
+## TestFlight release
+
+Increment `CURRENT_PROJECT_VERSION` in both `project.yml` and the generated Xcode project, run the simulator suite, then create an App Store archive. Export and upload it with the shared release helper:
+
+```sh
+xcodebuild -project RingRing.xcodeproj -scheme RingRing \
+  -configuration Release -destination 'generic/platform=iOS' \
+  -archivePath /tmp/RingRing.xcarchive archive -allowProvisioningUpdates
+node ../scripts/appstore-connect.mjs export \
+  /tmp/RingRing.xcarchive /tmp/RingRing-export AppStoreExportOptions.plist
+node ../scripts/appstore-connect.mjs upload /tmp/RingRing-export/RingRing.ipa
+```
+
+The helper obtains the App Store Connect credential from AustinLand, gives Xcode or Apple's uploader a mode-`0600` temporary key, and removes it in a `finally` block. It never places a signing key in the repository or a persistent key-search directory. After Apple finishes processing, attach the validated build to the existing internal group and add the matching physical test matrix from `TESTFLIGHT.md`.
+
 ## Provisioning contract
 
 The app accepts the general HTTPS `/join/<token>` link shown in a host's 48-hour invitation. It previews only the party name and a safe available extension, then asks for the phone name, extension, and adult-service permission in a native Memphis-style form. The final JSON claim consumes the invitation and returns the new SIP account plus call menu atomically. If another invitee takes the suggested extension first, the app refreshes the suggestion without losing the invitation.

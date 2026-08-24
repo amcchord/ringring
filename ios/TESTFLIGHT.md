@@ -1,5 +1,21 @@
 # TestFlight notes
 
+## 0.1.0 (6) — Direct call joining and a clearer call menu
+
+What to test on a physical iPhone:
+
+1. Start a call between two other party phones. Confirm **Happening now** appears at the top of RingRing with the participant names and phone count, then tap it once to join.
+2. With that same call still active, dial its ordinary extension from a third hardware phone. Confirm it joins the existing conversation instead of ringing a new call and everyone hears who joined.
+3. Confirm **People** remains the visually dominant section. **More to call** should appear below a divider with smaller, muted rows for Echo test, time, weather, radio, and other optional services.
+4. Open and background RingRing several times while a call starts and ends. The live call card should appear and disappear without a revoked-credential alert or a blank menu.
+5. Recheck foreground, background, and lock-screen incoming calls, two-way audio, a direct person button, manual dialing, mute, speaker, keypad tones, decline, and disconnect/reset.
+
+Known limits:
+
+- PushKit and CallKit delivery require a real iPhone and the production server; Simulator verifies UI and deterministic app logic only.
+- iOS can suppress background launch after the person explicitly force-quits the app. Relaunch RingRing once before testing.
+- Live-call buttons are a current same-party snapshot, not call history or public presence.
+
 ## 0.1.0 (5) — Background calls, live joins, and ringtones
 
 What to test on a physical iPhone:
