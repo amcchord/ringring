@@ -165,14 +165,23 @@ func Open(path string) (*Store, error) {
 		}
 	}
 
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite", sqliteDSN(path))
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(`PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;`); err != nil {
+	if _, err := db.Exec(`PRAGMA journal_mode = WAL`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("configure database: %w", err)
+	}
+	var foreignKeys int
+	if err := db.QueryRow(`PRAGMA foreign_keys`).Scan(&foreignKeys); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("verify database foreign keys: %w", err)
+	}
+	if foreignKeys != 1 {
+		_ = db.Close()
+		return nil, errors.New("database foreign keys are not enabled")
 	}
 	if _, err := db.Exec(schema); err != nil {
 		_ = db.Close()
@@ -214,7 +223,79 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate reserved member extensions: %w", err)
 	}
+	if err := repairOrphanedRows(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("repair orphaned database rows: %w", err)
+	}
 	return &Store{db: db}, nil
+}
+
+func sqliteDSN(path string) string {
+	if path == ":memory:" {
+		path = "file::memory:?mode=memory&cache=private"
+	}
+	separator := "?"
+	if strings.Contains(path, "?") {
+		separator = "&"
+	}
+	return path + separator + "_foreign_keys=on&_busy_timeout=5000"
+}
+
+// repairOrphanedRows removes only records whose declared parent no longer
+// exists. Older builds could disable foreign-key enforcement while deleting a
+// host test account, leaving these rows unreachable through the application.
+// The statements are ordered from leaves toward roots and are idempotent.
+func repairOrphanedRows(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	repairs := []struct {
+		table, parent, statement string
+	}{
+		{"phone_push_registrations", "devices", `DELETE FROM phone_push_registrations WHERE NOT EXISTS (SELECT 1 FROM devices WHERE devices.id = phone_push_registrations.device_id)`},
+		{"device_readiness", "devices", `DELETE FROM device_readiness WHERE NOT EXISTS (SELECT 1 FROM devices WHERE devices.id = device_readiness.device_id)`},
+		{"device_provisioning_tokens", "devices", `DELETE FROM device_provisioning_tokens WHERE NOT EXISTS (SELECT 1 FROM devices WHERE devices.id = device_provisioning_tokens.device_id)`},
+		{"devices", "members", `DELETE FROM devices WHERE NOT EXISTS (SELECT 1 FROM members WHERE members.id = devices.member_id)`},
+		{"members", "parties", `DELETE FROM members WHERE NOT EXISTS (SELECT 1 FROM parties WHERE parties.id = members.party_id)`},
+		{"party_services", "parties", `DELETE FROM party_services WHERE NOT EXISTS (SELECT 1 FROM parties WHERE parties.id = party_services.party_id)`},
+		{"invitations", "parties", `DELETE FROM invitations WHERE NOT EXISTS (SELECT 1 FROM parties WHERE parties.id = invitations.party_id)`},
+		{"invitations", "users", `DELETE FROM invitations WHERE NOT EXISTS (SELECT 1 FROM users WHERE users.id = invitations.created_by_user_id)`},
+		{"parties", "users", `DELETE FROM parties WHERE NOT EXISTS (SELECT 1 FROM users WHERE users.id = parties.host_user_id)`},
+		{"sessions", "users", `DELETE FROM sessions WHERE NOT EXISTS (SELECT 1 FROM users WHERE users.id = sessions.user_id)`},
+		{"local_credentials", "users", `DELETE FROM local_credentials WHERE NOT EXISTS (SELECT 1 FROM users WHERE users.id = local_credentials.user_id)`},
+		{"recovery_codes", "users", `DELETE FROM recovery_codes WHERE NOT EXISTS (SELECT 1 FROM users WHERE users.id = recovery_codes.user_id)`},
+	}
+	for _, repair := range repairs {
+		var declared int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM pragma_foreign_key_list(?) WHERE "table" = ?`, repair.table, repair.parent).Scan(&declared); err != nil {
+			return err
+		}
+		if declared == 0 {
+			continue
+		}
+		if _, err := tx.Exec(repair.statement); err != nil {
+			return err
+		}
+	}
+	rows, err := tx.Query(`PRAGMA foreign_key_check`)
+	if err != nil {
+		return err
+	}
+	if rows.Next() {
+		_ = rows.Close()
+		return errors.New("database foreign-key check failed after orphan repair")
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func ensureMemberWeatherColumns(db *sql.DB) error {
@@ -1421,28 +1502,76 @@ func (s *Store) ActiveDeviceForHost(ctx context.Context, partyID, hostUserID, de
 }
 
 func (s *Store) DeleteMember(ctx context.Context, partyID, hostUserID, memberID string) error {
-	result, err := s.db.ExecContext(ctx, `
-		DELETE FROM members
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin hosted member deletion: %w", err)
+	}
+	defer tx.Rollback()
+	var found int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM members
 		WHERE id = ? AND party_id = ?
 		AND EXISTS (SELECT 1 FROM parties WHERE id = ? AND host_user_id = ?)`,
-		memberID, partyID, partyID, hostUserID,
-	)
-	if err != nil {
-		return fmt.Errorf("delete hosted member: %w", err)
+		memberID, partyID, partyID, hostUserID).Scan(&found); err != nil {
+		return fmt.Errorf("authorize hosted member deletion: %w", err)
 	}
-	if rows, _ := result.RowsAffected(); rows != 1 {
+	if found != 1 {
 		return ErrNotFound
+	}
+	for _, statement := range []string{
+		`DELETE FROM phone_push_registrations WHERE device_id IN (SELECT id FROM devices WHERE member_id = ?)`,
+		`DELETE FROM device_readiness WHERE device_id IN (SELECT id FROM devices WHERE member_id = ?)`,
+		`DELETE FROM device_provisioning_tokens WHERE device_id IN (SELECT id FROM devices WHERE member_id = ?)`,
+		`DELETE FROM devices WHERE member_id = ?`,
+		`DELETE FROM members WHERE id = ? AND party_id = ?`,
+	} {
+		args := []any{memberID}
+		if strings.Contains(statement, "party_id = ?") {
+			args = append(args, partyID)
+		}
+		if _, err := tx.ExecContext(ctx, statement, args...); err != nil {
+			return fmt.Errorf("delete hosted member records: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit hosted member deletion: %w", err)
 	}
 	return nil
 }
 
 func (s *Store) DeleteParty(ctx context.Context, partyID, hostUserID string) error {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM parties WHERE id = ? AND host_user_id = ?`, partyID, hostUserID)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("delete hosted party: %w", err)
+		return fmt.Errorf("begin hosted party deletion: %w", err)
 	}
-	if rows, _ := result.RowsAffected(); rows != 1 {
+	defer tx.Rollback()
+	var found int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM parties WHERE id = ? AND host_user_id = ?`, partyID, hostUserID).Scan(&found); err != nil {
+		return fmt.Errorf("authorize hosted party deletion: %w", err)
+	}
+	if found != 1 {
 		return ErrNotFound
+	}
+	for _, statement := range []string{
+		`DELETE FROM phone_push_registrations WHERE device_id IN (SELECT d.id FROM devices d JOIN members m ON m.id = d.member_id WHERE m.party_id = ?)`,
+		`DELETE FROM device_readiness WHERE device_id IN (SELECT d.id FROM devices d JOIN members m ON m.id = d.member_id WHERE m.party_id = ?)`,
+		`DELETE FROM device_provisioning_tokens WHERE device_id IN (SELECT d.id FROM devices d JOIN members m ON m.id = d.member_id WHERE m.party_id = ?)`,
+		`DELETE FROM devices WHERE member_id IN (SELECT id FROM members WHERE party_id = ?)`,
+		`DELETE FROM members WHERE party_id = ?`,
+		`DELETE FROM invitations WHERE party_id = ?`,
+		`DELETE FROM party_services WHERE party_id = ?`,
+		`DELETE FROM parties WHERE id = ? AND host_user_id = ?`,
+	} {
+		args := []any{partyID}
+		if strings.Contains(statement, "host_user_id = ?") {
+			args = append(args, hostUserID)
+		}
+		if _, err := tx.ExecContext(ctx, statement, args...); err != nil {
+			return fmt.Errorf("delete hosted party records: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit hosted party deletion: %w", err)
 	}
 	return nil
 }
@@ -1459,6 +1588,15 @@ func (s *Store) DeleteUserWithoutParties(ctx context.Context, userID string) err
 	}
 	if parties != 0 {
 		return ErrPartiesRemain
+	}
+	for _, table := range []string{"sessions", "recovery_codes", "local_credentials", "invitations"} {
+		column := "user_id"
+		if table == "invitations" {
+			column = "created_by_user_id"
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE `+column+` = ?`, userID); err != nil {
+			return fmt.Errorf("delete user %s: %w", table, err)
+		}
 	}
 	result, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID)
 	if err != nil {

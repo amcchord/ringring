@@ -2,6 +2,31 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-24 — Repair disposable-test state before the physical time acceptance call
+
+### Findings
+
+- A real disposable Linphone extension registered over verified public SIP TLS, received an answered `*11` call, and then received no usable prompt audio. Privacy-safe Asterisk diagnostics showed `Permission denied` while the unprivileged process resolved `ringring-here` and `digits/day-1`; the production sound directories were `0700 root:root` because the guarded checkout's `umask 077` propagated through Docker `COPY`.
+- Cleanup of that disposable host exposed a separate preview-build defect. SQLite foreign keys were enabled through one multi-statement `Exec`, but the live connection did not retain enforcement; party and account deletion relied on cascades and left 13 unreachable child rows across invitations, a member, local credentials, recovery codes, and a session. `ringringctl upgrade` correctly refused its pre-upgrade backup when `foreign_key_check` found them.
+
+### Shipped
+
+- Moved `foreign_keys=on` and the busy timeout into the SQLite DSN so they apply to every physical connection, then read back the enforcement flag before migration. Member, party, and account deletion now remove their authorized dependent rows explicitly inside transactions as defense in depth.
+- Added an idempotent forward repair that considers only declared SQLite relationships, deletes only a child whose parent is already absent, and refuses startup unless the complete foreign-key check is empty. Legacy test schemas without those declarations remain untouched.
+- Added a `repair-state` maintenance command and a production recovery helper for the otherwise blocked backup gate. The helper requires an exact published fast-forward target, healthy services, a clean checkout, and zero calls; creates a root-only checksum-protected pre-repair quarantine; proves repair on a disposable copy; applies the identical target migration to live state; and verifies the current runtime before the ordinary guarded upgrade proceeds.
+- Made all packaged Asterisk sound directories `0755` and files `0644` at image build time. The SIP smoke gate checks the exact prompt files as the `asterisk:ringring` user rather than root.
+
+### Migration and rollback
+
+- No schema is added or removed. The data migration removes only unreachable rows already referencing nonexistent parents. Older releases accept the repaired database, but cannot reconstruct those rows because their owning user or party was already deleted.
+- An affected installation that cannot pass the ordinary pre-backup gate must use the exact source-controlled recovery documented in `docs/DEPLOYMENT.md`, retain its quarantine archive, and immediately run `ringringctl upgrade`. The quarantine is intentionally pre-repair and must receive the same target's `repair-state` before any restore.
+
+### Verification
+
+- Store tests reproduce foreign-key-disabled deletion, prove explicit cleanup leaves no violation, create orphan rows across every dependent table, reopen through the forward repair, and confirm both `foreign_keys=1` and an empty `foreign_key_check`. Focused store and command tests, shell syntax, ShellCheck, and diff checks pass.
+- `make check`, `make security`, and `make admin-test` pass, including formatting, shell/lifecycle checks, `go vet`, the race-enabled Go suite, and `govulncheck` with no called vulnerability. The workspace-rooted `make sip-smoke` gate passes verified TLS/UDP registration, authenticated `*11` spoken audio, other special-line fallbacks, RTP, direct-extension three-phone joining, and zero residual channels; the first `/tmp`-rooted attempt hit Docker Desktop's documented bind-share ownership limitation before the app could open its disposable database.
+- Production recovery, guarded deployment, and a fresh real disposable-extension time call are recorded below once complete.
+
 ## 2026-08-24 — Make physical-phone time prompts language-safe
 
 ### Findings

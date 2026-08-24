@@ -348,7 +348,24 @@ The voice extension chooser adds no schema, secret, environment variable, public
 
 ### Friendly time voice and English prompt routing upgrade and rollback
 
-The friendly `*11` line adds no schema, secret, environment variable, port, or provider credential. It reuses the existing party-scoped speech key and private FastAGI listener, writes one replaceable derived WAV per party, and uses the deployment `TZ` already shared by the app and Asterisk. Generated PJSIP endpoints now select `language=en` explicitly so physical phones cannot override resolution of the checked-in greeting or bundled fallback prompts. The dialplan keeps `SayUnixTime` behind the provider path; rolling back returns to the older local-time route and ignores the derived WAV. Validate the loaded `SayUnixTime` application, endpoint language, English sound files, and generated `*11` route before promotion.
+The friendly `*11` line adds no schema, secret, environment variable, port, or provider credential. It reuses the existing party-scoped speech key and private FastAGI listener, writes one replaceable derived WAV per party, and uses the deployment `TZ` already shared by the app and Asterisk. Generated PJSIP endpoints now select `language=en` explicitly so physical phones cannot override resolution of the checked-in greeting or bundled fallback prompts. The Asterisk image makes both the language-prefixed and root English prompt trees explicitly traversable (`0755`) and their files readable (`0644`), independent of the guarded checkout's root umask. The dialplan keeps `SayUnixTime` behind the provider path; rolling back returns to the older local-time route and ignores the derived WAV. Validate the loaded `SayUnixTime` application, endpoint language, prompt modes as the unprivileged Asterisk user, and generated `*11` route before promotion.
+
+This release also moves SQLite foreign-key enforcement into every physical connection and explicitly cleans dependent rows during host deletion. Startup performs one idempotent data repair: it deletes only a child row whose declared parent no longer exists, then requires `PRAGMA foreign_key_check` to be empty. It does not change a valid user, party, member, phone, invitation, credential, or service row. Older binaries accept the repaired database on rollback; the unreachable child rows cannot be restored by a normal rollback because their parents were already absent.
+
+If an affected preview build already deleted a disposable host while enforcement was off, the ordinary pre-upgrade backup correctly stops on the foreign-key violation. Do not edit the live WAL database or bypass the backup gate. Publish the repair target, confirm zero active channels, and run its exact source-controlled recovery helper followed immediately by the normal guarded upgrade:
+
+```sh
+cd /opt/ringring
+git fetch --prune origin
+target=$(git rev-parse origin/main)
+git archive "$target" scripts/repair-orphaned-state.sh | tar -xO > /root/repair-orphaned-state.sh
+chmod 0700 /root/repair-orphaned-state.sh
+/root/repair-orphaned-state.sh "$target" --yes
+rm -f /root/repair-orphaned-state.sh
+./ringringctl upgrade --target "$target" --yes
+```
+
+The helper refuses a dirty checkout, unadvertised/non-fast-forward target, pending upgrade, unhealthy service, or active call. It builds the exact target outside the checkout; stops only the app; creates a checksum-protected, root-only pre-repair quarantine containing the cleanly stopped database and application encryption environment; proves that a copy repairs and verifies; applies the same repair to live state; restarts the current app; and re-verifies it. Retain that quarantine with the guarded pre/post backups. Restoring it requires running the same target's `repair-state` before service startup; do not restore its known-invalid database directly.
 
 ### Radio-selection upgrade and rollback
 

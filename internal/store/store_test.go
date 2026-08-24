@@ -1126,6 +1126,11 @@ func TestDeletionIsHostScopedAndCascades(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Exercise the explicit cleanup path as well as SQLite's cascades. This
+	// reproduces the connection state used by the affected preview build.
+	if _, err := s.db.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
+		t.Fatal(err)
+	}
 	defer s.Close()
 	now := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
 	host, _ := s.UpsertGoogleUser(ctx, GoogleProfile{Subject: "delete-host", Email: "host@example.test", Name: "Host"}, now, "usr_delete_host")
@@ -1179,6 +1184,98 @@ func TestDeletionIsHostScopedAndCascades(t *testing.T) {
 	}
 	if _, err := s.UserBySession(ctx, sessionHash, now); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("deleted account session lookup error = %v", err)
+	}
+	rows, err := s.db.Query(`PRAGMA foreign_key_check`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		t.Fatal("explicit deletion left an orphaned row")
+	}
+}
+
+func TestOpenEnablesForeignKeysAndRepairsDeclaredOrphans(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "orphaned.db")
+	created, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := created.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// A raw connection defaults foreign-key enforcement off, matching the
+	// affected build. Delete both parents so every dependent table is orphaned.
+	legacy, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = legacy.Exec(`
+		INSERT INTO users (id, google_subject, email, name, created_at)
+		VALUES ('usr_orphan', 'local:usr_orphan', '', 'Disposable test', 1);
+		INSERT INTO sessions (token_hash, user_id, expires_at, created_at)
+		VALUES (X'01', 'usr_orphan', 2, 1);
+		INSERT INTO local_credentials (user_id, username, password_hash, created_at, updated_at)
+		VALUES ('usr_orphan', 'orphan-user', 'hash', 1, 1);
+		INSERT INTO recovery_codes (user_id, code_hash, created_at)
+		VALUES ('usr_orphan', X'02', 1);
+		INSERT INTO parties (id, name, slug, host_user_id, created_at)
+		VALUES ('pty_orphan', 'Disposable test', 'orphan-party', 'usr_orphan', 1);
+		INSERT INTO party_services (party_id, updated_at)
+		VALUES ('pty_orphan', 1);
+		INSERT INTO invitations (id, party_id, created_by_user_id, token_hash, expires_at, created_at)
+		VALUES ('inv_orphan', 'pty_orphan', 'usr_orphan', X'03', 2, 1);
+		INSERT INTO members (id, party_id, display_name, extension, created_at)
+		VALUES ('mem_orphan', 'pty_orphan', 'Disposable phone', '991', 1);
+		INSERT INTO devices (id, member_id, label, sip_username, sip_secret_ciphertext, created_at)
+		VALUES ('dev_orphan', 'mem_orphan', 'Disposable phone', '991991', 'cipher', 1);
+		INSERT INTO device_readiness (device_id, updated_at)
+		VALUES ('dev_orphan', 1);
+		INSERT INTO device_provisioning_tokens (token_hash, device_id, expires_at, created_at)
+		VALUES (X'04', 'dev_orphan', 2, 1);
+		INSERT INTO phone_push_registrations (device_id, token_hash, token_ciphertext, environment, updated_at)
+		VALUES ('dev_orphan', X'05', 'cipher', 'development', 1);
+		DELETE FROM parties WHERE id = 'pty_orphan';
+		DELETE FROM users WHERE id = 'usr_orphan';`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	repaired, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repaired.Close()
+	var foreignKeys int
+	if err := repaired.db.QueryRow(`PRAGMA foreign_keys`).Scan(&foreignKeys); err != nil {
+		t.Fatal(err)
+	}
+	if foreignKeys != 1 {
+		t.Fatalf("foreign_keys = %d, want 1", foreignKeys)
+	}
+	for _, table := range []string{
+		"sessions", "local_credentials", "recovery_codes", "party_services", "invitations",
+		"members", "devices", "device_readiness", "device_provisioning_tokens", "phone_push_registrations",
+	} {
+		var count int
+		if err := repaired.db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&count); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		if count != 0 {
+			t.Fatalf("%s retained %d orphaned rows", table, count)
+		}
+	}
+	rows, err := repaired.db.Query(`PRAGMA foreign_key_check`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		t.Fatal("orphan repair left a foreign-key violation")
 	}
 }
 

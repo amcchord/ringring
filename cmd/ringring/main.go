@@ -101,6 +101,25 @@ func main() {
 				logger.Error("write verification report", "error", err)
 				os.Exit(1)
 			}
+		case "repair-state":
+			database, err := store.Open(cfg.DatabasePath)
+			if err != nil {
+				logger.Error("repair database state", "error", err)
+				os.Exit(1)
+			}
+			if err := database.Close(); err != nil {
+				logger.Error("close repaired database state", "error", err)
+				os.Exit(1)
+			}
+			report, err := maintenance.VerifyState(context.Background(), cfg.DatabasePath, cfg.MasterKey)
+			if err != nil {
+				logger.Error("verify repaired database state", "error", err)
+				os.Exit(1)
+			}
+			if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
+				logger.Error("write repair report", "error", err)
+				os.Exit(1)
+			}
 		case "verify-ami":
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
