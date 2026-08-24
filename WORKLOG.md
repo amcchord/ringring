@@ -2,6 +2,19 @@
 
 This is the durable, chronological project record. Add new entries at the top. Capture decisions and verification, not a transcript of commands.
 
+## 2026-08-23 — Restore incoming calls to the Grandstream test adapter
+
+### Resolved
+
+- Traced asymmetric `101`→`103` calling to credential drift on the HT801V2, not party routing. RingRing had a valid extension route and current short credential, while the adapter's FXS port still held the superseded long SIP account; an outgoing authenticated call could appear to work, but Asterisk had no current contact for the incoming leg.
+- Replaced the FXS port's SIP User ID, Authentication ID, and password with the already-issued current RingRing credential. No party membership, server credential, database row, generated route, or public service configuration changed.
+
+### Verification
+
+- The adapter and Asterisk now independently report the extension's contact as registered and available.
+- A bounded RingRing setup call created a live incoming ringing channel to the Grandstream. The diagnostic call was cleared immediately afterward and left no active channel.
+- Keep Asterisk's live contact list authoritative when diagnosing this class of failure: the adapter's local status page had continued to display `Registered` for its stale account even though that identity no longer matched the active RingRing device.
+
 ## 2026-08-23 — Show live phone activity and call timers
 
 ### Shipped
