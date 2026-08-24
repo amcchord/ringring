@@ -22,6 +22,11 @@ This is the durable, chronological project record. Add new entries at the top. C
 - In-app browser QA with three disposable members covered a two-phone live party call plus a third outgoing call, then separate off-hook, ringing, and calling states. The rendered clock advanced from `0:12` to `0:13` in one second between private refreshes. The desktop populated layout is clean; the browser's fixed viewport still leaves the existing CSS/accessibility contract responsible for the 850px and 520px breakpoints.
 - `make check`, `make security`, `make admin-test`, and the Docker-shareable `make sip-smoke` pass locally. This includes formatting, shell and lifecycle checks, `go vet`, the race-enabled suite, `govulncheck` with no called vulnerability, verified SIP TLS 1.2 and UDP registration, live three-phone conference joining, mixed-transport calls, operator fallbacks, RTP echo, and authenticated extension selection.
 
+### Production
+
+- Published and deployed exact runtime commit `888e791448fd3d144fa2aff7652bb01f5bcef9f1` through the guarded fast-forward upgrader after confirming no active Asterisk channels. Pre/post archives `ringring-20260824T022442Z-5242c68.tar.gz` and `ringring-20260824T022630Z-888e791.tar.gz` both pass checksum, safe-extraction, SQLite, credential-decryption, isolated-readiness, and telephony-regeneration drills.
+- Production `ringringctl doctor`, database and credential integrity, public `/healthz` and `/readyz`, all three service health checks, the installed `CoreShowChannels` AMI command, and the public timer-script SHA-256 pass. Asterisk reports the expected registered contact after reconciliation. The known app-before-Asterisk startup race produced one initial warning; recreating only the app after Asterisk was healthy cleared it without restarting the PBX, and the fresh app log is clean.
+
 ## 2026-08-23 — Auto-fill the WP826 phonebook
 
 ### Shipped
